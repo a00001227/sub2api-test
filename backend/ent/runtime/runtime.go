@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
+	"github.com/Wei-Shaw/sub2api/ent/feedback"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
@@ -24,6 +25,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
+	"github.com/Wei-Shaw/sub2api/ent/pricingmodel"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -755,6 +757,50 @@ func init() {
 	errorpassthroughruleDescSkipMonitoring := errorpassthroughruleFields[11].Descriptor()
 	// errorpassthroughrule.DefaultSkipMonitoring holds the default value on creation for the skip_monitoring field.
 	errorpassthroughrule.DefaultSkipMonitoring = errorpassthroughruleDescSkipMonitoring.Default.(bool)
+	feedbackFields := schema.Feedback{}.Fields()
+	_ = feedbackFields
+	// feedbackDescType is the schema descriptor for type field.
+	feedbackDescType := feedbackFields[1].Descriptor()
+	// feedback.TypeValidator is a validator for the "type" field. It is called by the builders before save.
+	feedback.TypeValidator = func() func(string) error {
+		validators := feedbackDescType.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(_type string) error {
+			for _, fn := range fns {
+				if err := fn(_type); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// feedbackDescContent is the schema descriptor for content field.
+	feedbackDescContent := feedbackFields[2].Descriptor()
+	// feedback.ContentValidator is a validator for the "content" field. It is called by the builders before save.
+	feedback.ContentValidator = feedbackDescContent.Validators[0].(func(string) error)
+	// feedbackDescRequestID is the schema descriptor for request_id field.
+	feedbackDescRequestID := feedbackFields[3].Descriptor()
+	// feedback.RequestIDValidator is a validator for the "request_id" field. It is called by the builders before save.
+	feedback.RequestIDValidator = feedbackDescRequestID.Validators[0].(func(string) error)
+	// feedbackDescStatus is the schema descriptor for status field.
+	feedbackDescStatus := feedbackFields[4].Descriptor()
+	// feedback.DefaultStatus holds the default value on creation for the status field.
+	feedback.DefaultStatus = feedbackDescStatus.Default.(string)
+	// feedback.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	feedback.StatusValidator = feedbackDescStatus.Validators[0].(func(string) error)
+	// feedbackDescCreatedAt is the schema descriptor for created_at field.
+	feedbackDescCreatedAt := feedbackFields[7].Descriptor()
+	// feedback.DefaultCreatedAt holds the default value on creation for the created_at field.
+	feedback.DefaultCreatedAt = feedbackDescCreatedAt.Default.(func() time.Time)
+	// feedbackDescUpdatedAt is the schema descriptor for updated_at field.
+	feedbackDescUpdatedAt := feedbackFields[8].Descriptor()
+	// feedback.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	feedback.DefaultUpdatedAt = feedbackDescUpdatedAt.Default.(func() time.Time)
+	// feedback.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	feedback.UpdateDefaultUpdatedAt = feedbackDescUpdatedAt.UpdateDefault.(func() time.Time)
 	groupMixin := schema.Group{}.Mixin()
 	groupMixinHooks1 := groupMixin[1].Hooks()
 	group.Hooks[0] = groupMixinHooks1[0]
@@ -1227,6 +1273,59 @@ func init() {
 	pendingauthsessionDescCompletionCodeHash := pendingauthsessionFields[12].Descriptor()
 	// pendingauthsession.DefaultCompletionCodeHash holds the default value on creation for the completion_code_hash field.
 	pendingauthsession.DefaultCompletionCodeHash = pendingauthsessionDescCompletionCodeHash.Default.(string)
+	pricingmodelMixin := schema.PricingModel{}.Mixin()
+	pricingmodelMixinFields0 := pricingmodelMixin[0].Fields()
+	_ = pricingmodelMixinFields0
+	pricingmodelFields := schema.PricingModel{}.Fields()
+	_ = pricingmodelFields
+	// pricingmodelDescCreatedAt is the schema descriptor for created_at field.
+	pricingmodelDescCreatedAt := pricingmodelMixinFields0[0].Descriptor()
+	// pricingmodel.DefaultCreatedAt holds the default value on creation for the created_at field.
+	pricingmodel.DefaultCreatedAt = pricingmodelDescCreatedAt.Default.(func() time.Time)
+	// pricingmodelDescUpdatedAt is the schema descriptor for updated_at field.
+	pricingmodelDescUpdatedAt := pricingmodelMixinFields0[1].Descriptor()
+	// pricingmodel.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	pricingmodel.DefaultUpdatedAt = pricingmodelDescUpdatedAt.Default.(func() time.Time)
+	// pricingmodel.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	pricingmodel.UpdateDefaultUpdatedAt = pricingmodelDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// pricingmodelDescModel is the schema descriptor for model field.
+	pricingmodelDescModel := pricingmodelFields[0].Descriptor()
+	// pricingmodel.ModelValidator is a validator for the "model" field. It is called by the builders before save.
+	pricingmodel.ModelValidator = func() func(string) error {
+		validators := pricingmodelDescModel.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(model string) error {
+			for _, fn := range fns {
+				if err := fn(model); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// pricingmodelDescModelType is the schema descriptor for model_type field.
+	pricingmodelDescModelType := pricingmodelFields[1].Descriptor()
+	// pricingmodel.DefaultModelType holds the default value on creation for the model_type field.
+	pricingmodel.DefaultModelType = pricingmodelDescModelType.Default.(string)
+	// pricingmodel.ModelTypeValidator is a validator for the "model_type" field. It is called by the builders before save.
+	pricingmodel.ModelTypeValidator = pricingmodelDescModelType.Validators[0].(func(string) error)
+	// pricingmodelDescUserType is the schema descriptor for user_type field.
+	pricingmodelDescUserType := pricingmodelFields[2].Descriptor()
+	// pricingmodel.DefaultUserType holds the default value on creation for the user_type field.
+	pricingmodel.DefaultUserType = pricingmodelDescUserType.Default.(string)
+	// pricingmodel.UserTypeValidator is a validator for the "user_type" field. It is called by the builders before save.
+	pricingmodel.UserTypeValidator = pricingmodelDescUserType.Validators[0].(func(string) error)
+	// pricingmodelDescEnabled is the schema descriptor for enabled field.
+	pricingmodelDescEnabled := pricingmodelFields[3].Descriptor()
+	// pricingmodel.DefaultEnabled holds the default value on creation for the enabled field.
+	pricingmodel.DefaultEnabled = pricingmodelDescEnabled.Default.(bool)
+	// pricingmodelDescSavingPercent is the schema descriptor for saving_percent field.
+	pricingmodelDescSavingPercent := pricingmodelFields[11].Descriptor()
+	// pricingmodel.DefaultSavingPercent holds the default value on creation for the saving_percent field.
+	pricingmodel.DefaultSavingPercent = pricingmodelDescSavingPercent.Default.(float64)
 	promocodeFields := schema.PromoCode{}.Fields()
 	_ = promocodeFields
 	// promocodeDescCode is the schema descriptor for code field.

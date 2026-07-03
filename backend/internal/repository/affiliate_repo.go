@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	affiliateCodeLength      = 12
+	affiliateCodeLength      = 8
 	affiliateCodeMaxAttempts = 12
 )
 

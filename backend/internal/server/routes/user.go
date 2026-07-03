@@ -72,6 +72,14 @@ func RegisterUserRoutes(
 			groups.GET("/rates", h.APIKey.GetUserGroupRates)
 		}
 
+		// 用户反馈/工单
+		feedback := authenticated.Group("/feedback")
+		{
+			feedback.POST("", h.Feedback.Create)
+			feedback.GET("", h.Feedback.List)
+			feedback.GET("/:id", h.Feedback.GetByID)
+		}
+
 		// 用户可用渠道（非管理员接口）
 		channels := authenticated.Group("/channels")
 		{

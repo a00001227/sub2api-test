@@ -27,13 +27,14 @@ type AuthHandler struct {
 	redeemService        *service.RedeemService
 	totpService          *service.TotpService
 	userAttributeService *service.UserAttributeService
+	apiKeyService        *service.APIKeyService
 
 	dingTalkClientInstance *DingTalkClient
 	dingTalkClientMu       sync.Mutex
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
+func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, userAttributeService *service.UserAttributeService, apiKeyService *service.APIKeyService) *AuthHandler {
 	return &AuthHandler{
 		cfg:                  cfg,
 		authService:          authService,
@@ -43,6 +44,7 @@ func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userSe
 		redeemService:        redeemService,
 		totpService:          totpService,
 		userAttributeService: userAttributeService,
+		apiKeyService:        apiKeyService,
 	}
 }
 
@@ -85,6 +87,12 @@ type AuthResponse struct {
 	User         *dto.User `json:"user"`
 }
 
+// RegisterAuthResponse 注册响应，比普通 AuthResponse 多一个默认密钥字段
+type RegisterAuthResponse struct {
+	AuthResponse
+	AccountKey *dto.APIKey `json:"account_key,omitempty"`
+}
+
 func ensureLoginUserActive(user *service.User) error {
 	if user == nil {
 		return infraerrors.Unauthorized("INVALID_USER", "user not found")
@@ -125,6 +133,54 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		ExpiresIn:    tokenPair.ExpiresIn,
 		TokenType:    "Bearer",
 		User:         dto.UserFromService(user),
+	})
+}
+
+// respondWithRegisterTokenPair 注册专用响应：在 Token 对基础上附带自动创建的默认密钥。
+// 密钥创建失败不影响注册成功，只记录日志。
+func (h *AuthHandler) respondWithRegisterTokenPair(c *gin.Context, user *service.User) {
+	if err := ensureLoginUserActive(user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	tokenPair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+	if err != nil {
+		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
+		token, tokenErr := h.authService.GenerateToken(user)
+		if tokenErr != nil {
+			response.InternalError(c, "Failed to generate token")
+			return
+		}
+		response.Success(c, RegisterAuthResponse{
+			AuthResponse: AuthResponse{
+				AccessToken: token,
+				TokenType:   "Bearer",
+				User:        dto.UserFromService(user),
+			},
+		})
+		return
+	}
+
+	var accountKey *dto.APIKey
+	if h.apiKeyService != nil {
+		if created, _, keyErr := h.apiKeyService.EnsureDefaultAccountKey(c.Request.Context(), user.ID); keyErr != nil {
+			slog.Warn("failed to create default api key for new user", "error", keyErr, "user_id", user.ID)
+		} else if created != nil {
+			k := dto.APIKeyFromService(created)
+			accountKey = k
+		}
+	}
+
+	response.Success(c, RegisterAuthResponse{
+		AuthResponse: AuthResponse{
+			AccessToken:  tokenPair.AccessToken,
+			RefreshToken: tokenPair.RefreshToken,
+			ExpiresIn:    tokenPair.ExpiresIn,
+			TokenType:    "Bearer",
+			User:         dto.UserFromService(user),
+		},
+		AccountKey: accountKey,
 	})
 }
 
@@ -185,7 +241,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	h.respondWithTokenPair(c, user)
+	h.respondWithRegisterTokenPair(c, user)
 }
 
 // SendVerifyCode 发送邮箱验证码

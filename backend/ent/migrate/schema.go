@@ -635,6 +635,42 @@ var (
 			},
 		},
 	}
+	// FeedbacksColumns holds the columns for the "feedbacks" table.
+	FeedbacksColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "type", Type: field.TypeString, Size: 40},
+		{Name: "content", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "request_id", Type: field.TypeString, Nullable: true, Size: 200},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "pending"},
+		{Name: "admin_reply", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "replied_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// FeedbacksTable holds the schema information for the "feedbacks" table.
+	FeedbacksTable = &schema.Table{
+		Name:       "feedbacks",
+		Columns:    FeedbacksColumns,
+		PrimaryKey: []*schema.Column{FeedbacksColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "feedback_status",
+				Unique:  false,
+				Columns: []*schema.Column{FeedbacksColumns[5]},
+			},
+			{
+				Name:    "feedback_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{FeedbacksColumns[8]},
+			},
+			{
+				Name:    "feedback_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{FeedbacksColumns[1]},
+			},
+		},
+	}
 	// GroupsColumns holds the columns for the "groups" table.
 	GroupsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1014,6 +1050,42 @@ var (
 				Name:    "pendingauthsession_completion_code_hash",
 				Unique:  false,
 				Columns: []*schema.Column{PendingAuthSessionsColumns[14]},
+			},
+		},
+	}
+	// PricingModelsColumns holds the columns for the "pricing_models" table.
+	PricingModelsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "model", Type: field.TypeString, Size: 200},
+		{Name: "model_type", Type: field.TypeString, Size: 20, Default: "text"},
+		{Name: "user_type", Type: field.TypeString, Size: 20, Default: "end_user"},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "input_price", Type: field.TypeFloat64, Nullable: true},
+		{Name: "output_price", Type: field.TypeFloat64, Nullable: true},
+		{Name: "cache_read_price", Type: field.TypeFloat64, Nullable: true},
+		{Name: "cache_write_price", Type: field.TypeFloat64, Nullable: true},
+		{Name: "official_input_price", Type: field.TypeFloat64, Nullable: true},
+		{Name: "official_output_price", Type: field.TypeFloat64, Nullable: true},
+		{Name: "image_pricing_json", Type: field.TypeString, Nullable: true},
+		{Name: "saving_percent", Type: field.TypeFloat64, Default: 0},
+	}
+	// PricingModelsTable holds the schema information for the "pricing_models" table.
+	PricingModelsTable = &schema.Table{
+		Name:       "pricing_models",
+		Columns:    PricingModelsColumns,
+		PrimaryKey: []*schema.Column{PricingModelsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "pricingmodel_model_user_type",
+				Unique:  true,
+				Columns: []*schema.Column{PricingModelsColumns[3], PricingModelsColumns[5]},
+			},
+			{
+				Name:    "pricingmodel_enabled",
+				Unique:  false,
+				Columns: []*schema.Column{PricingModelsColumns[6]},
 			},
 		},
 	}
@@ -1787,6 +1859,7 @@ var (
 		ChannelMonitorHistoriesTable,
 		ChannelMonitorRequestTemplatesTable,
 		ErrorPassthroughRulesTable,
+		FeedbacksTable,
 		GroupsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
@@ -1794,6 +1867,7 @@ var (
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
 		PendingAuthSessionsTable,
+		PricingModelsTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
@@ -1862,6 +1936,9 @@ func init() {
 	ErrorPassthroughRulesTable.Annotation = &entsql.Annotation{
 		Table: "error_passthrough_rules",
 	}
+	FeedbacksTable.Annotation = &entsql.Annotation{
+		Table: "feedbacks",
+	}
 	GroupsTable.Annotation = &entsql.Annotation{
 		Table: "groups",
 	}
@@ -1886,6 +1963,9 @@ func init() {
 	PendingAuthSessionsTable.ForeignKeys[0].RefTable = UsersTable
 	PendingAuthSessionsTable.Annotation = &entsql.Annotation{
 		Table: "pending_auth_sessions",
+	}
+	PricingModelsTable.Annotation = &entsql.Annotation{
+		Table: "pricing_models",
 	}
 	PromoCodesTable.Annotation = &entsql.Annotation{
 		Table: "promo_codes",

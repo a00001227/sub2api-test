@@ -38,6 +38,9 @@ func RegisterAdminRoutes(
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
+		// 用户反馈管理
+		registerFeedbackRoutes(admin, h)
+
 		// OpenAI OAuth
 		registerOpenAIOAuthRoutes(admin, h)
 
@@ -103,6 +106,9 @@ func RegisterAdminRoutes(
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
+
+		// Pricing Display System 管理
+		registerPricingModelRoutes(admin, h)
 	}
 }
 
@@ -351,6 +357,16 @@ func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		announcements.PUT("/:id", h.Admin.Announcement.Update)
 		announcements.DELETE("/:id", h.Admin.Announcement.Delete)
 		announcements.GET("/:id/read-status", h.Admin.Announcement.ListReadStatus)
+	}
+}
+
+func registerFeedbackRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	feedbacks := admin.Group("/feedbacks")
+	{
+		feedbacks.GET("", h.Admin.Feedback.List)
+		feedbacks.GET("/:id", h.Admin.Feedback.GetByID)
+		feedbacks.PUT("/:id/status", h.Admin.Feedback.UpdateStatus)
+		feedbacks.PUT("/:id/reply", h.Admin.Feedback.Reply)
 	}
 }
 
@@ -662,6 +678,20 @@ func registerAffiliateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			users.GET("/:user_id/overview", h.Admin.Affiliate.GetUserOverview)
 			users.PUT("/:user_id", h.Admin.Affiliate.UpdateUserSettings)
 			users.DELETE("/:user_id", h.Admin.Affiliate.ClearUserSettings)
+		}
+	}
+}
+
+func registerPricingModelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	pricing := admin.Group("/pricing")
+	{
+		models := pricing.Group("/models")
+		{
+			models.GET("", h.Admin.PricingModel.List)
+			models.POST("", h.Admin.PricingModel.Create)
+			models.GET("/:id", h.Admin.PricingModel.GetByID)
+			models.PUT("/:id", h.Admin.PricingModel.Update)
+			models.DELETE("/:id", h.Admin.PricingModel.Delete)
 		}
 	}
 }

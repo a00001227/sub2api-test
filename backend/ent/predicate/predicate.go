@@ -42,6 +42,9 @@ type ChannelMonitorRequestTemplate func(*sql.Selector)
 // ErrorPassthroughRule is the predicate function for errorpassthroughrule builders.
 type ErrorPassthroughRule func(*sql.Selector)
 
+// Feedback is the predicate function for feedback builders.
+type Feedback func(*sql.Selector)
+
 // Group is the predicate function for group builders.
 type Group func(*sql.Selector)
 
@@ -62,6 +65,9 @@ type PaymentProviderInstance func(*sql.Selector)
 
 // PendingAuthSession is the predicate function for pendingauthsession builders.
 type PendingAuthSession func(*sql.Selector)
+
+// PricingModel is the predicate function for pricingmodel builders.
+type PricingModel func(*sql.Selector)
 
 // PromoCode is the predicate function for promocode builders.
 type PromoCode func(*sql.Selector)

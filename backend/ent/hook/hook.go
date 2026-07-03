@@ -153,6 +153,18 @@ func (f ErrorPassthroughRuleFunc) Mutate(ctx context.Context, m ent.Mutation) (e
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ErrorPassthroughRuleMutation", m)
 }
 
+// The FeedbackFunc type is an adapter to allow the use of ordinary
+// function as Feedback mutator.
+type FeedbackFunc func(context.Context, *ent.FeedbackMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f FeedbackFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.FeedbackMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.FeedbackMutation", m)
+}
+
 // The GroupFunc type is an adapter to allow the use of ordinary
 // function as Group mutator.
 type GroupFunc func(context.Context, *ent.GroupMutation) (ent.Value, error)
@@ -235,6 +247,18 @@ func (f PendingAuthSessionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PendingAuthSessionMutation", m)
+}
+
+// The PricingModelFunc type is an adapter to allow the use of ordinary
+// function as PricingModel mutator.
+type PricingModelFunc func(context.Context, *ent.PricingModelMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PricingModelFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PricingModelMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PricingModelMutation", m)
 }
 
 // The PromoCodeFunc type is an adapter to allow the use of ordinary

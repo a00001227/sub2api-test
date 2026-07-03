@@ -40,6 +40,8 @@ func ProvideAdminHandlers(
 	paymentHandler *admin.PaymentHandler,
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
+	pricingModelHandler *admin.PricingModelHandler,
+	feedbackHandler *admin.FeedbackHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -73,6 +75,8 @@ func ProvideAdminHandlers(
 		Payment:                paymentHandler,
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
+		PricingModel:           pricingModelHandler,
+		Feedback:               feedbackHandler,
 	}
 }
 
@@ -113,6 +117,9 @@ func ProvideHandlers(
 	paymentHandler *PaymentHandler,
 	paymentWebhookHandler *PaymentWebhookHandler,
 	availableChannelHandler *AvailableChannelHandler,
+	publicPricingHandler *PublicPricingHandler,
+	pricingDisplayHandler *PricingDisplayHandler,
+	feedbackHandler *FeedbackHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -133,6 +140,9 @@ func ProvideHandlers(
 		Payment:          paymentHandler,
 		PaymentWebhook:   paymentWebhookHandler,
 		AvailableChannel: availableChannelHandler,
+		PublicPricing:    publicPricingHandler,
+		PricingDisplay:   pricingDisplayHandler,
+		Feedback:         feedbackHandler,
 	}
 }
 
@@ -154,6 +164,9 @@ var ProviderSet = wire.NewSet(
 	NewPaymentHandler,
 	NewPaymentWebhookHandler,
 	NewAvailableChannelHandler,
+	NewPublicPricingHandler,
+	NewPricingDisplayHandler,
+	NewFeedbackHandler,
 
 	// Admin handlers
 	admin.NewDashboardHandler,
@@ -187,6 +200,8 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
+	admin.NewPricingModelHandler,
+	admin.NewFeedbackHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

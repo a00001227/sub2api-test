@@ -922,6 +922,17 @@ func (s *PricingService) ListModelNamesByProvider(provider string) []string {
 	return names
 }
 
+// ListAllPricing returns a snapshot of all model pricing data. Thread-safe.
+func (s *PricingService) ListAllPricing() map[string]*LiteLLMModelPricing {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]*LiteLLMModelPricing, len(s.pricingData))
+	for k, v := range s.pricingData {
+		result[k] = v
+	}
+	return result
+}
+
 // isNumeric 检查字符串是否为纯数字
 func isNumeric(s string) bool {
 	for _, c := range s {

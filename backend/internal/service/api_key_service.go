@@ -266,6 +266,27 @@ func (s *APIKeyService) GenerateKey() (string, error) {
 	return key, nil
 }
 
+// EnsureDefaultAccountKey 为新注册用户创建默认密钥（幂等）。
+// 如果该用户已有密钥，直接返回 (nil, false, nil)，不重复创建。
+// 创建失败不影响注册流程，调用方应忽略错误并继续响应。
+func (s *APIKeyService) EnsureDefaultAccountKey(ctx context.Context, userID int64) (*APIKey, bool, error) {
+	count, err := s.apiKeyRepo.CountByUserID(ctx, userID)
+	if err != nil {
+		return nil, false, fmt.Errorf("count api keys: %w", err)
+	}
+	if count > 0 {
+		return nil, false, nil
+	}
+
+	apiKey, err := s.Create(ctx, userID, CreateAPIKeyRequest{
+		Name: "Default",
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("create default api key: %w", err)
+	}
+	return apiKey, true, nil
+}
+
 // ValidateCustomKey 验证自定义API Key格式
 func (s *APIKeyService) ValidateCustomKey(key string) error {
 	// 检查长度

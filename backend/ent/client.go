@@ -27,6 +27,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
+	"github.com/Wei-Shaw/sub2api/ent/feedback"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
@@ -34,6 +35,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
+	"github.com/Wei-Shaw/sub2api/ent/pricingmodel"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -83,6 +85,8 @@ type Client struct {
 	ChannelMonitorRequestTemplate *ChannelMonitorRequestTemplateClient
 	// ErrorPassthroughRule is the client for interacting with the ErrorPassthroughRule builders.
 	ErrorPassthroughRule *ErrorPassthroughRuleClient
+	// Feedback is the client for interacting with the Feedback builders.
+	Feedback *FeedbackClient
 	// Group is the client for interacting with the Group builders.
 	Group *GroupClient
 	// IdempotencyRecord is the client for interacting with the IdempotencyRecord builders.
@@ -97,6 +101,8 @@ type Client struct {
 	PaymentProviderInstance *PaymentProviderInstanceClient
 	// PendingAuthSession is the client for interacting with the PendingAuthSession builders.
 	PendingAuthSession *PendingAuthSessionClient
+	// PricingModel is the client for interacting with the PricingModel builders.
+	PricingModel *PricingModelClient
 	// PromoCode is the client for interacting with the PromoCode builders.
 	PromoCode *PromoCodeClient
 	// PromoCodeUsage is the client for interacting with the PromoCodeUsage builders.
@@ -152,6 +158,7 @@ func (c *Client) init() {
 	c.ChannelMonitorHistory = NewChannelMonitorHistoryClient(c.config)
 	c.ChannelMonitorRequestTemplate = NewChannelMonitorRequestTemplateClient(c.config)
 	c.ErrorPassthroughRule = NewErrorPassthroughRuleClient(c.config)
+	c.Feedback = NewFeedbackClient(c.config)
 	c.Group = NewGroupClient(c.config)
 	c.IdempotencyRecord = NewIdempotencyRecordClient(c.config)
 	c.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(c.config)
@@ -159,6 +166,7 @@ func (c *Client) init() {
 	c.PaymentOrder = NewPaymentOrderClient(c.config)
 	c.PaymentProviderInstance = NewPaymentProviderInstanceClient(c.config)
 	c.PendingAuthSession = NewPendingAuthSessionClient(c.config)
+	c.PricingModel = NewPricingModelClient(c.config)
 	c.PromoCode = NewPromoCodeClient(c.config)
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
@@ -279,6 +287,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
 		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
+		Feedback:                      NewFeedbackClient(cfg),
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
@@ -286,6 +295,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
+		PricingModel:                  NewPricingModelClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
@@ -333,6 +343,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
 		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
+		Feedback:                      NewFeedbackClient(cfg),
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
@@ -340,6 +351,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
+		PricingModel:                  NewPricingModelClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
@@ -388,13 +400,14 @@ func (c *Client) Use(hooks ...Hook) {
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.AuthIdentity, c.AuthIdentityChannel, c.ChannelMonitor,
 		c.ChannelMonitorDailyRollup, c.ChannelMonitorHistory,
-		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Group,
+		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Feedback, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
-		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
-		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession,
+		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -407,13 +420,14 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.AuthIdentity, c.AuthIdentityChannel, c.ChannelMonitor,
 		c.ChannelMonitorDailyRollup, c.ChannelMonitorHistory,
-		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Group,
+		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Feedback, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
-		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
-		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession,
+		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -446,6 +460,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ChannelMonitorRequestTemplate.mutate(ctx, m)
 	case *ErrorPassthroughRuleMutation:
 		return c.ErrorPassthroughRule.mutate(ctx, m)
+	case *FeedbackMutation:
+		return c.Feedback.mutate(ctx, m)
 	case *GroupMutation:
 		return c.Group.mutate(ctx, m)
 	case *IdempotencyRecordMutation:
@@ -460,6 +476,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PaymentProviderInstance.mutate(ctx, m)
 	case *PendingAuthSessionMutation:
 		return c.PendingAuthSession.mutate(ctx, m)
+	case *PricingModelMutation:
+		return c.PricingModel.mutate(ctx, m)
 	case *PromoCodeMutation:
 		return c.PromoCode.mutate(ctx, m)
 	case *PromoCodeUsageMutation:
@@ -2400,6 +2418,139 @@ func (c *ErrorPassthroughRuleClient) mutate(ctx context.Context, m *ErrorPassthr
 	}
 }
 
+// FeedbackClient is a client for the Feedback schema.
+type FeedbackClient struct {
+	config
+}
+
+// NewFeedbackClient returns a client for the Feedback from the given config.
+func NewFeedbackClient(c config) *FeedbackClient {
+	return &FeedbackClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `feedback.Hooks(f(g(h())))`.
+func (c *FeedbackClient) Use(hooks ...Hook) {
+	c.hooks.Feedback = append(c.hooks.Feedback, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `feedback.Intercept(f(g(h())))`.
+func (c *FeedbackClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Feedback = append(c.inters.Feedback, interceptors...)
+}
+
+// Create returns a builder for creating a Feedback entity.
+func (c *FeedbackClient) Create() *FeedbackCreate {
+	mutation := newFeedbackMutation(c.config, OpCreate)
+	return &FeedbackCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Feedback entities.
+func (c *FeedbackClient) CreateBulk(builders ...*FeedbackCreate) *FeedbackCreateBulk {
+	return &FeedbackCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *FeedbackClient) MapCreateBulk(slice any, setFunc func(*FeedbackCreate, int)) *FeedbackCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &FeedbackCreateBulk{err: fmt.Errorf("calling to FeedbackClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*FeedbackCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &FeedbackCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Feedback.
+func (c *FeedbackClient) Update() *FeedbackUpdate {
+	mutation := newFeedbackMutation(c.config, OpUpdate)
+	return &FeedbackUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *FeedbackClient) UpdateOne(_m *Feedback) *FeedbackUpdateOne {
+	mutation := newFeedbackMutation(c.config, OpUpdateOne, withFeedback(_m))
+	return &FeedbackUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *FeedbackClient) UpdateOneID(id int64) *FeedbackUpdateOne {
+	mutation := newFeedbackMutation(c.config, OpUpdateOne, withFeedbackID(id))
+	return &FeedbackUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Feedback.
+func (c *FeedbackClient) Delete() *FeedbackDelete {
+	mutation := newFeedbackMutation(c.config, OpDelete)
+	return &FeedbackDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *FeedbackClient) DeleteOne(_m *Feedback) *FeedbackDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *FeedbackClient) DeleteOneID(id int64) *FeedbackDeleteOne {
+	builder := c.Delete().Where(feedback.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &FeedbackDeleteOne{builder}
+}
+
+// Query returns a query builder for Feedback.
+func (c *FeedbackClient) Query() *FeedbackQuery {
+	return &FeedbackQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeFeedback},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Feedback entity by its id.
+func (c *FeedbackClient) Get(ctx context.Context, id int64) (*Feedback, error) {
+	return c.Query().Where(feedback.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *FeedbackClient) GetX(ctx context.Context, id int64) *Feedback {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *FeedbackClient) Hooks() []Hook {
+	return c.hooks.Feedback
+}
+
+// Interceptors returns the client interceptors.
+func (c *FeedbackClient) Interceptors() []Interceptor {
+	return c.inters.Feedback
+}
+
+func (c *FeedbackClient) mutate(ctx context.Context, m *FeedbackMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&FeedbackCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&FeedbackUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&FeedbackUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&FeedbackDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Feedback mutation op: %q", m.Op())
+	}
+}
+
 // GroupClient is a client for the Group schema.
 type GroupClient struct {
 	config
@@ -3538,6 +3689,139 @@ func (c *PendingAuthSessionClient) mutate(ctx context.Context, m *PendingAuthSes
 		return (&PendingAuthSessionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown PendingAuthSession mutation op: %q", m.Op())
+	}
+}
+
+// PricingModelClient is a client for the PricingModel schema.
+type PricingModelClient struct {
+	config
+}
+
+// NewPricingModelClient returns a client for the PricingModel from the given config.
+func NewPricingModelClient(c config) *PricingModelClient {
+	return &PricingModelClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `pricingmodel.Hooks(f(g(h())))`.
+func (c *PricingModelClient) Use(hooks ...Hook) {
+	c.hooks.PricingModel = append(c.hooks.PricingModel, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `pricingmodel.Intercept(f(g(h())))`.
+func (c *PricingModelClient) Intercept(interceptors ...Interceptor) {
+	c.inters.PricingModel = append(c.inters.PricingModel, interceptors...)
+}
+
+// Create returns a builder for creating a PricingModel entity.
+func (c *PricingModelClient) Create() *PricingModelCreate {
+	mutation := newPricingModelMutation(c.config, OpCreate)
+	return &PricingModelCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of PricingModel entities.
+func (c *PricingModelClient) CreateBulk(builders ...*PricingModelCreate) *PricingModelCreateBulk {
+	return &PricingModelCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *PricingModelClient) MapCreateBulk(slice any, setFunc func(*PricingModelCreate, int)) *PricingModelCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &PricingModelCreateBulk{err: fmt.Errorf("calling to PricingModelClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*PricingModelCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &PricingModelCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for PricingModel.
+func (c *PricingModelClient) Update() *PricingModelUpdate {
+	mutation := newPricingModelMutation(c.config, OpUpdate)
+	return &PricingModelUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *PricingModelClient) UpdateOne(_m *PricingModel) *PricingModelUpdateOne {
+	mutation := newPricingModelMutation(c.config, OpUpdateOne, withPricingModel(_m))
+	return &PricingModelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *PricingModelClient) UpdateOneID(id int64) *PricingModelUpdateOne {
+	mutation := newPricingModelMutation(c.config, OpUpdateOne, withPricingModelID(id))
+	return &PricingModelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for PricingModel.
+func (c *PricingModelClient) Delete() *PricingModelDelete {
+	mutation := newPricingModelMutation(c.config, OpDelete)
+	return &PricingModelDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *PricingModelClient) DeleteOne(_m *PricingModel) *PricingModelDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *PricingModelClient) DeleteOneID(id int64) *PricingModelDeleteOne {
+	builder := c.Delete().Where(pricingmodel.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &PricingModelDeleteOne{builder}
+}
+
+// Query returns a query builder for PricingModel.
+func (c *PricingModelClient) Query() *PricingModelQuery {
+	return &PricingModelQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypePricingModel},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a PricingModel entity by its id.
+func (c *PricingModelClient) Get(ctx context.Context, id int64) (*PricingModel, error) {
+	return c.Query().Where(pricingmodel.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *PricingModelClient) GetX(ctx context.Context, id int64) *PricingModel {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *PricingModelClient) Hooks() []Hook {
+	return c.hooks.PricingModel
+}
+
+// Interceptors returns the client interceptors.
+func (c *PricingModelClient) Interceptors() []Interceptor {
+	return c.inters.PricingModel
+}
+
+func (c *PricingModelClient) mutate(ctx context.Context, m *PricingModelMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&PricingModelCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&PricingModelUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&PricingModelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&PricingModelDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown PricingModel mutation op: %q", m.Op())
 	}
 }
 
@@ -6212,23 +6496,23 @@ type (
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, ChannelMonitor, ChannelMonitorDailyRollup,
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		Feedback, Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
+		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PricingModel,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, ChannelMonitor, ChannelMonitorDailyRollup,
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		Feedback, Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
+		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PricingModel,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 
