@@ -62,6 +62,7 @@ type Handlers struct {
 	PublicPricing    *PublicPricingHandler
 	PricingDisplay   *PricingDisplayHandler
 	Feedback         *FeedbackHandler
+	AccountAPI       *AccountAPIHandler
 }
 
 // BuildInfo contains build-time information

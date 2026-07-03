@@ -214,6 +214,13 @@ func RegisterGatewayRoutes(
 	// Antigravity 模型列表
 	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
 
+	// 账号密钥余额查询（只接受 Authorization: Bearer，不进入模型路由）
+	r.GET("/balance",
+		middleware.RequireBearerOnly(),
+		gin.HandlerFunc(apiKeyAuth),
+		h.AccountAPI.Balance,
+	)
+
 	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
 	antigravityV1 := r.Group("/antigravity/v1")
 	antigravityV1.Use(bodyLimit)
