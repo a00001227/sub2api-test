@@ -221,6 +221,28 @@ func RegisterGatewayRoutes(
 		h.AccountAPI.Balance,
 	)
 
+	// 客户密钥管理（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
+	r.POST("/sub-keys",
+		middleware.RequireBearerOnly(),
+		gin.HandlerFunc(apiKeyAuth),
+		h.AccountAPI.CreateSubKey,
+	)
+	r.GET("/sub-keys",
+		middleware.RequireBearerOnly(),
+		gin.HandlerFunc(apiKeyAuth),
+		h.AccountAPI.ListSubKeys,
+	)
+	r.PUT("/sub-keys/:id",
+		middleware.RequireBearerOnly(),
+		gin.HandlerFunc(apiKeyAuth),
+		h.AccountAPI.UpdateSubKey,
+	)
+	r.DELETE("/sub-keys/:id",
+		middleware.RequireBearerOnly(),
+		gin.HandlerFunc(apiKeyAuth),
+		h.AccountAPI.DeleteSubKey,
+	)
+
 	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
 	antigravityV1 := r.Group("/antigravity/v1")
 	antigravityV1.Use(bodyLimit)

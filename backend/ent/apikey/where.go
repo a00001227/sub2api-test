@@ -90,6 +90,11 @@ func GroupID(v int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldGroupID, v))
 }
 
+// ParentKeyID applies equality check predicate on the "parent_key_id" field. It's identical to ParentKeyIDEQ.
+func ParentKeyID(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldParentKeyID, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldStatus, v))
@@ -468,6 +473,56 @@ func GroupIDIsNil() predicate.APIKey {
 // GroupIDNotNil applies the NotNil predicate on the "group_id" field.
 func GroupIDNotNil() predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotNull(FieldGroupID))
+}
+
+// ParentKeyIDEQ applies the EQ predicate on the "parent_key_id" field.
+func ParentKeyIDEQ(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldParentKeyID, v))
+}
+
+// ParentKeyIDNEQ applies the NEQ predicate on the "parent_key_id" field.
+func ParentKeyIDNEQ(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldParentKeyID, v))
+}
+
+// ParentKeyIDIn applies the In predicate on the "parent_key_id" field.
+func ParentKeyIDIn(vs ...int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldParentKeyID, vs...))
+}
+
+// ParentKeyIDNotIn applies the NotIn predicate on the "parent_key_id" field.
+func ParentKeyIDNotIn(vs ...int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldParentKeyID, vs...))
+}
+
+// ParentKeyIDGT applies the GT predicate on the "parent_key_id" field.
+func ParentKeyIDGT(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldParentKeyID, v))
+}
+
+// ParentKeyIDGTE applies the GTE predicate on the "parent_key_id" field.
+func ParentKeyIDGTE(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldParentKeyID, v))
+}
+
+// ParentKeyIDLT applies the LT predicate on the "parent_key_id" field.
+func ParentKeyIDLT(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldParentKeyID, v))
+}
+
+// ParentKeyIDLTE applies the LTE predicate on the "parent_key_id" field.
+func ParentKeyIDLTE(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldParentKeyID, v))
+}
+
+// ParentKeyIDIsNil applies the IsNil predicate on the "parent_key_id" field.
+func ParentKeyIDIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldParentKeyID))
+}
+
+// ParentKeyIDNotNil applies the NotNil predicate on the "parent_key_id" field.
+func ParentKeyIDNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldParentKeyID))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

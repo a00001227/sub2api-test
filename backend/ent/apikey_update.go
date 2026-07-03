@@ -120,6 +120,33 @@ func (_u *APIKeyUpdate) ClearGroupID() *APIKeyUpdate {
 	return _u
 }
 
+// SetParentKeyID sets the "parent_key_id" field.
+func (_u *APIKeyUpdate) SetParentKeyID(v int64) *APIKeyUpdate {
+	_u.mutation.ResetParentKeyID()
+	_u.mutation.SetParentKeyID(v)
+	return _u
+}
+
+// SetNillableParentKeyID sets the "parent_key_id" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableParentKeyID(v *int64) *APIKeyUpdate {
+	if v != nil {
+		_u.SetParentKeyID(*v)
+	}
+	return _u
+}
+
+// AddParentKeyID adds value to the "parent_key_id" field.
+func (_u *APIKeyUpdate) AddParentKeyID(v int64) *APIKeyUpdate {
+	_u.mutation.AddParentKeyID(v)
+	return _u
+}
+
+// ClearParentKeyID clears the value of the "parent_key_id" field.
+func (_u *APIKeyUpdate) ClearParentKeyID() *APIKeyUpdate {
+	_u.mutation.ClearParentKeyID()
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *APIKeyUpdate) SetStatus(v string) *APIKeyUpdate {
 	_u.mutation.SetStatus(v)
@@ -593,6 +620,15 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.ParentKeyID(); ok {
+		_spec.SetField(apikey.FieldParentKeyID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedParentKeyID(); ok {
+		_spec.AddField(apikey.FieldParentKeyID, field.TypeInt64, value)
+	}
+	if _u.mutation.ParentKeyIDCleared() {
+		_spec.ClearField(apikey.FieldParentKeyID, field.TypeInt64)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
 	}
@@ -904,6 +940,33 @@ func (_u *APIKeyUpdateOne) SetNillableGroupID(v *int64) *APIKeyUpdateOne {
 // ClearGroupID clears the value of the "group_id" field.
 func (_u *APIKeyUpdateOne) ClearGroupID() *APIKeyUpdateOne {
 	_u.mutation.ClearGroupID()
+	return _u
+}
+
+// SetParentKeyID sets the "parent_key_id" field.
+func (_u *APIKeyUpdateOne) SetParentKeyID(v int64) *APIKeyUpdateOne {
+	_u.mutation.ResetParentKeyID()
+	_u.mutation.SetParentKeyID(v)
+	return _u
+}
+
+// SetNillableParentKeyID sets the "parent_key_id" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableParentKeyID(v *int64) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetParentKeyID(*v)
+	}
+	return _u
+}
+
+// AddParentKeyID adds value to the "parent_key_id" field.
+func (_u *APIKeyUpdateOne) AddParentKeyID(v int64) *APIKeyUpdateOne {
+	_u.mutation.AddParentKeyID(v)
+	return _u
+}
+
+// ClearParentKeyID clears the value of the "parent_key_id" field.
+func (_u *APIKeyUpdateOne) ClearParentKeyID() *APIKeyUpdateOne {
+	_u.mutation.ClearParentKeyID()
 	return _u
 }
 
@@ -1409,6 +1472,15 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ParentKeyID(); ok {
+		_spec.SetField(apikey.FieldParentKeyID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedParentKeyID(); ok {
+		_spec.AddField(apikey.FieldParentKeyID, field.TypeInt64, value)
+	}
+	if _u.mutation.ParentKeyIDCleared() {
+		_spec.ClearField(apikey.FieldParentKeyID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)

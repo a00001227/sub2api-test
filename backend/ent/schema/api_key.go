@@ -44,6 +44,10 @@ func (APIKey) Fields() []ent.Field {
 		field.Int64("group_id").
 			Optional().
 			Nillable(),
+		field.Int64("parent_key_id").
+			Optional().
+			Nillable().
+			Comment("NULL = account key; NOT NULL = sub key whose parent is the account key with this ID"),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),
@@ -144,5 +148,7 @@ func (APIKey) Indexes() []ent.Index {
 		// Index for quota queries
 		index.Fields("quota", "quota_used"),
 		index.Fields("expires_at"),
+		index.Fields("parent_key_id"),
+		index.Fields("user_id", "parent_key_id"),
 	}
 }

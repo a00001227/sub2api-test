@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html"
 	"strconv"
@@ -37,6 +38,15 @@ var (
 	ErrAPIKeyRateLimit5hExceeded = infraerrors.TooManyRequests("API_KEY_RATE_5H_EXCEEDED", "api key 5小时限额已用完")
 	ErrAPIKeyRateLimit1dExceeded = infraerrors.TooManyRequests("API_KEY_RATE_1D_EXCEEDED", "api key 日限额已用完")
 	ErrAPIKeyRateLimit7dExceeded = infraerrors.TooManyRequests("API_KEY_RATE_7D_EXCEEDED", "api key 7天限额已用完")
+
+	// Sub-key errors
+	ErrAccountKeyRequired              = infraerrors.Forbidden("ACCOUNT_KEY_REQUIRED", "this endpoint requires an account key, not a sub key")
+	ErrInsufficientAvailableBalance    = infraerrors.BadRequest("INSUFFICIENT_AVAILABLE_BALANCE", "budget exceeds available balance")
+	ErrInvalidBudget                   = infraerrors.BadRequest("INVALID_BUDGET", "budget must be greater than 0")
+	ErrAccountKeyGroupRequired         = infraerrors.BadRequest("ACCOUNT_KEY_GROUP_REQUIRED", "account key must be bound to a group before creating sub keys")
+	ErrSubKeyNotFound                  = infraerrors.NotFound("SUB_KEY_NOT_FOUND", "sub key not found")
+	ErrBudgetLessThanSpent             = infraerrors.BadRequest("BUDGET_LESS_THAN_SPENT", "new budget cannot be less than already spent amount")
+	ErrInvalidStatus                   = infraerrors.BadRequest("INVALID_STATUS", "status must be 'active' or 'disabled'")
 )
 
 const (
@@ -71,6 +81,13 @@ type APIKeyRepository interface {
 	CountByGroupID(ctx context.Context, groupID int64) (int64, error)
 	ListKeysByUserID(ctx context.Context, userID int64) ([]string, error)
 	ListKeysByGroupID(ctx context.Context, groupID int64) ([]string, error)
+
+	// Sub-key methods
+	ListSubKeysByUserID(ctx context.Context, userID int64, page, limit int) ([]APIKey, int64, error)
+	SumSubKeyRemainingQuotaByUserID(ctx context.Context, userID int64) (float64, error)
+	// GetSubKeyByIDForUser 返回属于 userID 的 sub key（parent_key_id IS NOT NULL）。
+	// 若不存在或不属于该用户则返回 ErrAPIKeyNotFound。
+	GetSubKeyByIDForUser(ctx context.Context, userID, subKeyID int64) (*APIKey, error)
 
 	// Quota methods
 	IncrementQuotaUsed(ctx context.Context, id int64, amount float64) (float64, error)
@@ -905,4 +922,191 @@ func (s *APIKeyService) UpdateRateLimitUsage(ctx context.Context, apiKeyID int64
 		return nil
 	}
 	return s.apiKeyRepo.IncrementRateLimitUsage(ctx, apiKeyID, cost)
+}
+
+// GetLockedBalance returns the sum of remaining quota across all active sub keys for a user.
+func (s *APIKeyService) GetLockedBalance(ctx context.Context, userID int64) (float64, error) {
+	return s.apiKeyRepo.SumSubKeyRemainingQuotaByUserID(ctx, userID)
+}
+
+// CreateSubKey creates a sub key under an account key with the given budget.
+func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, label string, budget float64) (*APIKey, error) {
+	if accountKey.ParentKeyID != nil {
+		return nil, ErrAccountKeyRequired
+	}
+	if accountKey.GroupID == nil {
+		return nil, ErrAccountKeyGroupRequired
+	}
+	if budget <= 0 {
+		return nil, ErrInvalidBudget
+	}
+
+	user, err := s.userRepo.GetByID(ctx, accountKey.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	locked, err := s.GetLockedBalance(ctx, accountKey.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	available := user.Balance - locked
+	if budget > available {
+		return nil, ErrInsufficientAvailableBalance
+	}
+
+	key, err := s.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+
+	subKey := &APIKey{
+		UserID:      accountKey.UserID,
+		Key:         key,
+		Name:        html.EscapeString(label),
+		GroupID:     accountKey.GroupID,
+		ParentKeyID: &accountKey.ID,
+		Status:      StatusAPIKeyActive,
+		Quota:       budget,
+	}
+	if err := s.apiKeyRepo.Create(ctx, subKey); err != nil {
+		return nil, fmt.Errorf("create sub key: %w", err)
+	}
+
+	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
+	return subKey, nil
+}
+
+// ListSubKeys returns sub keys belonging to the given account key's user.
+func (s *APIKeyService) ListSubKeys(ctx context.Context, accountKey *APIKey, page, limit int) ([]APIKey, int64, error) {
+	if accountKey.ParentKeyID != nil {
+		return nil, 0, ErrAccountKeyRequired
+	}
+	return s.apiKeyRepo.ListSubKeysByUserID(ctx, accountKey.UserID, page, limit)
+}
+
+// UpdateSubKeyRequest holds the optional fields that can be changed on a sub key.
+type UpdateSubKeyRequest struct {
+	Label         *string  // new name
+	BudgetVirtual *float64 // new quota
+	Status        *string  // "active" or "disabled"
+}
+
+// subKeyContributesToLocked returns true when a sub key's remaining quota counts
+// towards locked_balance (mirrors SumSubKeyRemainingQuotaByUserID filter).
+func subKeyContributesToLocked(k *APIKey) bool {
+	if k.Quota <= 0 {
+		return false
+	}
+	return k.Status == StatusAPIKeyActive || k.Status == StatusAPIKeyQuotaExhausted
+}
+
+// subKeyRemaining returns max(quota - quota_used, 0) for a sub key.
+func subKeyRemaining(k *APIKey) float64 {
+	r := k.Quota - k.QuotaUsed
+	if r < 0 {
+		return 0
+	}
+	return r
+}
+
+// UpdateSubKey modifies label, budget, and/or status of a sub key owned by accountKey.
+func (s *APIKeyService) UpdateSubKey(ctx context.Context, accountKey *APIKey, subKeyID int64, req UpdateSubKeyRequest) (*APIKey, error) {
+	if accountKey.ParentKeyID != nil {
+		return nil, ErrAccountKeyRequired
+	}
+
+	subKey, err := s.apiKeyRepo.GetSubKeyByIDForUser(ctx, accountKey.UserID, subKeyID)
+	if err != nil {
+		if errors.Is(err, ErrAPIKeyNotFound) {
+			return nil, ErrSubKeyNotFound
+		}
+		return nil, err
+	}
+
+	// snapshot of current contribution to locked_balance
+	oldContributes := subKeyContributesToLocked(subKey)
+	oldRemaining := subKeyRemaining(subKey)
+
+	if req.Label != nil {
+		subKey.Name = html.EscapeString(*req.Label)
+	}
+
+	newStatus := subKey.Status
+	if req.Status != nil {
+		switch *req.Status {
+		case StatusAPIKeyActive, StatusAPIKeyDisabled:
+			newStatus = *req.Status
+		default:
+			return nil, ErrInvalidStatus
+		}
+	}
+
+	newQuota := subKey.Quota
+	if req.BudgetVirtual != nil {
+		bv := *req.BudgetVirtual
+		if bv <= 0 {
+			return nil, ErrInvalidBudget
+		}
+		if bv < subKey.QuotaUsed {
+			return nil, ErrBudgetLessThanSpent
+		}
+		newQuota = bv
+	}
+
+	// Compute effect on locked_balance
+	subKey.Status = newStatus
+	subKey.Quota = newQuota
+	newContributes := subKeyContributesToLocked(subKey)
+	newRemaining := subKeyRemaining(subKey)
+
+	// Only need balance check when the sub key will contribute more than before
+	if newContributes && (!oldContributes || newRemaining > oldRemaining) {
+		currentLocked, err := s.GetLockedBalance(ctx, accountKey.UserID)
+		if err != nil {
+			return nil, err
+		}
+		// Adjust for this key's old contribution (GetLockedBalance already includes it)
+		var oldContrib float64
+		if oldContributes {
+			oldContrib = oldRemaining
+		}
+		projectedLocked := currentLocked - oldContrib + newRemaining
+
+		user, err := s.userRepo.GetByID(ctx, accountKey.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if projectedLocked > user.Balance {
+			return nil, ErrInsufficientAvailableBalance
+		}
+	}
+
+	if err := s.apiKeyRepo.Update(ctx, subKey); err != nil {
+		return nil, fmt.Errorf("update sub key: %w", err)
+	}
+	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
+	return subKey, nil
+}
+
+// DeleteSubKey soft-deletes a sub key owned by accountKey.
+func (s *APIKeyService) DeleteSubKey(ctx context.Context, accountKey *APIKey, subKeyID int64) error {
+	if accountKey.ParentKeyID != nil {
+		return ErrAccountKeyRequired
+	}
+
+	subKey, err := s.apiKeyRepo.GetSubKeyByIDForUser(ctx, accountKey.UserID, subKeyID)
+	if err != nil {
+		if errors.Is(err, ErrAPIKeyNotFound) {
+			return ErrSubKeyNotFound
+		}
+		return err
+	}
+
+	if err := s.apiKeyRepo.Delete(ctx, subKey.ID); err != nil {
+		return fmt.Errorf("delete sub key: %w", err)
+	}
+	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
+	return nil
 }

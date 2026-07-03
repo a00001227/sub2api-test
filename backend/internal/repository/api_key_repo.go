@@ -45,6 +45,7 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetName(key.Name).
 		SetStatus(key.Status).
 		SetNillableGroupID(key.GroupID).
+		SetNillableParentKeyID(key.ParentKeyID).
 		SetNillableLastUsedAt(key.LastUsedAt).
 		SetQuota(key.Quota).
 		SetQuotaUsed(key.QuotaUsed).
@@ -709,6 +710,7 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
 		GroupID:       m.GroupID,
+		ParentKeyID:   m.ParentKeyID,
 		Quota:         m.Quota,
 		QuotaUsed:     m.QuotaUsed,
 		ExpiresAt:     m.ExpiresAt,
@@ -824,4 +826,89 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// ListSubKeysByUserID 列出用户下所有子密钥（parent_key_id IS NOT NULL），支持分页。
+// 返回 (keys, total, error)。
+func (r *apiKeyRepository) ListSubKeysByUserID(ctx context.Context, userID int64, page, limit int) ([]service.APIKey, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	q := r.activeQuery().
+		Where(
+			apikey.UserIDEQ(userID),
+			apikey.ParentKeyIDNotNil(),
+		)
+
+	total, err := q.Clone().Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := q.
+		Order(dbent.Desc(apikey.FieldCreatedAt)).
+		Limit(limit).
+		Offset(offset).
+		All(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	out := make([]service.APIKey, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, *apiKeyEntityToService(m))
+	}
+	return out, int64(total), nil
+}
+
+// SumSubKeyRemainingQuotaByUserID 计算用户所有有效子密钥的剩余预算之和（locked_balance）。
+// 过滤条件：parent_key_id IS NOT NULL, quota > 0, status IN (active, quota_exhausted),
+// expires_at IS NULL OR expires_at > now(), deleted_at IS NULL。
+func (r *apiKeyRepository) SumSubKeyRemainingQuotaByUserID(ctx context.Context, userID int64) (float64, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT COALESCE(SUM(GREATEST(quota - quota_used, 0)), 0)
+		FROM api_keys
+		WHERE deleted_at IS NULL
+		  AND user_id = $1
+		  AND parent_key_id IS NOT NULL
+		  AND quota > 0
+		  AND status IN ('active', 'quota_exhausted')
+		  AND (expires_at IS NULL OR expires_at > NOW())
+	`, userID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return 0, nil
+	}
+	var sum float64
+	if err := rows.Scan(&sum); err != nil {
+		return 0, err
+	}
+	return sum, rows.Err()
+}
+
+// GetSubKeyByIDForUser returns the sub key with the given ID that belongs to userID
+// (parent_key_id IS NOT NULL). Returns ErrAPIKeyNotFound if not found or not owned.
+func (r *apiKeyRepository) GetSubKeyByIDForUser(ctx context.Context, userID, subKeyID int64) (*service.APIKey, error) {
+	m, err := r.activeQuery().
+		Where(
+			apikey.IDEQ(subKeyID),
+			apikey.UserIDEQ(userID),
+			apikey.ParentKeyIDNotNil(),
+		).
+		Only(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		return nil, err
+	}
+	return apiKeyEntityToService(m), nil
 }

@@ -33,6 +33,7 @@ type APIKey struct {
 	Key         string
 	Name        string
 	GroupID     *int64
+	ParentKeyID *int64 // nil = account key; non-nil = sub key
 	Status      string
 	IPWhitelist []string
 	IPBlacklist []string
