@@ -144,9 +144,11 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// ── 5. 加载订阅（订阅模式时始终加载） ───────────────────────
 
-		// skipBilling: /v1/usage、/balance、/sub-keys、/sub-keys/:id 只需鉴权，跳过所有计费执行
+		// skipBilling: 管理/查询接口只需鉴权，跳过所有计费执行
 		path := c.Request.URL.Path
 		skipBilling := path == "/v1/usage" || path == "/balance" ||
+			path == "/sub-key/balance" || path == "/sub-key/usage-logs" ||
+			path == "/usage-logs" ||
 			path == "/sub-keys" || strings.HasPrefix(path, "/sub-keys/")
 
 		var subscription *service.UserSubscription

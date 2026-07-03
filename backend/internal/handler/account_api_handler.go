@@ -3,7 +3,12 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -15,13 +20,15 @@ import (
 type AccountAPIHandler struct {
 	userService   *service.UserService
 	apiKeyService *service.APIKeyService
+	usageService  *service.UsageService
 }
 
 // NewAccountAPIHandler 创建 AccountAPIHandler。
-func NewAccountAPIHandler(userService *service.UserService, apiKeyService *service.APIKeyService) *AccountAPIHandler {
+func NewAccountAPIHandler(userService *service.UserService, apiKeyService *service.APIKeyService, usageService *service.UsageService) *AccountAPIHandler {
 	return &AccountAPIHandler{
 		userService:   userService,
 		apiKeyService: apiKeyService,
+		usageService:  usageService,
 	}
 }
 
@@ -337,4 +344,261 @@ func (h *AccountAPIHandler) DeleteSubKey(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// GetSubKeyBalance 查询客户密钥自身的预算状态。
+//
+// GET /sub-key/balance
+// Authorization: Bearer <client_key>
+//
+// 只允许客户密钥（parent_key_id IS NOT NULL）访问。
+// 账号密钥访问返回 403 CLIENT_KEY_REQUIRED。
+func (h *AccountAPIHandler) GetSubKeyBalance(c *gin.Context) {
+	raw, exists := c.Get(string(middleware.ContextKeyAPIKey))
+	if !exists {
+		middleware.AbortWithError(c, 401, "API_KEY_REQUIRED", "API key not found in context")
+		return
+	}
+	apiKey, ok := raw.(*service.APIKey)
+	if !ok || apiKey == nil {
+		middleware.AbortWithError(c, 401, "API_KEY_REQUIRED", "Invalid API key in context")
+		return
+	}
+	if apiKey.ParentKeyID == nil {
+		middleware.AbortWithError(c, 403, "CLIENT_KEY_REQUIRED", service.ErrClientKeyRequired.Error())
+		return
+	}
+
+	quota := apiKey.Quota
+	quotaUsed := apiKey.QuotaUsed
+
+	if quota <= 0 {
+		// 历史兼容：quota=0 表示无限制
+		c.JSON(http.StatusOK, gin.H{
+			"budget":    nil,
+			"spent":     quotaUsed,
+			"remaining": nil,
+			"unlimited": true,
+			"status":    apiKey.Status,
+			"label":     apiKey.Name,
+			"unit":      "USD",
+		})
+		return
+	}
+
+	remaining := quota - quotaUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"budget":    quota,
+		"spent":     quotaUsed,
+		"remaining": remaining,
+		"status":    apiKey.Status,
+		"label":     apiKey.Name,
+		"unit":      "USD",
+	})
+}
+
+// GetUsageLogs 查询账号密钥下的用量日志。
+//
+// GET /usage-logs?page=&limit=&startDate=&endDate=&model=&status=&requestId=&subKeyId=
+// Authorization: Bearer <account_key>
+//
+// 只允许账号密钥（parent_key_id IS NULL）访问；subKeyId 可选，需验证所属权。
+// 不记录 usage log；不扣余额；不返回完整 key。
+func (h *AccountAPIHandler) GetUsageLogs(c *gin.Context) {
+	accountKey := h.accountKeyFromContext(c)
+	if accountKey == nil {
+		return
+	}
+
+	page := parseInt(c.Query("page"), 1)
+	limit := parseInt(c.Query("limit"), 20)
+	if limit > 100 {
+		limit = 100
+	}
+
+	filters := usagestats.UsageLogFilters{
+		UserID:     accountKey.UserID,
+		Model:      strings.TrimSpace(c.Query("model")),
+		RequestID:  strings.TrimSpace(c.Query("requestId")),
+		ExactTotal: true,
+	}
+
+	// Optional subKeyId filter — validate ownership
+	if subKeyIDStr := strings.TrimSpace(c.Query("subKeyId")); subKeyIDStr != "" {
+		subKeyID, ok := parseInt64Param(c, subKeyIDStr, "subKeyId")
+		if !ok {
+			return
+		}
+		subKey, err := h.apiKeyService.GetSubKeyByIDForUser(c.Request.Context(), accountKey.UserID, subKeyID)
+		if err != nil {
+			if errors.Is(err, service.ErrSubKeyNotFound) || errors.Is(err, service.ErrAPIKeyNotFound) {
+				middleware.AbortWithError(c, 404, "SUB_KEY_NOT_FOUND", "sub key not found")
+			} else {
+				middleware.AbortWithError(c, 500, "INTERNAL_ERROR", "failed to validate sub key")
+			}
+			return
+		}
+		filters.APIKeyID = subKey.ID
+	}
+
+	// Date range
+	if s := strings.TrimSpace(c.Query("startDate")); s != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", s, "")
+		if err != nil {
+			middleware.AbortWithError(c, 400, "INVALID_START_DATE", "startDate must be YYYY-MM-DD")
+			return
+		}
+		filters.StartTime = &t
+	}
+	if s := strings.TrimSpace(c.Query("endDate")); s != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", s, "")
+		if err != nil {
+			middleware.AbortWithError(c, 400, "INVALID_END_DATE", "endDate must be YYYY-MM-DD")
+			return
+		}
+		t = t.AddDate(0, 0, 1)
+		filters.EndTime = &t
+	}
+
+	params := pagination.PaginationParams{
+		Page:      page,
+		PageSize:  limit,
+		SortBy:    "created_at",
+		SortOrder: "desc",
+	}
+
+	records, result, err := h.usageService.ListWithFilters(c.Request.Context(), params, filters)
+	if err != nil {
+		middleware.AbortWithError(c, 500, "INTERNAL_ERROR", "failed to list usage logs")
+		return
+	}
+
+	items := make([]*dto.UsageLog, 0, len(records))
+	for i := range records {
+		item := dto.UsageLogFromService(&records[i])
+		// Do not expose API key value in usage log responses
+		if item != nil && item.APIKey != nil {
+			item.APIKey.Key = ""
+		}
+		items = append(items, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": items,
+		"total": result.Total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// GetSubKeyUsageLogs 查询客户密钥自身的用量日志。
+//
+// GET /sub-key/usage-logs?page=&limit=&startDate=&endDate=&model=&requestId=
+// Authorization: Bearer <client_key>
+//
+// 只允许客户密钥（parent_key_id IS NOT NULL）访问；账号密钥返回 403。
+// quota_exhausted 状态的 key 也可查询（skipBilling 覆盖）。
+func (h *AccountAPIHandler) GetSubKeyUsageLogs(c *gin.Context) {
+	raw, exists := c.Get(string(middleware.ContextKeyAPIKey))
+	if !exists {
+		middleware.AbortWithError(c, 401, "API_KEY_REQUIRED", "API key not found in context")
+		return
+	}
+	apiKey, ok := raw.(*service.APIKey)
+	if !ok || apiKey == nil {
+		middleware.AbortWithError(c, 401, "API_KEY_REQUIRED", "invalid API key in context")
+		return
+	}
+	if apiKey.ParentKeyID == nil {
+		middleware.AbortWithError(c, 403, "CLIENT_KEY_REQUIRED", service.ErrClientKeyRequired.Error())
+		return
+	}
+
+	// subKeyId is not applicable on this endpoint
+	if strings.TrimSpace(c.Query("subKeyId")) != "" {
+		middleware.AbortWithError(c, 400, "INVALID_PARAM", "subKeyId is not supported on this endpoint; this key can only query its own logs")
+		return
+	}
+
+	page := parseInt(c.Query("page"), 1)
+	limit := parseInt(c.Query("limit"), 20)
+	if limit > 100 {
+		limit = 100
+	}
+
+	filters := usagestats.UsageLogFilters{
+		UserID:     apiKey.UserID,
+		APIKeyID:   apiKey.ID,
+		Model:      strings.TrimSpace(c.Query("model")),
+		RequestID:  strings.TrimSpace(c.Query("requestId")),
+		ExactTotal: true,
+	}
+
+	if s := strings.TrimSpace(c.Query("startDate")); s != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", s, "")
+		if err != nil {
+			middleware.AbortWithError(c, 400, "INVALID_START_DATE", "startDate must be YYYY-MM-DD")
+			return
+		}
+		filters.StartTime = &t
+	}
+	if s := strings.TrimSpace(c.Query("endDate")); s != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", s, "")
+		if err != nil {
+			middleware.AbortWithError(c, 400, "INVALID_END_DATE", "endDate must be YYYY-MM-DD")
+			return
+		}
+		t = t.AddDate(0, 0, 1)
+		filters.EndTime = &t
+	}
+
+	params := pagination.PaginationParams{
+		Page:      page,
+		PageSize:  limit,
+		SortBy:    "created_at",
+		SortOrder: "desc",
+	}
+
+	records, result, err := h.usageService.ListWithFilters(c.Request.Context(), params, filters)
+	if err != nil {
+		middleware.AbortWithError(c, 500, "INTERNAL_ERROR", "failed to list usage logs")
+		return
+	}
+
+	items := make([]*dto.UsageLog, 0, len(records))
+	for i := range records {
+		item := dto.UsageLogFromService(&records[i])
+		if item != nil && item.APIKey != nil {
+			item.APIKey.Key = ""
+		}
+		items = append(items, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": items,
+		"total": result.Total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// parseInt64Param parses a string as positive int64 and aborts with 400 on failure.
+func parseInt64Param(c *gin.Context, s, paramName string) (int64, bool) {
+	v := int64(0)
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			middleware.AbortWithError(c, 400, "INVALID_PARAM", paramName+" must be a positive integer")
+			return 0, false
+		}
+		v = v*10 + int64(ch-'0')
+	}
+	if v <= 0 {
+		middleware.AbortWithError(c, 400, "INVALID_PARAM", paramName+" must be a positive integer")
+		return 0, false
+	}
+	return v, true
 }

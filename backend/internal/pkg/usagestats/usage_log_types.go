@@ -272,6 +272,7 @@ type UsageLogFilters struct {
 	BillingMode string
 	StartTime   *time.Time
 	EndTime     *time.Time
+	RequestID   string
 	// ExactTotal requests exact COUNT(*) for pagination. Default false for fast large-table paging.
 	ExactTotal bool
 }

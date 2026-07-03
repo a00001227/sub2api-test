@@ -167,7 +167,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	feedbackRepository := repository.NewFeedbackRepository(client)
 	feedbackService := service.NewFeedbackService(feedbackRepository, userRepository)
 	feedbackHandler := handler.NewFeedbackHandler(feedbackService)
-	accountAPIHandler := handler.NewAccountAPIHandler(userService, apiKeyService)
+	accountAPIHandler := handler.NewAccountAPIHandler(userService, apiKeyService, usageService)
 	adminFeedbackHandler := admin.NewFeedbackHandler(feedbackService)
 	channelMonitorRepository := repository.NewChannelMonitorRepository(client, db)
 	channelMonitorService := service.ProvideChannelMonitorService(channelMonitorRepository, secretEncryptor)

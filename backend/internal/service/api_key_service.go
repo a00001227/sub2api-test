@@ -41,6 +41,7 @@ var (
 
 	// Sub-key errors
 	ErrAccountKeyRequired              = infraerrors.Forbidden("ACCOUNT_KEY_REQUIRED", "this endpoint requires an account key, not a sub key")
+	ErrClientKeyRequired               = infraerrors.Forbidden("CLIENT_KEY_REQUIRED", "this endpoint requires a client key, not an account key")
 	ErrInsufficientAvailableBalance    = infraerrors.BadRequest("INSUFFICIENT_AVAILABLE_BALANCE", "budget exceeds available balance")
 	ErrInvalidBudget                   = infraerrors.BadRequest("INVALID_BUDGET", "budget must be greater than 0")
 	ErrAccountKeyGroupRequired         = infraerrors.BadRequest("ACCOUNT_KEY_GROUP_REQUIRED", "account key must be bound to a group before creating sub keys")
@@ -1109,4 +1110,16 @@ func (s *APIKeyService) DeleteSubKey(ctx context.Context, accountKey *APIKey, su
 	}
 	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
 	return nil
+}
+
+// GetSubKeyByIDForUser returns a sub key owned by userID. Wraps ErrAPIKeyNotFound → ErrSubKeyNotFound.
+func (s *APIKeyService) GetSubKeyByIDForUser(ctx context.Context, userID, subKeyID int64) (*APIKey, error) {
+	key, err := s.apiKeyRepo.GetSubKeyByIDForUser(ctx, userID, subKeyID)
+	if err != nil {
+		if errors.Is(err, ErrAPIKeyNotFound) {
+			return nil, ErrSubKeyNotFound
+		}
+		return nil, err
+	}
+	return key, nil
 }

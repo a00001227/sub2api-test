@@ -2821,6 +2821,10 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)+1))
 		args = append(args, *filters.EndTime)
 	}
+	if filters.RequestID != "" {
+		conditions = append(conditions, fmt.Sprintf("request_id = $%d", len(args)+1))
+		args = append(args, filters.RequestID)
+	}
 
 	whereClause := buildWhere(conditions)
 	var (
