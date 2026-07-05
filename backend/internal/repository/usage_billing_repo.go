@@ -123,9 +123,21 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	if cmd.APIKeyQuotaCost > 0 {
 		exhausted, err := incrementUsageBillingAPIKeyQuota(ctx, tx, cmd.APIKeyID, cmd.APIKeyQuotaCost)
 		if err != nil {
-			return err
+			if errors.Is(err, service.ErrAPIKeyNotFound) {
+				// key 在请求进行中被（软）删除：跳过 quota 记账但保留余额扣款。
+				// 若在此返回错误会回滚整个事务（含余额扣款），等于把已消费的
+				// 用量免单——删除 key 不应成为免费用量的通道。
+				logger.LegacyPrintf(
+					"repository.usage_billing",
+					"Warning: api key %d deleted mid-request; balance charged, quota skipped (user=%d cost=%.8f)",
+					cmd.APIKeyID, cmd.UserID, cmd.APIKeyQuotaCost,
+				)
+			} else {
+				return err
+			}
+		} else {
+			result.APIKeyQuotaExhausted = exhausted
 		}
-		result.APIKeyQuotaExhausted = exhausted
 	}
 
 	if cmd.APIKeyRateLimitCost > 0 {

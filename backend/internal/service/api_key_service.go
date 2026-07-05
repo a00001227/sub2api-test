@@ -40,14 +40,15 @@ var (
 	ErrAPIKeyRateLimit7dExceeded = infraerrors.TooManyRequests("API_KEY_RATE_7D_EXCEEDED", "api key 7天限额已用完")
 
 	// Sub-key errors
-	ErrAccountKeyRequired              = infraerrors.Forbidden("ACCOUNT_KEY_REQUIRED", "this endpoint requires an account key, not a sub key")
-	ErrClientKeyRequired               = infraerrors.Forbidden("CLIENT_KEY_REQUIRED", "this endpoint requires a client key, not an account key")
-	ErrInsufficientAvailableBalance    = infraerrors.BadRequest("INSUFFICIENT_AVAILABLE_BALANCE", "budget exceeds available balance")
-	ErrInvalidBudget                   = infraerrors.BadRequest("INVALID_BUDGET", "budget must be greater than 0")
-	ErrAccountKeyGroupRequired         = infraerrors.BadRequest("ACCOUNT_KEY_GROUP_REQUIRED", "account key must be bound to a group before creating sub keys")
-	ErrSubKeyNotFound                  = infraerrors.NotFound("SUB_KEY_NOT_FOUND", "sub key not found")
-	ErrBudgetLessThanSpent             = infraerrors.BadRequest("BUDGET_LESS_THAN_SPENT", "new budget cannot be less than already spent amount")
-	ErrInvalidStatus                   = infraerrors.BadRequest("INVALID_STATUS", "status must be 'active' or 'disabled'")
+	ErrAccountKeyRequired           = infraerrors.Forbidden("ACCOUNT_KEY_REQUIRED", "this endpoint requires an account key, not a sub key")
+	ErrClientKeyRequired            = infraerrors.Forbidden("CLIENT_KEY_REQUIRED", "this endpoint requires a client key, not an account key")
+	ErrInsufficientAvailableBalance = infraerrors.BadRequest("INSUFFICIENT_AVAILABLE_BALANCE", "budget exceeds available balance")
+	ErrInvalidBudget                = infraerrors.BadRequest("INVALID_BUDGET", "budget must be greater than 0")
+	ErrAccountKeyGroupRequired      = infraerrors.BadRequest("ACCOUNT_KEY_GROUP_REQUIRED", "account key must be bound to a group before creating sub keys")
+	ErrSubKeyNotFound               = infraerrors.NotFound("SUB_KEY_NOT_FOUND", "sub key not found")
+	ErrBudgetLessThanSpent          = infraerrors.BadRequest("BUDGET_LESS_THAN_SPENT", "new budget cannot be less than already spent amount")
+	ErrInvalidStatus                = infraerrors.BadRequest("INVALID_STATUS", "status must be 'active' or 'disabled'")
+	ErrInvalidMultiplier            = infraerrors.BadRequest("INVALID_MULTIPLIER", "budgetVirtual must be greater than or equal to paidAmount")
 )
 
 const (
@@ -66,6 +67,11 @@ type APIKeyRepository interface {
 	// GetByKeyForAuth 认证专用查询，返回最小字段集
 	GetByKeyForAuth(ctx context.Context, key string) (*APIKey, error)
 	Update(ctx context.Context, key *APIKey) error
+	// RotateKey 原地更换 key 字符串（secret 轮换），不改变记录 ID 及其他字段。
+	RotateKey(ctx context.Context, id int64, newKey string) error
+	// UpdateSubKeyBudget 定向更新 sub key 的 label/quota/multiplier/status，
+	// 不触碰 quota_used（由计费路径原子累加）。带 quota_used <= quota 原子守卫。
+	UpdateSubKeyBudget(ctx context.Context, id int64, name string, quota, displayMultiplier float64, status string) error
 	Delete(ctx context.Context, id int64) error
 	// DeleteWithAudit 在同一事务内先写 deleted_api_key_audits 审计、再软删除该 key。
 	DeleteWithAudit(ctx context.Context, id int64) error
@@ -213,6 +219,12 @@ type RateLimitCacheInvalidator interface {
 	InvalidateAPIKeyRateLimit(ctx context.Context, keyID int64) error
 }
 
+// LockedBalanceInvalidator drops the in-process locked_balance cache for a user
+// after sub key budget mutations so the billing preflight reads fresh data.
+type LockedBalanceInvalidator interface {
+	InvalidateLockedBalance(userID int64)
+}
+
 type APIKeyService struct {
 	apiKeyRepo            APIKeyRepository
 	userRepo              UserRepository
@@ -221,12 +233,38 @@ type APIKeyService struct {
 	userGroupRateRepo     UserGroupRateRepository
 	cache                 APIKeyCache
 	rateLimitCacheInvalid RateLimitCacheInvalidator // optional: invalidate Redis rate limit cache
+	lockedBalanceInvalid  LockedBalanceInvalidator  // optional: invalidate locked balance cache
 	cfg                   *config.Config
 	authCacheL1           *ristretto.Cache
 	authCfg               apiKeyAuthCacheConfig
 	authGroup             singleflight.Group
 	lastUsedTouchL1       sync.Map // keyID -> nextAllowedAt(time.Time)
 	lastUsedTouchSF       singleflight.Group
+	// subKeyBudgetMu 按 userID 串行化「读余额/锁定 → 校验 → 写入」的 sub key
+	// 预算变更（创建/增额），防止并发请求都读到同一份 locked 而双双通过校验
+	// 造成超额锁定。进程内锁：单实例下完全消除竞态，多实例下大幅收窄窗口。
+	subKeyBudgetMu sync.Map // userID(int64) -> *sync.Mutex
+}
+
+// SetLockedBalanceInvalidator sets the optional locked balance cache invalidator.
+func (s *APIKeyService) SetLockedBalanceInvalidator(inv LockedBalanceInvalidator) {
+	s.lockedBalanceInvalid = inv
+}
+
+// invalidateLockedBalance drops the billing-side locked_balance cache (no-op
+// when the invalidator is not wired).
+func (s *APIKeyService) invalidateLockedBalance(userID int64) {
+	if s.lockedBalanceInvalid != nil {
+		s.lockedBalanceInvalid.InvalidateLockedBalance(userID)
+	}
+}
+
+// lockSubKeyBudget 获取指定用户的 sub key 预算变更锁，返回解锁函数。
+func (s *APIKeyService) lockSubKeyBudget(userID int64) func() {
+	v, _ := s.subKeyBudgetMu.LoadOrStore(userID, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // NewAPIKeyService 创建API Key服务实例
@@ -930,17 +968,38 @@ func (s *APIKeyService) GetLockedBalance(ctx context.Context, userID int64) (flo
 	return s.apiKeyRepo.SumSubKeyRemainingQuotaByUserID(ctx, userID)
 }
 
-// CreateSubKey creates a sub key under an account key with the given budget.
-func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, label string, budget float64) (*APIKey, error) {
+// CreateSubKey creates a sub key under an account key.
+// budgetVirtual is the customer-facing budget; paidAmount is the real amount
+// locked from the account balance (quota). displayMultiplier = budgetVirtual/paidAmount.
+func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, label string, budgetVirtual, paidAmount float64) (*APIKey, error) {
 	if accountKey.ParentKeyID != nil {
 		return nil, ErrAccountKeyRequired
 	}
 	if accountKey.GroupID == nil {
-		return nil, ErrAccountKeyGroupRequired
+		// Default account keys are created at registration without a group.
+		// Fall back to the user's first available group so sub key creation
+		// works out of the box; only fail when the user truly has none.
+		groups, err := s.GetAvailableGroups(ctx, accountKey.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve default group: %w", err)
+		}
+		if len(groups) == 0 {
+			return nil, ErrAccountKeyGroupRequired
+		}
+		groupID := groups[0].ID
+		accountKey.GroupID = &groupID
 	}
-	if budget <= 0 {
+	if budgetVirtual <= 0 || paidAmount <= 0 {
 		return nil, ErrInvalidBudget
 	}
+	if budgetVirtual < paidAmount {
+		return nil, ErrInvalidMultiplier
+	}
+	displayMultiplier := budgetVirtual / paidAmount
+
+	// Serialize balance check + insert per user (see lockSubKeyBudget).
+	unlock := s.lockSubKeyBudget(accountKey.UserID)
+	defer unlock()
 
 	user, err := s.userRepo.GetByID(ctx, accountKey.UserID)
 	if err != nil {
@@ -953,7 +1012,7 @@ func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, la
 	}
 
 	available := user.Balance - locked
-	if budget > available {
+	if paidAmount > available {
 		return nil, ErrInsufficientAvailableBalance
 	}
 
@@ -963,19 +1022,21 @@ func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, la
 	}
 
 	subKey := &APIKey{
-		UserID:      accountKey.UserID,
-		Key:         key,
-		Name:        html.EscapeString(label),
-		GroupID:     accountKey.GroupID,
-		ParentKeyID: &accountKey.ID,
-		Status:      StatusAPIKeyActive,
-		Quota:       budget,
+		UserID:            accountKey.UserID,
+		Key:               key,
+		Name:              html.EscapeString(label),
+		GroupID:           accountKey.GroupID,
+		ParentKeyID:       &accountKey.ID,
+		Status:            StatusAPIKeyActive,
+		Quota:             paidAmount,
+		DisplayMultiplier: displayMultiplier,
 	}
 	if err := s.apiKeyRepo.Create(ctx, subKey); err != nil {
 		return nil, fmt.Errorf("create sub key: %w", err)
 	}
 
 	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
+	s.invalidateLockedBalance(accountKey.UserID)
 	return subKey, nil
 }
 
@@ -990,8 +1051,18 @@ func (s *APIKeyService) ListSubKeys(ctx context.Context, accountKey *APIKey, pag
 // UpdateSubKeyRequest holds the optional fields that can be changed on a sub key.
 type UpdateSubKeyRequest struct {
 	Label         *string  // new name
-	BudgetVirtual *float64 // new quota
+	BudgetVirtual *float64 // new customer-facing budget
+	PaidAmount    *float64 // new real locked amount (quota)
 	Status        *string  // "active" or "disabled"
+}
+
+// EffectiveDisplayMultiplier returns the key's display multiplier, treating
+// missing/zero values as 1 for legacy compatibility.
+func EffectiveDisplayMultiplier(k *APIKey) float64 {
+	if k == nil || k.DisplayMultiplier <= 0 {
+		return 1
+	}
+	return k.DisplayMultiplier
 }
 
 // subKeyContributesToLocked returns true when a sub key's remaining quota counts
@@ -1017,6 +1088,12 @@ func (s *APIKeyService) UpdateSubKey(ctx context.Context, accountKey *APIKey, su
 	if accountKey.ParentKeyID != nil {
 		return nil, ErrAccountKeyRequired
 	}
+
+	// Serialize balance check + write per user (see lockSubKeyBudget). Taken
+	// before the read so the snapshot used for validation stays coherent with
+	// the write against concurrent Create/Update on the same account.
+	unlock := s.lockSubKeyBudget(accountKey.UserID)
+	defer unlock()
 
 	subKey, err := s.apiKeyRepo.GetSubKeyByIDForUser(ctx, accountKey.UserID, subKeyID)
 	if err != nil {
@@ -1044,21 +1121,55 @@ func (s *APIKeyService) UpdateSubKey(ctx context.Context, accountKey *APIKey, su
 		}
 	}
 
+	// Resolve new quota (paidAmount) and display multiplier.
+	//  - both budgetVirtual & paidAmount → quota = paidAmount, multiplier = bv/pa
+	//  - only budgetVirtual              → quota unchanged, multiplier = bv/quota
+	//  - only paidAmount                 → multiplier unchanged, quota = paidAmount
 	newQuota := subKey.Quota
-	if req.BudgetVirtual != nil {
+	newMultiplier := EffectiveDisplayMultiplier(subKey)
+	switch {
+	case req.BudgetVirtual != nil && req.PaidAmount != nil:
+		bv, pa := *req.BudgetVirtual, *req.PaidAmount
+		if bv <= 0 || pa <= 0 {
+			return nil, ErrInvalidBudget
+		}
+		if bv < pa {
+			return nil, ErrInvalidMultiplier
+		}
+		newQuota = pa
+		newMultiplier = bv / pa
+	case req.BudgetVirtual != nil:
 		bv := *req.BudgetVirtual
 		if bv <= 0 {
 			return nil, ErrInvalidBudget
 		}
-		if bv < subKey.QuotaUsed {
-			return nil, ErrBudgetLessThanSpent
+		if bv < subKey.Quota {
+			return nil, ErrInvalidMultiplier
 		}
-		newQuota = bv
+		if subKey.Quota > 0 {
+			newMultiplier = bv / subKey.Quota
+		}
+	case req.PaidAmount != nil:
+		pa := *req.PaidAmount
+		if pa <= 0 {
+			return nil, ErrInvalidBudget
+		}
+		newQuota = pa
+	}
+	if newQuota < subKey.QuotaUsed {
+		return nil, ErrBudgetLessThanSpent
+	}
+
+	// Top-up revives an exhausted key: once the budget rises above the spent
+	// amount the key must be usable again. An explicit req.Status still wins.
+	if req.Status == nil && newStatus == StatusAPIKeyQuotaExhausted && newQuota > subKey.QuotaUsed {
+		newStatus = StatusAPIKeyActive
 	}
 
 	// Compute effect on locked_balance
 	subKey.Status = newStatus
 	subKey.Quota = newQuota
+	subKey.DisplayMultiplier = newMultiplier
 	newContributes := subKeyContributesToLocked(subKey)
 	newRemaining := subKeyRemaining(subKey)
 
@@ -1084,11 +1195,29 @@ func (s *APIKeyService) UpdateSubKey(ctx context.Context, accountKey *APIKey, su
 		}
 	}
 
-	if err := s.apiKeyRepo.Update(ctx, subKey); err != nil {
-		return nil, fmt.Errorf("update sub key: %w", err)
+	// Targeted write: quota_used and usage counters are owned by the billing
+	// path — a full-row Update would overwrite concurrent consumption with the
+	// stale snapshot read above. The repo re-checks quota_used <= quota
+	// atomically inside the UPDATE.
+	if err := s.apiKeyRepo.UpdateSubKeyBudget(ctx, subKey.ID, subKey.Name, newQuota, newMultiplier, newStatus); err != nil {
+		if errors.Is(err, ErrAPIKeyNotFound) {
+			return nil, ErrSubKeyNotFound
+		}
+		return nil, err
 	}
 	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
-	return subKey, nil
+	s.invalidateLockedBalance(accountKey.UserID)
+
+	// Re-read so the response reflects the true post-update state (including
+	// any quota_used growth during this call).
+	updated, err := s.apiKeyRepo.GetSubKeyByIDForUser(ctx, accountKey.UserID, subKeyID)
+	if err != nil {
+		if errors.Is(err, ErrAPIKeyNotFound) {
+			return nil, ErrSubKeyNotFound
+		}
+		return nil, err
+	}
+	return updated, nil
 }
 
 // DeleteSubKey soft-deletes a sub key owned by accountKey.
@@ -1109,6 +1238,7 @@ func (s *APIKeyService) DeleteSubKey(ctx context.Context, accountKey *APIKey, su
 		return fmt.Errorf("delete sub key: %w", err)
 	}
 	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
+	s.invalidateLockedBalance(accountKey.UserID)
 	return nil
 }
 
@@ -1122,4 +1252,35 @@ func (s *APIKeyService) GetSubKeyByIDForUser(ctx context.Context, userID, subKey
 		return nil, err
 	}
 	return key, nil
+}
+
+// RotateAccountKey swaps the secret of an account key in place. The record ID,
+// parent_key_id links from sub keys, quota and usage stay untouched — only the
+// key string changes. Returns the new full key.
+func (s *APIKeyService) RotateAccountKey(ctx context.Context, userID, keyID int64) (string, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
+	if err != nil {
+		return "", err
+	}
+	if apiKey.UserID != userID {
+		return "", ErrAPIKeyNotFound
+	}
+	if apiKey.ParentKeyID != nil {
+		return "", ErrAccountKeyRequired
+	}
+
+	oldKey := apiKey.Key
+	newKey, err := s.GenerateKey()
+	if err != nil {
+		return "", fmt.Errorf("generate key: %w", err)
+	}
+
+	if err := s.apiKeyRepo.RotateKey(ctx, keyID, newKey); err != nil {
+		return "", err
+	}
+
+	// Old secret must stop authenticating immediately.
+	s.InvalidateAuthCacheByKey(ctx, oldKey)
+	s.InvalidateAuthCacheByKey(ctx, newKey)
+	return newKey, nil
 }

@@ -103,9 +103,45 @@ func (h *AccountAPIHandler) Balance(c *gin.Context) {
 }
 
 // createSubKeyRequest is the request body for POST /sub-keys.
+// budget is the legacy alias for budgetVirtual; paidAmount defaults to
+// budgetVirtual (multiplier 1) when omitted.
 type createSubKeyRequest struct {
-	Label  string  `json:"label" binding:"required"`
-	Budget float64 `json:"budget" binding:"required"`
+	Label         string   `json:"label"`
+	Budget        *float64 `json:"budget"`
+	BudgetVirtual *float64 `json:"budgetVirtual"`
+	PaidAmount    *float64 `json:"paidAmount"`
+}
+
+// subKeyDTO renders a sub key with both the customer-facing virtual amounts
+// and the account's real amounts. Includes the full key: the account key can
+// always retrieve its own sub keys' secrets (same policy as the account key).
+func subKeyDTO(k *service.APIKey) gin.H {
+	multiplier := service.EffectiveDisplayMultiplier(k)
+	remaining := k.Quota - k.QuotaUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	return gin.H{
+		"id":     k.ID,
+		"label":  k.Name,
+		"key":    k.Key,
+		"key_id": maskedKey(k.Key),
+
+		"budgetVirtual":    k.Quota * multiplier,
+		"spentVirtual":     k.QuotaUsed * multiplier,
+		"remainingVirtual": remaining * multiplier,
+
+		"paidAmount":        k.Quota,
+		"spentAmount":       k.QuotaUsed,
+		"remainingAmount":   remaining,
+		"displayMultiplier": multiplier,
+
+		"group_id":   k.GroupID,
+		"status":     k.Status,
+		"createdAt":  k.CreatedAt,
+		"updatedAt":  k.UpdatedAt,
+		"expires_at": k.ExpiresAt,
+	}
 }
 
 // CreateSubKey 创建客户密钥。
@@ -124,7 +160,25 @@ func (h *AccountAPIHandler) CreateSubKey(c *gin.Context) {
 		return
 	}
 
-	subKey, err := h.apiKeyService.CreateSubKey(c.Request.Context(), accountKey, req.Label, req.Budget)
+	// budget (legacy) and budgetVirtual are aliases
+	budgetVirtual := 0.0
+	if req.BudgetVirtual != nil {
+		budgetVirtual = *req.BudgetVirtual
+	} else if req.Budget != nil {
+		budgetVirtual = *req.Budget
+	}
+	if budgetVirtual <= 0 {
+		middleware.AbortWithError(c, 400, "INVALID_BUDGET", "budgetVirtual must be greater than 0")
+		return
+	}
+
+	// paidAmount defaults to budgetVirtual (multiplier 1)
+	paidAmount := budgetVirtual
+	if req.PaidAmount != nil {
+		paidAmount = *req.PaidAmount
+	}
+
+	subKey, err := h.apiKeyService.CreateSubKey(c.Request.Context(), accountKey, req.Label, budgetVirtual, paidAmount)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAccountKeyRequired):
@@ -133,6 +187,8 @@ func (h *AccountAPIHandler) CreateSubKey(c *gin.Context) {
 			middleware.AbortWithError(c, 400, "ACCOUNT_KEY_GROUP_REQUIRED", err.Error())
 		case errors.Is(err, service.ErrInvalidBudget):
 			middleware.AbortWithError(c, 400, "INVALID_BUDGET", err.Error())
+		case errors.Is(err, service.ErrInvalidMultiplier):
+			middleware.AbortWithError(c, 400, "INVALID_MULTIPLIER", err.Error())
 		case errors.Is(err, service.ErrInsufficientAvailableBalance):
 			middleware.AbortWithError(c, 400, "INSUFFICIENT_AVAILABLE_BALANCE", err.Error())
 		default:
@@ -141,15 +197,7 @@ func (h *AccountAPIHandler) CreateSubKey(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"id":         subKey.ID,
-		"key":        subKey.Key,
-		"label":      subKey.Name,
-		"budget":     subKey.Quota,
-		"group_id":   subKey.GroupID,
-		"status":     subKey.Status,
-		"created_at": subKey.CreatedAt,
-	})
+	c.JSON(http.StatusCreated, subKeyDTO(subKey))
 }
 
 // ListSubKeys 列出当前账号密钥下的所有客户密钥。
@@ -175,22 +223,8 @@ func (h *AccountAPIHandler) ListSubKeys(c *gin.Context) {
 	}
 
 	items := make([]gin.H, len(keys))
-	for i, k := range keys {
-		remaining := k.Quota - k.QuotaUsed
-		if remaining < 0 {
-			remaining = 0
-		}
-		items[i] = gin.H{
-			"id":               k.ID,
-			"label":            k.Name,
-			"budget":           k.Quota,
-			"budget_used":      k.QuotaUsed,
-			"budget_remaining": remaining,
-			"group_id":         k.GroupID,
-			"status":           k.Status,
-			"created_at":       k.CreatedAt,
-			"expires_at":       k.ExpiresAt,
-		}
+	for i := range keys {
+		items[i] = subKeyDTO(&keys[i])
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -246,6 +280,7 @@ func maskedKey(key string) string {
 type updateSubKeyRequest struct {
 	Label         *string  `json:"label"`
 	BudgetVirtual *float64 `json:"budgetVirtual"`
+	PaidAmount    *float64 `json:"paidAmount"`
 	Status        *string  `json:"status"`
 }
 
@@ -273,6 +308,7 @@ func (h *AccountAPIHandler) UpdateSubKey(c *gin.Context) {
 	svcReq := service.UpdateSubKeyRequest{
 		Label:         req.Label,
 		BudgetVirtual: req.BudgetVirtual,
+		PaidAmount:    req.PaidAmount,
 		Status:        req.Status,
 	}
 
@@ -285,10 +321,14 @@ func (h *AccountAPIHandler) UpdateSubKey(c *gin.Context) {
 			middleware.AbortWithError(c, 404, "SUB_KEY_NOT_FOUND", err.Error())
 		case errors.Is(err, service.ErrInvalidBudget):
 			middleware.AbortWithError(c, 400, "INVALID_BUDGET", err.Error())
+		case errors.Is(err, service.ErrInvalidMultiplier):
+			middleware.AbortWithError(c, 400, "INVALID_MULTIPLIER", err.Error())
 		case errors.Is(err, service.ErrBudgetLessThanSpent):
 			middleware.AbortWithError(c, 400, "BUDGET_LESS_THAN_SPENT", err.Error())
 		case errors.Is(err, service.ErrInsufficientAvailableBalance):
 			middleware.AbortWithError(c, 400, "INSUFFICIENT_AVAILABLE_BALANCE", err.Error())
+		case errors.Is(err, service.ErrInvalidStatus):
+			middleware.AbortWithError(c, 400, "INVALID_STATUS", err.Error())
 		case errors.Is(err, service.ErrAccountKeyGroupRequired):
 			middleware.AbortWithError(c, 400, "ACCOUNT_KEY_GROUP_REQUIRED", err.Error())
 		default:
@@ -297,22 +337,7 @@ func (h *AccountAPIHandler) UpdateSubKey(c *gin.Context) {
 		return
 	}
 
-	remaining := updated.Quota - updated.QuotaUsed
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"id":               updated.ID,
-		"label":            updated.Name,
-		"key_id":           maskedKey(updated.Key),
-		"budgetVirtual":    updated.Quota,
-		"spentVirtual":     updated.QuotaUsed,
-		"remainingVirtual": remaining,
-		"status":           updated.Status,
-		"createdAt":        updated.CreatedAt,
-		"updatedAt":        updated.UpdatedAt,
-	})
+	c.JSON(http.StatusOK, subKeyDTO(updated))
 }
 
 // DeleteSubKey 删除客户密钥（软删除）。
@@ -371,12 +396,13 @@ func (h *AccountAPIHandler) GetSubKeyBalance(c *gin.Context) {
 
 	quota := apiKey.Quota
 	quotaUsed := apiKey.QuotaUsed
+	multiplier := service.EffectiveDisplayMultiplier(apiKey)
 
 	if quota <= 0 {
 		// 历史兼容：quota=0 表示无限制
 		c.JSON(http.StatusOK, gin.H{
 			"budget":    nil,
-			"spent":     quotaUsed,
+			"spent":     quotaUsed * multiplier,
 			"remaining": nil,
 			"unlimited": true,
 			"status":    apiKey.Status,
@@ -392,9 +418,9 @@ func (h *AccountAPIHandler) GetSubKeyBalance(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"budget":    quota,
-		"spent":     quotaUsed,
-		"remaining": remaining,
+		"budget":    quota * multiplier,
+		"spent":     quotaUsed * multiplier,
+		"remaining": remaining * multiplier,
 		"status":    apiKey.Status,
 		"label":     apiKey.Name,
 		"unit":      "USD",

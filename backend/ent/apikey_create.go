@@ -181,6 +181,20 @@ func (_c *APIKeyCreate) SetNillableQuotaUsed(v *float64) *APIKeyCreate {
 	return _c
 }
 
+// SetDisplayMultiplier sets the "display_multiplier" field.
+func (_c *APIKeyCreate) SetDisplayMultiplier(v float64) *APIKeyCreate {
+	_c.mutation.SetDisplayMultiplier(v)
+	return _c
+}
+
+// SetNillableDisplayMultiplier sets the "display_multiplier" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableDisplayMultiplier(v *float64) *APIKeyCreate {
+	if v != nil {
+		_c.SetDisplayMultiplier(*v)
+	}
+	return _c
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_c *APIKeyCreate) SetExpiresAt(v time.Time) *APIKeyCreate {
 	_c.mutation.SetExpiresAt(v)
@@ -409,6 +423,10 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultQuotaUsed
 		_c.mutation.SetQuotaUsed(v)
 	}
+	if _, ok := _c.mutation.DisplayMultiplier(); !ok {
+		v := apikey.DefaultDisplayMultiplier
+		_c.mutation.SetDisplayMultiplier(v)
+	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		v := apikey.DefaultRateLimit5h
 		_c.mutation.SetRateLimit5h(v)
@@ -476,6 +494,9 @@ func (_c *APIKeyCreate) check() error {
 	}
 	if _, ok := _c.mutation.QuotaUsed(); !ok {
 		return &ValidationError{Name: "quota_used", err: errors.New(`ent: missing required field "APIKey.quota_used"`)}
+	}
+	if _, ok := _c.mutation.DisplayMultiplier(); !ok {
+		return &ValidationError{Name: "display_multiplier", err: errors.New(`ent: missing required field "APIKey.display_multiplier"`)}
 	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		return &ValidationError{Name: "rate_limit_5h", err: errors.New(`ent: missing required field "APIKey.rate_limit_5h"`)}
@@ -572,6 +593,10 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.QuotaUsed(); ok {
 		_spec.SetField(apikey.FieldQuotaUsed, field.TypeFloat64, value)
 		_node.QuotaUsed = value
+	}
+	if value, ok := _c.mutation.DisplayMultiplier(); ok {
+		_spec.SetField(apikey.FieldDisplayMultiplier, field.TypeFloat64, value)
+		_node.DisplayMultiplier = value
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)
@@ -922,6 +947,24 @@ func (u *APIKeyUpsert) UpdateQuotaUsed() *APIKeyUpsert {
 // AddQuotaUsed adds v to the "quota_used" field.
 func (u *APIKeyUpsert) AddQuotaUsed(v float64) *APIKeyUpsert {
 	u.Add(apikey.FieldQuotaUsed, v)
+	return u
+}
+
+// SetDisplayMultiplier sets the "display_multiplier" field.
+func (u *APIKeyUpsert) SetDisplayMultiplier(v float64) *APIKeyUpsert {
+	u.Set(apikey.FieldDisplayMultiplier, v)
+	return u
+}
+
+// UpdateDisplayMultiplier sets the "display_multiplier" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateDisplayMultiplier() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldDisplayMultiplier)
+	return u
+}
+
+// AddDisplayMultiplier adds v to the "display_multiplier" field.
+func (u *APIKeyUpsert) AddDisplayMultiplier(v float64) *APIKeyUpsert {
+	u.Add(apikey.FieldDisplayMultiplier, v)
 	return u
 }
 
@@ -1392,6 +1435,27 @@ func (u *APIKeyUpsertOne) AddQuotaUsed(v float64) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdateQuotaUsed() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateQuotaUsed()
+	})
+}
+
+// SetDisplayMultiplier sets the "display_multiplier" field.
+func (u *APIKeyUpsertOne) SetDisplayMultiplier(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetDisplayMultiplier(v)
+	})
+}
+
+// AddDisplayMultiplier adds v to the "display_multiplier" field.
+func (u *APIKeyUpsertOne) AddDisplayMultiplier(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddDisplayMultiplier(v)
+	})
+}
+
+// UpdateDisplayMultiplier sets the "display_multiplier" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateDisplayMultiplier() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateDisplayMultiplier()
 	})
 }
 
@@ -2058,6 +2122,27 @@ func (u *APIKeyUpsertBulk) AddQuotaUsed(v float64) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdateQuotaUsed() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateQuotaUsed()
+	})
+}
+
+// SetDisplayMultiplier sets the "display_multiplier" field.
+func (u *APIKeyUpsertBulk) SetDisplayMultiplier(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetDisplayMultiplier(v)
+	})
+}
+
+// AddDisplayMultiplier adds v to the "display_multiplier" field.
+func (u *APIKeyUpsertBulk) AddDisplayMultiplier(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddDisplayMultiplier(v)
+	})
+}
+
+// UpdateDisplayMultiplier sets the "display_multiplier" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateDisplayMultiplier() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateDisplayMultiplier()
 	})
 }
 

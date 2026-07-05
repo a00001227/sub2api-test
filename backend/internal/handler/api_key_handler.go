@@ -270,6 +270,31 @@ func (h *APIKeyHandler) Delete(c *gin.Context) {
 	response.Success(c, gin.H{"message": "API key deleted successfully"})
 }
 
+// Regenerate rotates an API key's secret in place: the record ID, sub keys'
+// parent_key_id, quota and usage are untouched — only the key string changes.
+// POST /api/v1/keys/:id/regenerate
+func (h *APIKeyHandler) Regenerate(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+
+	newKey, err := h.apiKeyService.RotateAccountKey(c.Request.Context(), subject.UserID, keyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{"key": newKey})
+}
+
 // GetAvailableGroups 获取用户可以绑定的分组列表
 // GET /api/v1/groups/available
 func (h *APIKeyHandler) GetAvailableGroups(c *gin.Context) {

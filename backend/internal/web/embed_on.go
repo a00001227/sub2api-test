@@ -307,7 +307,17 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 		trimmed == "/health" ||
 		trimmed == "/responses" ||
 		strings.HasPrefix(trimmed, "/responses/") ||
-		strings.HasPrefix(trimmed, "/images/")
+		strings.HasPrefix(trimmed, "/images/") ||
+		// Derouter Account API (mounted at gateway root, Bearer-authenticated)
+		trimmed == "/balance" ||
+		trimmed == "/sub-keys" ||
+		strings.HasPrefix(trimmed, "/sub-keys/") ||
+		strings.HasPrefix(trimmed, "/sub-key/") ||
+		trimmed == "/usage-logs" ||
+		strings.HasPrefix(trimmed, "/chat/") ||
+		trimmed == "/embeddings" ||
+		trimmed == "/messages" ||
+		strings.HasPrefix(trimmed, "/messages/")
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {

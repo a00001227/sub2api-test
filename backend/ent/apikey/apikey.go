@@ -43,6 +43,8 @@ const (
 	FieldQuota = "quota"
 	// FieldQuotaUsed holds the string denoting the quota_used field in the database.
 	FieldQuotaUsed = "quota_used"
+	// FieldDisplayMultiplier holds the string denoting the display_multiplier field in the database.
+	FieldDisplayMultiplier = "display_multiplier"
 	// FieldExpiresAt holds the string denoting the expires_at field in the database.
 	FieldExpiresAt = "expires_at"
 	// FieldRateLimit5h holds the string denoting the rate_limit_5h field in the database.
@@ -111,6 +113,7 @@ var Columns = []string{
 	FieldIPBlacklist,
 	FieldQuota,
 	FieldQuotaUsed,
+	FieldDisplayMultiplier,
 	FieldExpiresAt,
 	FieldRateLimit5h,
 	FieldRateLimit1d,
@@ -159,6 +162,8 @@ var (
 	DefaultQuota float64
 	// DefaultQuotaUsed holds the default value on creation for the "quota_used" field.
 	DefaultQuotaUsed float64
+	// DefaultDisplayMultiplier holds the default value on creation for the "display_multiplier" field.
+	DefaultDisplayMultiplier float64
 	// DefaultRateLimit5h holds the default value on creation for the "rate_limit_5h" field.
 	DefaultRateLimit5h float64
 	// DefaultRateLimit1d holds the default value on creation for the "rate_limit_1d" field.
@@ -239,6 +244,11 @@ func ByQuota(opts ...sql.OrderTermOption) OrderOption {
 // ByQuotaUsed orders the results by the quota_used field.
 func ByQuotaUsed(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldQuotaUsed, opts...).ToFunc()
+}
+
+// ByDisplayMultiplier orders the results by the display_multiplier field.
+func ByDisplayMultiplier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDisplayMultiplier, opts...).ToFunc()
 }
 
 // ByExpiresAt orders the results by the expires_at field.

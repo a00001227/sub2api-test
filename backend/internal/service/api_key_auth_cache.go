@@ -8,6 +8,7 @@ type APIKeyAuthSnapshot struct {
 	APIKeyID    int64                    `json:"api_key_id"`
 	UserID      int64                    `json:"user_id"`
 	GroupID     *int64                   `json:"group_id,omitempty"`
+	ParentKeyID *int64                   `json:"parent_key_id,omitempty"` // nil = account key; non-nil = sub key
 	Name        string                   `json:"name"`
 	Status      string                   `json:"status"`
 	IPWhitelist []string                 `json:"ip_whitelist,omitempty"`
@@ -18,6 +19,9 @@ type APIKeyAuthSnapshot struct {
 	// Quota fields for API Key independent quota feature
 	Quota     float64 `json:"quota"`      // Quota limit in USD (0 = unlimited)
 	QuotaUsed float64 `json:"quota_used"` // Used quota amount
+
+	// DisplayMultiplier scales quota into the customer-facing virtual budget
+	DisplayMultiplier float64 `json:"display_multiplier"`
 
 	// Expiration field for API Key expiration feature
 	ExpiresAt *time.Time `json:"expires_at,omitempty"` // Expiration time (nil = never expires)

@@ -73,6 +73,11 @@ func (APIKey) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
 			Default(0).
 			Comment("Used quota amount in USD"),
+		// Display multiplier for derouter-style virtual budgets
+		field.Float("display_multiplier").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
+			Default(1).
+			Comment("Virtual budget multiplier (budgetVirtual / paidAmount); 1 for account keys and legacy sub keys"),
 		// Expiration time (nil = never expires)
 		field.Time("expires_at").
 			Optional().

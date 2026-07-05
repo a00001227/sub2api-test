@@ -63,6 +63,7 @@ func RegisterUserRoutes(
 			keys.POST("", h.APIKey.Create)
 			keys.PUT("/:id", h.APIKey.Update)
 			keys.DELETE("/:id", h.APIKey.Delete)
+			keys.POST("/:id/regenerate", h.APIKey.Regenerate)
 		}
 
 		// 用户可用分组（非管理员接口）

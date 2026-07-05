@@ -51,6 +51,11 @@ type APIKey struct {
 	QuotaUsed float64    // Used quota amount
 	ExpiresAt *time.Time // Expiration time (nil = never expires)
 
+	// DisplayMultiplier scales quota/quota_used into the customer-facing
+	// virtual budget (budgetVirtual = quota * DisplayMultiplier).
+	// 1 for account keys and legacy sub keys.
+	DisplayMultiplier float64
+
 	// Rate limit fields
 	RateLimit5h   float64    // Rate limit in USD per 5h (0 = unlimited)
 	RateLimit1d   float64    // Rate limit in USD per 1d (0 = unlimited)

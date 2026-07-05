@@ -48,6 +48,8 @@ type APIKey struct {
 	Quota float64 `json:"quota,omitempty"`
 	// Used quota amount in USD
 	QuotaUsed float64 `json:"quota_used,omitempty"`
+	// Virtual budget multiplier (budgetVirtual / paidAmount); 1 for account keys and legacy sub keys
+	DisplayMultiplier float64 `json:"display_multiplier,omitempty"`
 	// Expiration time for this API key (null = never expires)
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Rate limit in USD per 5 hours (0 = unlimited)
@@ -125,7 +127,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
 			values[i] = new([]byte)
-		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
+		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldDisplayMultiplier, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
 		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID, apikey.FieldParentKeyID:
 			values[i] = new(sql.NullInt64)
@@ -245,6 +247,12 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field quota_used", values[i])
 			} else if value.Valid {
 				_m.QuotaUsed = value.Float64
+			}
+		case apikey.FieldDisplayMultiplier:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field display_multiplier", values[i])
+			} else if value.Valid {
+				_m.DisplayMultiplier = value.Float64
 			}
 		case apikey.FieldExpiresAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -410,6 +418,9 @@ func (_m *APIKey) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("quota_used=")
 	builder.WriteString(fmt.Sprintf("%v", _m.QuotaUsed))
+	builder.WriteString(", ")
+	builder.WriteString("display_multiplier=")
+	builder.WriteString(fmt.Sprintf("%v", _m.DisplayMultiplier))
 	builder.WriteString(", ")
 	if v := _m.ExpiresAt; v != nil {
 		builder.WriteString("expires_at=")

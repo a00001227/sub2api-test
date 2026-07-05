@@ -214,53 +214,32 @@ func RegisterGatewayRoutes(
 	// Antigravity 模型列表
 	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
 
-	// 账号密钥余额查询（只接受 Authorization: Bearer，不进入模型路由）
-	r.GET("/balance",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.Balance,
-	)
+	// ── Derouter Account API ─────────────────────────────────────
+	// 对外契约挂载在网关根路径（/balance、/sub-keys…）；同时在 /api/account
+	// 前缀下再注册一份，供 portal-ui 等自有前端复用既有的 /api 代理与放行
+	// 规则，无需在每层基础设施上单独放行根路径。
+	registerAccountAPI := func(g gin.IRoutes) {
+		bearerOnly := middleware.RequireBearerOnly()
+		auth := gin.HandlerFunc(apiKeyAuth)
 
-	// 客户密钥自身预算查询（只接受 Authorization: Bearer <client_key>）
-	r.GET("/sub-key/balance",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.GetSubKeyBalance,
-	)
+		// 账号密钥余额查询（只接受 Authorization: Bearer，不进入模型路由）
+		g.GET("/balance", bearerOnly, auth, h.AccountAPI.Balance)
 
-	// 客户密钥管理（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
-	r.POST("/sub-keys",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.CreateSubKey,
-	)
-	r.GET("/sub-keys",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.ListSubKeys,
-	)
-	r.PUT("/sub-keys/:id",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.UpdateSubKey,
-	)
-	r.DELETE("/sub-keys/:id",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.DeleteSubKey,
-	)
+		// 客户密钥自身预算查询（只接受 Authorization: Bearer <client_key>）
+		g.GET("/sub-key/balance", bearerOnly, auth, h.AccountAPI.GetSubKeyBalance)
 
-	// 用量日志查询（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
-	r.GET("/usage-logs",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.GetUsageLogs,
-	)
-	r.GET("/sub-key/usage-logs",
-		middleware.RequireBearerOnly(),
-		gin.HandlerFunc(apiKeyAuth),
-		h.AccountAPI.GetSubKeyUsageLogs,
-	)
+		// 客户密钥管理（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
+		g.POST("/sub-keys", bearerOnly, auth, h.AccountAPI.CreateSubKey)
+		g.GET("/sub-keys", bearerOnly, auth, h.AccountAPI.ListSubKeys)
+		g.PUT("/sub-keys/:id", bearerOnly, auth, h.AccountAPI.UpdateSubKey)
+		g.DELETE("/sub-keys/:id", bearerOnly, auth, h.AccountAPI.DeleteSubKey)
+
+		// 用量日志查询（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
+		g.GET("/usage-logs", bearerOnly, auth, h.AccountAPI.GetUsageLogs)
+		g.GET("/sub-key/usage-logs", bearerOnly, auth, h.AccountAPI.GetSubKeyUsageLogs)
+	}
+	registerAccountAPI(r)
+	registerAccountAPI(r.Group("/api/account"))
 
 	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
 	antigravityV1 := r.Group("/antigravity/v1")

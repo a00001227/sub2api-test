@@ -49,6 +49,7 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetNillableLastUsedAt(key.LastUsedAt).
 		SetQuota(key.Quota).
 		SetQuotaUsed(key.QuotaUsed).
+		SetDisplayMultiplier(normalizeDisplayMultiplier(key.DisplayMultiplier)).
 		SetNillableExpiresAt(key.ExpiresAt).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
@@ -131,12 +132,14 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldID,
 			apikey.FieldUserID,
 			apikey.FieldGroupID,
+			apikey.FieldParentKeyID,
 			apikey.FieldName,
 			apikey.FieldStatus,
 			apikey.FieldIPWhitelist,
 			apikey.FieldIPBlacklist,
 			apikey.FieldQuota,
 			apikey.FieldQuotaUsed,
+			apikey.FieldDisplayMultiplier,
 			apikey.FieldExpiresAt,
 			apikey.FieldRateLimit5h,
 			apikey.FieldRateLimit1d,
@@ -207,6 +210,83 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 	return apiKeyEntityToService(m), nil
 }
 
+// normalizeDisplayMultiplier guards against zero/negative multipliers from
+// legacy in-memory structs so the DB always stores a sane value (>= 1 semantics
+// are enforced at the service layer; here we only prevent 0 which would break
+// virtual balance math).
+func normalizeDisplayMultiplier(m float64) float64 {
+	if m <= 0 {
+		return 1
+	}
+	return m
+}
+
+// RotateKey swaps the secret of an existing API key in place. Only the key
+// column (and updated_at) change — ID, parent_key_id, quota and sub keys are
+// untouched.
+func (r *apiKeyRepository) RotateKey(ctx context.Context, id int64, newKey string) error {
+	now := time.Now()
+	affected, err := r.client.APIKey.Update().
+		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
+		SetKey(newKey).
+		SetUpdatedAt(now).
+		Save(ctx)
+	if err != nil {
+		return translatePersistenceError(err, nil, service.ErrAPIKeyExists)
+	}
+	if affected == 0 {
+		return service.ErrAPIKeyNotFound
+	}
+	return nil
+}
+
+// UpdateSubKeyBudget performs a targeted update of a sub key's label, budget
+// (quota), display multiplier, and status WITHOUT touching quota_used or any
+// usage counters. quota_used is owned by the billing path (atomic increments);
+// a full-row Update here would overwrite concurrent consumption with a stale
+// snapshot. The `quota_used <= $newQuota` guard re-validates the
+// budget-not-below-spent invariant atomically inside the UPDATE, closing the
+// read-check-write race in the service layer.
+//
+// Returns ErrBudgetLessThanSpent when the guard rejects the row (spent grew
+// past the new quota between the service's check and this write), or
+// ErrAPIKeyNotFound when the key vanished (deleted).
+func (r *apiKeyRepository) UpdateSubKeyBudget(ctx context.Context, id int64, name string, quota, displayMultiplier float64, status string) error {
+	if r.sql == nil {
+		return errors.New("sql executor unavailable")
+	}
+	res, err := r.sql.ExecContext(ctx, `
+		UPDATE api_keys
+		SET name = $1,
+			quota = $2,
+			display_multiplier = $3,
+			status = $4,
+			updated_at = NOW()
+		WHERE id = $5
+			AND deleted_at IS NULL
+			AND quota_used <= $2
+	`, name, quota, normalizeDisplayMultiplier(displayMultiplier), status, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		// Distinguish "gone" from "guard rejected".
+		exists, existsErr := r.activeQuery().Where(apikey.IDEQ(id)).Exist(ctx)
+		if existsErr != nil {
+			return existsErr
+		}
+		if !exists {
+			return service.ErrAPIKeyNotFound
+		}
+		return service.ErrBudgetLessThanSpent
+	}
+	return nil
+}
+
 func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) error {
 	// 使用原子操作：将软删除检查与更新合并到同一语句，避免竞态条件。
 	// 之前的实现先检查 Exist 再 UpdateOneID，若在两步之间发生软删除，
@@ -227,6 +307,7 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		SetUsage5h(key.Usage5h).
 		SetUsage1d(key.Usage1d).
 		SetUsage7d(key.Usage7d).
+		SetDisplayMultiplier(normalizeDisplayMultiplier(key.DisplayMultiplier)).
 		SetUpdatedAt(now)
 	if key.GroupID != nil {
 		builder.SetGroupID(*key.GroupID)
@@ -603,7 +684,7 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 		SET
 			quota_used = quota_used + $1,
 			status = CASE
-				WHEN quota > 0 AND quota_used + $1 >= quota THEN $2
+				WHEN quota > 0 AND status = $4 AND quota_used + $1 >= quota THEN $2
 				ELSE status
 			END,
 			updated_at = NOW()
@@ -612,7 +693,7 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 	`
 
 	state := &service.APIKeyQuotaUsageState{}
-	if err := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
+	if err := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id, service.StatusAPIKeyActive}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, service.ErrAPIKeyNotFound
 		}
@@ -699,30 +780,31 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		return nil
 	}
 	out := &service.APIKey{
-		ID:            m.ID,
-		UserID:        m.UserID,
-		Key:           m.Key,
-		Name:          m.Name,
-		Status:        m.Status,
-		IPWhitelist:   m.IPWhitelist,
-		IPBlacklist:   m.IPBlacklist,
-		LastUsedAt:    m.LastUsedAt,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
-		GroupID:       m.GroupID,
-		ParentKeyID:   m.ParentKeyID,
-		Quota:         m.Quota,
-		QuotaUsed:     m.QuotaUsed,
-		ExpiresAt:     m.ExpiresAt,
-		RateLimit5h:   m.RateLimit5h,
-		RateLimit1d:   m.RateLimit1d,
-		RateLimit7d:   m.RateLimit7d,
-		Usage5h:       m.Usage5h,
-		Usage1d:       m.Usage1d,
-		Usage7d:       m.Usage7d,
-		Window5hStart: m.Window5hStart,
-		Window1dStart: m.Window1dStart,
-		Window7dStart: m.Window7dStart,
+		ID:                m.ID,
+		UserID:            m.UserID,
+		Key:               m.Key,
+		Name:              m.Name,
+		Status:            m.Status,
+		IPWhitelist:       m.IPWhitelist,
+		IPBlacklist:       m.IPBlacklist,
+		LastUsedAt:        m.LastUsedAt,
+		CreatedAt:         m.CreatedAt,
+		UpdatedAt:         m.UpdatedAt,
+		GroupID:           m.GroupID,
+		ParentKeyID:       m.ParentKeyID,
+		Quota:             m.Quota,
+		QuotaUsed:         m.QuotaUsed,
+		ExpiresAt:         m.ExpiresAt,
+		DisplayMultiplier: m.DisplayMultiplier,
+		RateLimit5h:       m.RateLimit5h,
+		RateLimit1d:       m.RateLimit1d,
+		RateLimit7d:       m.RateLimit7d,
+		Usage5h:           m.Usage5h,
+		Usage1d:           m.Usage1d,
+		Usage7d:           m.Usage7d,
+		Window5hStart:     m.Window5hStart,
+		Window1dStart:     m.Window1dStart,
+		Window7dStart:     m.Window7dStart,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)

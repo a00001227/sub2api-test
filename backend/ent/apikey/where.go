@@ -115,6 +115,11 @@ func QuotaUsed(v float64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldQuotaUsed, v))
 }
 
+// DisplayMultiplier applies equality check predicate on the "display_multiplier" field. It's identical to DisplayMultiplierEQ.
+func DisplayMultiplier(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldDisplayMultiplier, v))
+}
+
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldExpiresAt, v))
@@ -738,6 +743,46 @@ func QuotaUsedLT(v float64) predicate.APIKey {
 // QuotaUsedLTE applies the LTE predicate on the "quota_used" field.
 func QuotaUsedLTE(v float64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldLTE(FieldQuotaUsed, v))
+}
+
+// DisplayMultiplierEQ applies the EQ predicate on the "display_multiplier" field.
+func DisplayMultiplierEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldDisplayMultiplier, v))
+}
+
+// DisplayMultiplierNEQ applies the NEQ predicate on the "display_multiplier" field.
+func DisplayMultiplierNEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldDisplayMultiplier, v))
+}
+
+// DisplayMultiplierIn applies the In predicate on the "display_multiplier" field.
+func DisplayMultiplierIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldDisplayMultiplier, vs...))
+}
+
+// DisplayMultiplierNotIn applies the NotIn predicate on the "display_multiplier" field.
+func DisplayMultiplierNotIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldDisplayMultiplier, vs...))
+}
+
+// DisplayMultiplierGT applies the GT predicate on the "display_multiplier" field.
+func DisplayMultiplierGT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldDisplayMultiplier, v))
+}
+
+// DisplayMultiplierGTE applies the GTE predicate on the "display_multiplier" field.
+func DisplayMultiplierGTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldDisplayMultiplier, v))
+}
+
+// DisplayMultiplierLT applies the LT predicate on the "display_multiplier" field.
+func DisplayMultiplierLT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldDisplayMultiplier, v))
+}
+
+// DisplayMultiplierLTE applies the LTE predicate on the "display_multiplier" field.
+func DisplayMultiplierLTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldDisplayMultiplier, v))
 }
 
 // ExpiresAtEQ applies the EQ predicate on the "expires_at" field.

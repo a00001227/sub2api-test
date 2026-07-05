@@ -96,6 +96,13 @@ type apiKeyRateLimitLoader interface {
 	GetRateLimitData(ctx context.Context, keyID int64) (*APIKeyRateLimitData, error)
 }
 
+// subKeyLockedBalanceLoader loads the sum of sub keys' remaining real budgets
+// (locked_balance) so account-key spending can be capped to the available
+// balance instead of eating into funds reserved for customers.
+type subKeyLockedBalanceLoader interface {
+	SumSubKeyRemainingQuotaByUserID(ctx context.Context, userID int64) (float64, error)
+}
+
 // BillingCacheService 计费缓存服务
 // 负责余额和订阅数据的缓存管理，提供高性能的计费资格检查
 type BillingCacheService struct {
@@ -103,6 +110,7 @@ type BillingCacheService struct {
 	userRepo              UserRepository
 	subRepo               UserSubscriptionRepository
 	apiKeyRateLimitLoader apiKeyRateLimitLoader
+	lockedBalanceLoader   subKeyLockedBalanceLoader
 	userRPMCache          UserRPMCache
 	userGroupRateRepo     UserGroupRateRepository
 	cfg                   *config.Config
@@ -116,6 +124,11 @@ type BillingCacheService struct {
 	stopped            atomic.Bool
 	balanceLoadSF      singleflight.Group
 	quotaLoadSF        singleflight.Group
+	lockedLoadSF       singleflight.Group
+	// lockedBalanceCache 短 TTL 进程内缓存：账号密钥每个请求都要读 locked_balance，
+	// 直接打 DB SUM 在热路径上代价过高。锁定余额只在 sub key 创建/调整/删除和
+	// 客户消费时变化，秒级过期足以兼顾准确性与性能。
+	lockedBalanceCache sync.Map // userID(int64) -> lockedBalanceEntry
 	// 丢弃日志节流计数器（减少高负载下日志噪音）
 	cacheWriteDropFullCount     uint64
 	cacheWriteDropFullLastLog   int64
@@ -139,6 +152,7 @@ func NewBillingCacheService(
 		userRepo:              userRepo,
 		subRepo:               subRepo,
 		apiKeyRateLimitLoader: apiKeyRepo,
+		lockedBalanceLoader:   apiKeyRepo,
 		userRPMCache:          userRPMCache,
 		userGroupRateRepo:     userGroupRateRepo,
 		cfg:                   cfg,
@@ -722,7 +736,7 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 			return err
 		}
 	} else {
-		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
+		if err := s.checkBalanceEligibility(ctx, user.ID, apiKey); err != nil {
 			return err
 		}
 	}
@@ -834,7 +848,7 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 }
 
 // checkBalanceEligibility 检查余额模式资格
-func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, userID int64) error {
+func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, userID int64, apiKey *APIKey) error {
 	balance, err := s.GetUserBalance(ctx, userID)
 	if err != nil {
 		if s.circuitBreaker != nil {
@@ -851,7 +865,71 @@ func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, userI
 		return ErrInsufficientBalance
 	}
 
+	// 账号密钥（parent_key_id IS NULL）自用消费只能花可用余额：
+	// balance − locked_balance（客户密钥的未消耗预算）。否则账号自用会吃掉
+	// 为客户预留的资金，导致客户额度形同虚设。客户密钥自身的消费会同步
+	// 减少 locked_balance，因此无需此检查。
+	if apiKey != nil && apiKey.ParentKeyID == nil {
+		locked, lockErr := s.getLockedBalanceCached(ctx, userID)
+		if lockErr != nil {
+			// fail-open：预留检查是次级保障，查询失败时退回 balance>0 门槛，
+			// 避免因单个 SUM 查询故障阻断全部账号密钥流量。
+			logger.LegacyPrintf("service.billing_cache", "Warning: locked balance check failed for user %d: %v", userID, lockErr)
+		} else if locked > 0 && balance-locked <= 0 {
+			return ErrInsufficientBalance
+		}
+	}
+
 	return nil
+}
+
+// lockedBalanceEntry 进程内 locked_balance 缓存条目。
+type lockedBalanceEntry struct {
+	value     float64
+	expiresAt time.Time
+}
+
+// lockedBalanceTTL 锁定余额缓存时长。锁定值仅在 sub key 预算变更与客户消费时
+// 移动，且此检查本身与缓存余额（5min TTL）比较，秒级新鲜度已远高于另一侧。
+const lockedBalanceTTL = 10 * time.Second
+
+// getLockedBalanceCached 带短 TTL 缓存 + singleflight 的 locked_balance 读取，
+// 避免账号密钥 preflight 热路径上每请求一次 DB SUM。
+func (s *BillingCacheService) getLockedBalanceCached(ctx context.Context, userID int64) (float64, error) {
+	if s.lockedBalanceLoader == nil {
+		return 0, nil
+	}
+	if v, ok := s.lockedBalanceCache.Load(userID); ok {
+		entry := v.(lockedBalanceEntry)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.value, nil
+		}
+	}
+	value, err, _ := s.lockedLoadSF.Do(strconv.FormatInt(userID, 10), func() (any, error) {
+		locked, err := s.lockedBalanceLoader.SumSubKeyRemainingQuotaByUserID(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		s.lockedBalanceCache.Store(userID, lockedBalanceEntry{
+			value:     locked,
+			expiresAt: time.Now().Add(lockedBalanceTTL),
+		})
+		return locked, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	locked, ok := value.(float64)
+	if !ok {
+		return 0, fmt.Errorf("unexpected locked balance type: %T", value)
+	}
+	return locked, nil
+}
+
+// InvalidateLockedBalance 使指定用户的 locked_balance 进程内缓存立即失效。
+// sub key 预算变更（创建/调整/删除）后调用，保证下一次账号密钥请求读到新值。
+func (s *BillingCacheService) InvalidateLockedBalance(userID int64) {
+	s.lockedBalanceCache.Delete(userID)
 }
 
 // checkSubscriptionEligibility 检查订阅模式资格

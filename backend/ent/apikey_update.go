@@ -259,6 +259,27 @@ func (_u *APIKeyUpdate) AddQuotaUsed(v float64) *APIKeyUpdate {
 	return _u
 }
 
+// SetDisplayMultiplier sets the "display_multiplier" field.
+func (_u *APIKeyUpdate) SetDisplayMultiplier(v float64) *APIKeyUpdate {
+	_u.mutation.ResetDisplayMultiplier()
+	_u.mutation.SetDisplayMultiplier(v)
+	return _u
+}
+
+// SetNillableDisplayMultiplier sets the "display_multiplier" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableDisplayMultiplier(v *float64) *APIKeyUpdate {
+	if v != nil {
+		_u.SetDisplayMultiplier(*v)
+	}
+	return _u
+}
+
+// AddDisplayMultiplier adds value to the "display_multiplier" field.
+func (_u *APIKeyUpdate) AddDisplayMultiplier(v float64) *APIKeyUpdate {
+	_u.mutation.AddDisplayMultiplier(v)
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *APIKeyUpdate) SetExpiresAt(v time.Time) *APIKeyUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -672,6 +693,12 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedQuotaUsed(); ok {
 		_spec.AddField(apikey.FieldQuotaUsed, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.DisplayMultiplier(); ok {
+		_spec.SetField(apikey.FieldDisplayMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedDisplayMultiplier(); ok {
+		_spec.AddField(apikey.FieldDisplayMultiplier, field.TypeFloat64, value)
+	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)
 	}
@@ -1079,6 +1106,27 @@ func (_u *APIKeyUpdateOne) SetNillableQuotaUsed(v *float64) *APIKeyUpdateOne {
 // AddQuotaUsed adds value to the "quota_used" field.
 func (_u *APIKeyUpdateOne) AddQuotaUsed(v float64) *APIKeyUpdateOne {
 	_u.mutation.AddQuotaUsed(v)
+	return _u
+}
+
+// SetDisplayMultiplier sets the "display_multiplier" field.
+func (_u *APIKeyUpdateOne) SetDisplayMultiplier(v float64) *APIKeyUpdateOne {
+	_u.mutation.ResetDisplayMultiplier()
+	_u.mutation.SetDisplayMultiplier(v)
+	return _u
+}
+
+// SetNillableDisplayMultiplier sets the "display_multiplier" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableDisplayMultiplier(v *float64) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetDisplayMultiplier(*v)
+	}
+	return _u
+}
+
+// AddDisplayMultiplier adds value to the "display_multiplier" field.
+func (_u *APIKeyUpdateOne) AddDisplayMultiplier(v float64) *APIKeyUpdateOne {
+	_u.mutation.AddDisplayMultiplier(v)
 	return _u
 }
 
@@ -1524,6 +1572,12 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.AddedQuotaUsed(); ok {
 		_spec.AddField(apikey.FieldQuotaUsed, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.DisplayMultiplier(); ok {
+		_spec.SetField(apikey.FieldDisplayMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedDisplayMultiplier(); ok {
+		_spec.AddField(apikey.FieldDisplayMultiplier, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)

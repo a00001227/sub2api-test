@@ -2136,6 +2136,34 @@ func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey) error 
 	return nil
 }
 
+func (r *stubApiKeyRepo) RotateKey(ctx context.Context, id int64, newKey string) error {
+	key, ok := r.byID[id]
+	if !ok {
+		return service.ErrAPIKeyNotFound
+	}
+	delete(r.byKey, key.Key)
+	key.Key = newKey
+	key.UpdatedAt = r.now
+	r.byKey[newKey] = key
+	return nil
+}
+
+func (r *stubApiKeyRepo) UpdateSubKeyBudget(ctx context.Context, id int64, name string, quota, displayMultiplier float64, status string) error {
+	key, ok := r.byID[id]
+	if !ok {
+		return service.ErrAPIKeyNotFound
+	}
+	if key.QuotaUsed > quota {
+		return service.ErrBudgetLessThanSpent
+	}
+	key.Name = name
+	key.Quota = quota
+	key.DisplayMultiplier = displayMultiplier
+	key.Status = status
+	key.UpdatedAt = r.now
+	return nil
+}
+
 func (r *stubApiKeyRepo) Delete(ctx context.Context, id int64) error {
 	key, ok := r.byID[id]
 	if !ok {

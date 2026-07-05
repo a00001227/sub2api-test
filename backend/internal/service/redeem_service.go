@@ -508,6 +508,22 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	return redeemCode, nil
 }
 
+// InvalidateBalanceCaches 失效指定用户的余额相关缓存（认证快照 + Redis 余额）。
+// 供余额被带外修改的路径（如支付退款）复用，保证计费读到新余额。
+func (s *RedeemService) InvalidateBalanceCaches(ctx context.Context, userID int64) {
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+	}
+	if s.billingCacheService == nil {
+		return
+	}
+	go func() {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.billingCacheService.InvalidateUserBalance(cacheCtx, userID)
+	}()
+}
+
 // invalidateRedeemCaches 失效兑换相关的缓存
 func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64, redeemCode *RedeemCode) {
 	switch redeemCode.Type {

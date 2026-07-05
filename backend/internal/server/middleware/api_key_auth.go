@@ -145,7 +145,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 5. 加载订阅（订阅模式时始终加载） ───────────────────────
 
 		// skipBilling: 管理/查询接口只需鉴权，跳过所有计费执行
-		path := c.Request.URL.Path
+		// Account API 同时挂载在根路径和 /api/account 前缀下，两者等价。
+		path := strings.TrimPrefix(c.Request.URL.Path, "/api/account")
 		skipBilling := path == "/v1/usage" || path == "/balance" ||
 			path == "/sub-key/balance" || path == "/sub-key/usage-logs" ||
 			path == "/usage-logs" ||

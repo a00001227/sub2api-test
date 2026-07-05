@@ -289,6 +289,11 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 				s.restoreStatus(ctx, p)
 				return nil, fmt.Errorf("deduction: %w", err)
 			}
+			// 余额被带外扣减，必须失效认证快照与 Redis 余额缓存，否则用户
+			// 可在缓存 TTL 内继续使用已退款的余额消费。
+			if s.redeemService != nil {
+				s.redeemService.InvalidateBalanceCaches(ctx, p.Order.UserID)
+			}
 		} else {
 			slog.Warn("skipping balance deduction on retry (previous rollback failed)", "orderID", p.OrderID)
 			p.BalanceToDeduct = 0
@@ -416,6 +421,9 @@ func (s *PaymentService) RollbackRefund(ctx context.Context, p *RefundPlan, gErr
 			slog.Error("[CRITICAL] rollback failed", "orderID", p.OrderID, "amount", p.BalanceToDeduct, "error", err)
 			s.writeAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED", "admin", map[string]any{"gatewayError": psErrMsg(gErr), "rollbackError": psErrMsg(err), "balanceDeducted": p.BalanceToDeduct})
 			return false
+		}
+		if s.redeemService != nil {
+			s.redeemService.InvalidateBalanceCaches(ctx, p.Order.UserID)
 		}
 	}
 	if p.DeductionType == payment.DeductionTypeSubscription && p.SubDaysToDeduct > 0 && p.SubscriptionID > 0 {
