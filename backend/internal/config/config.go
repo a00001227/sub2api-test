@@ -88,11 +88,15 @@ type Config struct {
 	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
 	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
-	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
-	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
-	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
-	Update                  UpdateConfig                  `mapstructure:"update"`
-	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
+	// ProviderConnect：Provider Portal 内部接入面（Phase 21E-6C-2B-1）。
+	// internal_token 为空时该内部面 fail-closed（路由 401）。
+	// 环境变量：PROVIDER_CONNECT_INTERNAL_TOKEN。
+	ProviderConnect ProviderConnectConfig `mapstructure:"provider_connect"`
+	RunMode         string                `mapstructure:"run_mode" yaml:"run_mode"`
+	Timezone        string                `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	Gemini          GeminiConfig          `mapstructure:"gemini"`
+	Update          UpdateConfig          `mapstructure:"update"`
+	Idempotency     IdempotencyConfig     `mapstructure:"idempotency"`
 }
 
 type LogConfig struct {
@@ -529,6 +533,19 @@ type TokenRefreshConfig struct {
 	MaxRetries int `mapstructure:"max_retries"`
 	// 重试退避基础时间（秒）
 	RetryBackoffSeconds int `mapstructure:"retry_backoff_seconds"`
+}
+
+// ProviderConnectConfig Provider Portal 内部接入面配置（Phase 21E-6C-2B-1 / 2D-1）。
+type ProviderConnectConfig struct {
+	// InternalToken Portal 后端调用内部 API 的 Bearer token。
+	// 空 = 内部面关闭（fail-closed）。
+	InternalToken string `mapstructure:"internal_token"`
+	// WebhookURL Portal 事件回调地址；空 = 不发送 webhook（默认关闭）。
+	// 环境变量：PROVIDER_CONNECT_WEBHOOK_URL。
+	WebhookURL string `mapstructure:"webhook_url"`
+	// WebhookSecret webhook HMAC 密钥；空 = 不发送（fail-closed）。
+	// 环境变量：PROVIDER_CONNECT_WEBHOOK_SECRET。
+	WebhookSecret string `mapstructure:"webhook_secret"`
 }
 
 type PricingConfig struct {

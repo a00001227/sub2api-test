@@ -31,6 +31,8 @@ const (
 	FieldGroupID = "group_id"
 	// FieldParentKeyID holds the string denoting the parent_key_id field in the database.
 	FieldParentKeyID = "parent_key_id"
+	// FieldAllowedGroupIds holds the string denoting the allowed_group_ids field in the database.
+	FieldAllowedGroupIds = "allowed_group_ids"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
@@ -107,6 +109,7 @@ var Columns = []string{
 	FieldName,
 	FieldGroupID,
 	FieldParentKeyID,
+	FieldAllowedGroupIds,
 	FieldStatus,
 	FieldLastUsedAt,
 	FieldIPWhitelist,

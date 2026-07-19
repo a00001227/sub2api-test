@@ -552,6 +552,9 @@ export interface SystemSettings {
   // 分组隔离
   allow_ungrouped_key_scheduling: boolean;
 
+  // 客户密钥强制通道前缀
+  sub_key_channel_prefix_required: boolean;
+
   // Gateway forwarding behavior
   enable_fingerprint_unification: boolean;
   enable_metadata_passthrough: boolean;
@@ -797,6 +800,7 @@ export interface UpdateSettingsRequest {
   min_claude_code_version?: string;
   max_claude_code_version?: string;
   allow_ungrouped_key_scheduling?: boolean;
+  sub_key_channel_prefix_required?: boolean;
   enable_fingerprint_unification?: boolean;
   enable_metadata_passthrough?: boolean;
   enable_cch_signing?: boolean;

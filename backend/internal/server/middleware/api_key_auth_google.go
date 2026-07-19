@@ -58,6 +58,40 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			abortWithGoogleError(c, 401, "User account is not active")
 			return
 		}
+
+		// URI 前缀选组（语义同 api_key_auth.go 的 applyForcedGroupIfAny，
+		// 错误响应走 Google 协议格式）。google 路径没有专属组授权检查，
+		// 换组时需显式补上，防止未授权用户经前缀访问专属分组。
+		if fg, hasFG := GetForcedGroupFromContext(c); hasFG {
+			if apiKey.GroupID == nil || *apiKey.GroupID != fg.ID {
+				if apiKey.ParentKeyID != nil {
+					allowed := false
+					for _, id := range apiKey.AllowedGroupIDs {
+						if id == fg.ID {
+							allowed = true
+							break
+						}
+					}
+					if !allowed {
+						service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
+						abortWithGoogleError(c, 403, "This key is not allowed to use the requested channel")
+						return
+					}
+				}
+				apiKey.Group = fg
+				gid := fg.ID
+				apiKey.GroupID = &gid
+				if apiKey.User != nil {
+					apiKey.User.UserGroupRPMOverride = nil
+				}
+				if !validateAPIKeyGroupAllowed(apiKey) {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
+					abortWithGoogleError(c, 403, "Not allowed to use the requested channel")
+					return
+				}
+			}
+		}
+
 		if _, message, ok := validateAPIKeyGroupAvailable(apiKey); !ok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
 			abortWithGoogleError(c, 403, message)

@@ -1613,6 +1613,10 @@ func (stubGroupRepo) ExistsByName(ctx context.Context, name string) (bool, error
 	return false, errors.New("not implemented")
 }
 
+func (stubGroupRepo) ExistsBySlugExcluding(ctx context.Context, slug string, excludeID int64) (bool, error) {
+	return false, nil
+}
+
 func (stubGroupRepo) GetAccountCount(ctx context.Context, groupID int64) (int64, int64, error) {
 	return 0, 0, errors.New("not implemented")
 }
@@ -2160,6 +2164,17 @@ func (r *stubApiKeyRepo) UpdateSubKeyBudget(ctx context.Context, id int64, name 
 	key.Quota = quota
 	key.DisplayMultiplier = displayMultiplier
 	key.Status = status
+	key.UpdatedAt = r.now
+	return nil
+}
+
+func (r *stubApiKeyRepo) UpdateSubKeyChannels(ctx context.Context, id int64, groupID *int64, groupIDs []int64) error {
+	key, ok := r.byID[id]
+	if !ok {
+		return service.ErrAPIKeyNotFound
+	}
+	key.GroupID = groupID
+	key.AllowedGroupIDs = groupIDs
 	key.UpdatedAt = r.now
 	return nil
 }

@@ -121,6 +121,7 @@ func ProvideHandlers(
 	pricingDisplayHandler *PricingDisplayHandler,
 	feedbackHandler *FeedbackHandler,
 	accountAPIHandler *AccountAPIHandler,
+	providerConnectHandler *ProviderConnectHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -145,6 +146,7 @@ func ProvideHandlers(
 		PricingDisplay:   pricingDisplayHandler,
 		Feedback:         feedbackHandler,
 		AccountAPI:       accountAPIHandler,
+		ProviderConnect:  providerConnectHandler,
 	}
 }
 
@@ -169,6 +171,7 @@ var ProviderSet = wire.NewSet(
 	NewPublicPricingHandler,
 	NewPricingDisplayHandler,
 	NewFeedbackHandler,
+	NewProviderConnectHandler,
 	NewAccountAPIHandler,
 
 	// Admin handlers

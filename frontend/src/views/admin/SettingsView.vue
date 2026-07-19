@@ -3756,6 +3756,20 @@
                   <label
                     class="text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
+                    {{ t("admin.settings.scheduling.subKeyPrefixRequired") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.scheduling.subKeyPrefixRequiredHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.sub_key_channel_prefix_required" />
+              </div>
+
+              <div class="flex items-center justify-between">
+                <div>
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
                     {{ t("admin.settings.openaiExperimentalScheduler.title") }}
                   </label>
                   <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -7825,6 +7839,7 @@ const form = reactive<SettingsForm>({
   max_claude_code_version: "",
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
+  sub_key_channel_prefix_required: false,
   openai_advanced_scheduler_enabled: false,
   // Gateway forwarding behavior
   enable_fingerprint_unification: true,
@@ -8950,6 +8965,7 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
+      sub_key_channel_prefix_required: form.sub_key_channel_prefix_required,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,
       enable_cch_signing: form.enable_cch_signing,

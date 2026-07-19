@@ -38,6 +38,11 @@ func (Group) Fields() []ent.Field {
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
+		// URL slug：请求可通过 /{slug}/v1/... 前缀按分组路由。空 = 不开放 URL 选组。
+		// 唯一约束通过部分索引实现（159_add_group_slug_and_subkey_allowed_groups.sql）。
+		field.String("slug").
+			MaxLen(64).
+			Optional(),
 		field.String("description").
 			Optional().
 			Nillable().

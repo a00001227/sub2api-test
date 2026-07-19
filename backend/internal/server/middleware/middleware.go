@@ -106,12 +106,28 @@ func GoogleErrorWriter(c *gin.Context, status int, message string) {
 	})
 }
 
-// RequireGroupAssignment 检查 API Key 是否已分配到分组，
-// 如果未分组且系统设置不允许未分组 Key 调度则返回 403。
+// RequireGroupAssignment 检查 API Key 的分组约束：
+//  1. 客户密钥强制通道前缀（可选开关）：开启后客户密钥必须通过 /{slug}/... URL
+//     前缀显式选择通道，裸路径请求 403 —— 保证客户实际走的通道永远是 URL 上
+//     写明的那个，避免配错 Base URL 时静默落到主通道计费。
+//  2. 未分组 Key：若系统设置不允许未分组 Key 调度则 403。
 func RequireGroupAssignment(settingService *service.SettingService, writeError GatewayErrorWriter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey.GroupID != nil {
+		if !ok {
+			c.Next()
+			return
+		}
+		if apiKey.ParentKeyID != nil {
+			if _, forced := GetForcedGroupFromContext(c); !forced &&
+				settingService.IsSubKeyChannelPrefixRequired(c.Request.Context()) {
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
+				writeError(c, http.StatusForbidden, "This key must select a channel via URL prefix (e.g. https://host/{channel}/v1/...). Ask the key owner for your channel URL.")
+				c.Abort()
+				return
+			}
+		}
+		if apiKey.GroupID != nil {
 			c.Next()
 			return
 		}

@@ -114,5 +114,13 @@ func registerRoutes(
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, settingService)
 	routes.RegisterPublicRoutes(v1, h)
 
+	// Provider Portal 内部接入面（Phase 21E-6C-2B-1）：独立 secret 鉴权，
+	// 挂在 /internal 而非 /api/v1；token 为空时 fail-closed（中间件返回 401）。
+	routes.RegisterProviderInternalRoutes(
+		r,
+		h.ProviderConnect,
+		middleware2.NewProviderInternalAuth(cfg.ProviderConnect.InternalToken),
+	)
+
 	handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService)
 }

@@ -247,6 +247,26 @@ func (_u *ProxyUpdate) AddExpiryWarnDays(v int) *ProxyUpdate {
 	return _u
 }
 
+// SetRegion sets the "region" field.
+func (_u *ProxyUpdate) SetRegion(v string) *ProxyUpdate {
+	_u.mutation.SetRegion(v)
+	return _u
+}
+
+// SetNillableRegion sets the "region" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableRegion(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetRegion(*v)
+	}
+	return _u
+}
+
+// ClearRegion clears the value of the "region" field.
+func (_u *ProxyUpdate) ClearRegion() *ProxyUpdate {
+	_u.mutation.ClearRegion()
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -378,6 +398,11 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.Region(); ok {
+		if err := proxy.RegionValidator(v); err != nil {
+			return &ValidationError{Name: "region", err: fmt.Errorf(`ent: validator failed for field "Proxy.region": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -446,6 +471,12 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.Region(); ok {
+		_spec.SetField(proxy.FieldRegion, field.TypeString, value)
+	}
+	if _u.mutation.RegionCleared() {
+		_spec.ClearField(proxy.FieldRegion, field.TypeString)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -759,6 +790,26 @@ func (_u *ProxyUpdateOne) AddExpiryWarnDays(v int) *ProxyUpdateOne {
 	return _u
 }
 
+// SetRegion sets the "region" field.
+func (_u *ProxyUpdateOne) SetRegion(v string) *ProxyUpdateOne {
+	_u.mutation.SetRegion(v)
+	return _u
+}
+
+// SetNillableRegion sets the "region" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableRegion(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetRegion(*v)
+	}
+	return _u
+}
+
+// ClearRegion clears the value of the "region" field.
+func (_u *ProxyUpdateOne) ClearRegion() *ProxyUpdateOne {
+	_u.mutation.ClearRegion()
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -903,6 +954,11 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.Region(); ok {
+		if err := proxy.RegionValidator(v); err != nil {
+			return &ValidationError{Name: "region", err: fmt.Errorf(`ent: validator failed for field "Proxy.region": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -988,6 +1044,12 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.Region(); ok {
+		_spec.SetField(proxy.FieldRegion, field.TypeString, value)
+	}
+	if _u.mutation.RegionCleared() {
+		_spec.ClearField(proxy.FieldRegion, field.TypeString)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

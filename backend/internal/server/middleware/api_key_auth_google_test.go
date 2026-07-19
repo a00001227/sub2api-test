@@ -110,6 +110,24 @@ func (f fakeAPIKeyRepo) GetRateLimitData(ctx context.Context, id int64) (*servic
 func (f fakeAPIKeyRepo) UpdateGroupIDByUserAndGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (int64, error) {
 	return 0, errors.New("not implemented")
 }
+func (f fakeAPIKeyRepo) RotateKey(ctx context.Context, id int64, newKey string) error {
+	return errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) UpdateSubKeyBudget(ctx context.Context, id int64, name string, quota, displayMultiplier float64, status string) error {
+	return errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) UpdateSubKeyChannels(ctx context.Context, id int64, groupID *int64, groupIDs []int64) error {
+	return errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) ListSubKeysByUserID(ctx context.Context, userID int64, page, limit int) ([]service.APIKey, int64, error) {
+	return nil, 0, errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) SumSubKeyRemainingQuotaByUserID(ctx context.Context, userID int64) (float64, error) {
+	return 0, errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) GetSubKeyByIDForUser(ctx context.Context, userID, subKeyID int64) (*service.APIKey, error) {
+	return nil, errors.New("not implemented")
+}
 
 func (f fakeGoogleSubscriptionRepo) Create(ctx context.Context, sub *service.UserSubscription) error {
 	return errors.New("not implemented")

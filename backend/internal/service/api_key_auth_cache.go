@@ -4,17 +4,19 @@ import "time"
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
-	Version     int                      `json:"version"`
-	APIKeyID    int64                    `json:"api_key_id"`
-	UserID      int64                    `json:"user_id"`
-	GroupID     *int64                   `json:"group_id,omitempty"`
-	ParentKeyID *int64                   `json:"parent_key_id,omitempty"` // nil = account key; non-nil = sub key
-	Name        string                   `json:"name"`
-	Status      string                   `json:"status"`
-	IPWhitelist []string                 `json:"ip_whitelist,omitempty"`
-	IPBlacklist []string                 `json:"ip_blacklist,omitempty"`
-	User        APIKeyAuthUserSnapshot   `json:"user"`
-	Group       *APIKeyAuthGroupSnapshot `json:"group,omitempty"`
+	Version     int    `json:"version"`
+	APIKeyID    int64  `json:"api_key_id"`
+	UserID      int64  `json:"user_id"`
+	GroupID     *int64 `json:"group_id,omitempty"`
+	ParentKeyID *int64 `json:"parent_key_id,omitempty"` // nil = account key; non-nil = sub key
+	// AllowedGroupIDs 客户密钥的通道白名单（URI 前缀选组时校验）
+	AllowedGroupIDs []int64                  `json:"allowed_group_ids,omitempty"`
+	Name            string                   `json:"name"`
+	Status          string                   `json:"status"`
+	IPWhitelist     []string                 `json:"ip_whitelist,omitempty"`
+	IPBlacklist     []string                 `json:"ip_blacklist,omitempty"`
+	User            APIKeyAuthUserSnapshot   `json:"user"`
+	Group           *APIKeyAuthGroupSnapshot `json:"group,omitempty"`
 
 	// Quota fields for API Key independent quota feature
 	Quota     float64 `json:"quota"`      // Quota limit in USD (0 = unlimited)

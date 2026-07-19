@@ -196,6 +196,7 @@ type AdminBoundAuthIdentityChannel struct {
 
 type CreateGroupInput struct {
 	Name             string
+	Slug             string // URL slug（可选；空 = 不开放 URL 选组）
 	Description      string
 	Platform         string
 	RateMultiplier   float64
@@ -236,6 +237,7 @@ type CreateGroupInput struct {
 
 type UpdateGroupInput struct {
 	Name             string
+	Slug             *string // nil = 不变；空串 = 清除
 	Description      *string
 	Platform         string
 	RateMultiplier   *float64 // 使用指针以支持设置为0
@@ -1794,6 +1796,20 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		return nil, errors.New("rate_multiplier must be > 0")
 	}
 
+	slug := strings.ToLower(strings.TrimSpace(input.Slug))
+	if err := ValidateGroupSlug(slug); err != nil {
+		return nil, err
+	}
+	if slug != "" {
+		taken, err := s.groupRepo.ExistsBySlugExcluding(ctx, slug, 0)
+		if err != nil {
+			return nil, err
+		}
+		if taken {
+			return nil, ErrGroupSlugExists
+		}
+	}
+
 	platform := input.Platform
 	if platform == "" {
 		platform = PlatformAnthropic
@@ -1878,6 +1894,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 
 	group := &Group{
 		Name:                            input.Name,
+		Slug:                            slug,
 		Description:                     input.Description,
 		Platform:                        platform,
 		RateMultiplier:                  input.RateMultiplier,
@@ -1909,8 +1926,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	if err := s.groupRepo.Create(ctx, group); err != nil {
-		return nil, err
+		return nil, mapGroupSlugConstraintErr(err)
 	}
+	s.invalidateGroupSlugCache()
 
 	// require_oauth_only: 过滤掉 apikey 类型账号
 	if group.RequireOAuthOnly && (group.Platform == PlatformOpenAI || group.Platform == PlatformAntigravity || group.Platform == PlatformAnthropic || group.Platform == PlatformGemini) && len(accountIDsToCopy) > 0 {
@@ -1950,6 +1968,22 @@ func normalizeLimit(limit *float64) *float64 {
 		return nil
 	}
 	return limit
+}
+
+// invalidateGroupSlugCache 分组增删改后立即失效 slug 路由缓存，
+// 使 URL 前缀路由即时生效（否则最长等待一个 TTL 周期）。
+func (s *adminServiceImpl) invalidateGroupSlugCache() {
+	invalidateActiveGroupSlugResolver()
+}
+
+// mapGroupSlugConstraintErr 将 slug 唯一索引冲突映射为业务错误：并发创建/
+// 更新竞态可能穿过 ExistsBySlugExcluding 预检，最终被数据库部分唯一索引
+// 拦下，此时应返回 GROUP_SLUG_EXISTS 而非裸数据库错误。
+func mapGroupSlugConstraintErr(err error) error {
+	if err != nil && strings.Contains(err.Error(), "idx_groups_slug_unique") {
+		return ErrGroupSlugExists
+	}
+	return err
 }
 
 // normalizePrice 将负数转换为 nil（表示使用默认价格），0 保留（表示免费）
@@ -2037,6 +2071,22 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 
 	if input.Name != "" {
 		group.Name = input.Name
+	}
+	if input.Slug != nil {
+		slug := strings.ToLower(strings.TrimSpace(*input.Slug))
+		if err := ValidateGroupSlug(slug); err != nil {
+			return nil, err
+		}
+		if slug != "" && slug != group.Slug {
+			taken, err := s.groupRepo.ExistsBySlugExcluding(ctx, slug, id)
+			if err != nil {
+				return nil, err
+			}
+			if taken {
+				return nil, ErrGroupSlugExists
+			}
+		}
+		group.Slug = slug
 	}
 	if input.Description != nil {
 		group.Description = *input.Description
@@ -2161,8 +2211,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	sanitizeGroupMessagesDispatchFields(group)
 
 	if err := s.groupRepo.Update(ctx, group); err != nil {
-		return nil, err
+		return nil, mapGroupSlugConstraintErr(err)
 	}
+	s.invalidateGroupSlugCache()
 
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
@@ -2252,6 +2303,7 @@ func (s *adminServiceImpl) DeleteGroup(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
+	s.invalidateGroupSlugCache()
 	// 注意：user_group_rate_multipliers 表通过外键 ON DELETE CASCADE 自动清理
 
 	// 事务成功后，异步失效受影响用户的订阅缓存

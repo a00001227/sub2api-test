@@ -63,6 +63,8 @@ type Handlers struct {
 	PricingDisplay   *PricingDisplayHandler
 	Feedback         *FeedbackHandler
 	AccountAPI       *AccountAPIHandler
+	// ProviderConnect Provider Portal 内部接入面（Phase 21E-6C-2B-1）。
+	ProviderConnect  *ProviderConnectHandler
 }
 
 // BuildInfo contains build-time information

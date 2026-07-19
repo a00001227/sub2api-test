@@ -13,6 +13,7 @@ type GroupModelsListConfig = domain.GroupModelsListConfig
 type Group struct {
 	ID             int64
 	Name           string
+	Slug           string // URL slug（/{slug}/v1/... 前缀选组）；空 = 不开放
 	Description    string
 	Platform       string
 	RateMultiplier float64

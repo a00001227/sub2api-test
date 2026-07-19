@@ -371,6 +371,16 @@
           />
         </div>
         <div>
+          <label class="input-label">{{ t("admin.groups.form.slug") }}</label>
+          <input
+            v-model="createForm.slug"
+            type="text"
+            class="input"
+            :placeholder="t('admin.groups.form.slugPlaceholder')"
+          />
+          <p class="input-hint">{{ t("admin.groups.form.slugHint") }}</p>
+        </div>
+        <div>
           <label class="input-label">{{
             t("admin.groups.form.description")
           }}</label>
@@ -1655,6 +1665,16 @@
             class="input"
             data-tour="edit-group-form-name"
           />
+        </div>
+        <div>
+          <label class="input-label">{{ t("admin.groups.form.slug") }}</label>
+          <input
+            v-model="editForm.slug"
+            type="text"
+            class="input"
+            :placeholder="t('admin.groups.form.slugPlaceholder')"
+          />
+          <p class="input-hint">{{ t("admin.groups.form.slugHint") }}</p>
         </div>
         <div>
           <label class="input-label">{{
@@ -3325,6 +3345,7 @@ const editModelsListSelectedCount = computed(
 
 const createForm = reactive({
   name: "",
+  slug: "",
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
@@ -3655,6 +3676,7 @@ const convertApiFormatToRoutingRules = async (
 
 const editForm = reactive({
   name: "",
+  slug: "",
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
@@ -3908,6 +3930,7 @@ const closeCreateModal = () => {
   });
   clearAllAccountSearchState();
   createForm.name = "";
+  createForm.slug = "";
   createForm.description = "";
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
@@ -4033,6 +4056,7 @@ const handleCreateGroup = async () => {
 const handleEdit = async (group: AdminGroup) => {
   editingGroup.value = group;
   editForm.name = group.name;
+  editForm.slug = group.slug || "";
   editForm.description = group.description || "";
   editForm.platform = group.platform;
   editForm.rate_multiplier = group.rate_multiplier;

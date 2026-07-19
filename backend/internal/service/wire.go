@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -10,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service/providerwebhook"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
 )
@@ -243,6 +245,21 @@ func ProvideSchedulerSnapshotService(
 	svc := NewSchedulerSnapshotService(cache, outboxRepo, accountRepo, groupRepo, cfg)
 	svc.Start()
 	return svc
+}
+
+// ProvideProviderUsageOutboxWorker (Phase 21E-6D-6B-2) constructs and starts
+// the usage-outbox delivery worker with its own Sender built from the same
+// ProviderConnect webhook config. Start() is a no-op when the webhook is
+// unconfigured (URL/secret empty) — rows accumulate but nothing is delivered,
+// never an error. Stop() is registered in the cleanup list.
+func ProvideProviderUsageOutboxWorker(cfg *config.Config, db *sql.DB) *ProviderUsageOutboxWorker {
+	sender := providerwebhook.NewSender(providerwebhook.Config{
+		URL:    cfg.ProviderConnect.WebhookURL,
+		Secret: cfg.ProviderConnect.WebhookSecret,
+	}, slog.Default())
+	worker := NewProviderUsageOutboxWorker(db, sender)
+	worker.Start()
+	return worker
 }
 
 // ProvideRateLimitService creates RateLimitService with optional dependencies.
@@ -535,6 +552,12 @@ var ProviderSet = wire.NewSet(
 	NewOpenAIGatewayService,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
 	NewOAuthService,
+	NewProxyAllocator,
+	NewProviderConnectService,
+	NewProviderConnectCompletionService,
+	NewProviderConnectImportService,
+	NewProviderAccountMetricsService,
+	ProvideProviderWebhookNotifier,
 	ProvideOpenAIOAuthService,
 	NewGeminiOAuthService,
 	NewGeminiQuotaService,

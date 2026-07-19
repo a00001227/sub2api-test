@@ -39,6 +39,7 @@ func newGroupRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *groupRep
 func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) error {
 	builder := r.client.Group.Create().
 		SetName(groupIn.Name).
+		SetSlug(groupIn.Slug).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
@@ -118,6 +119,7 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
 	builder := r.client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
+		SetSlug(groupIn.Slug).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
@@ -490,6 +492,15 @@ func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform str
 
 func (r *groupRepository) ExistsByName(ctx context.Context, name string) (bool, error) {
 	return r.client.Group.Query().Where(group.NameEQ(name)).Exist(ctx)
+}
+
+// ExistsBySlugExcluding 检查 slug 是否已被其他分组占用（excludeID 用于更新时排除自身，传 0 表示不排除）。
+func (r *groupRepository) ExistsBySlugExcluding(ctx context.Context, slug string, excludeID int64) (bool, error) {
+	q := r.client.Group.Query().Where(group.SlugEQ(slug))
+	if excludeID > 0 {
+		q = q.Where(group.IDNEQ(excludeID))
+	}
+	return q.Exist(ctx)
 }
 
 // ExistsByIDs 批量检查分组是否存在（仅检查未软删除记录）。

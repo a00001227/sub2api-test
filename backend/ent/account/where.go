@@ -145,6 +145,11 @@ func AutoPauseOnExpired(v bool) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldAutoPauseOnExpired, v))
 }
 
+// ExternalProviderAccountID applies equality check predicate on the "external_provider_account_id" field. It's identical to ExternalProviderAccountIDEQ.
+func ExternalProviderAccountID(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldExternalProviderAccountID, v))
+}
+
 // Schedulable applies equality check predicate on the "schedulable" field. It's identical to SchedulableEQ.
 func Schedulable(v bool) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldSchedulable, v))
@@ -1088,6 +1093,81 @@ func AutoPauseOnExpiredEQ(v bool) predicate.Account {
 // AutoPauseOnExpiredNEQ applies the NEQ predicate on the "auto_pause_on_expired" field.
 func AutoPauseOnExpiredNEQ(v bool) predicate.Account {
 	return predicate.Account(sql.FieldNEQ(FieldAutoPauseOnExpired, v))
+}
+
+// ExternalProviderAccountIDEQ applies the EQ predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDNEQ applies the NEQ predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDIn applies the In predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldExternalProviderAccountID, vs...))
+}
+
+// ExternalProviderAccountIDNotIn applies the NotIn predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldExternalProviderAccountID, vs...))
+}
+
+// ExternalProviderAccountIDGT applies the GT predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDGTE applies the GTE predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDLT applies the LT predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDLTE applies the LTE predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDContains applies the Contains predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDHasPrefix applies the HasPrefix predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDHasSuffix applies the HasSuffix predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDIsNil applies the IsNil predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldExternalProviderAccountID))
+}
+
+// ExternalProviderAccountIDNotNil applies the NotNil predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldExternalProviderAccountID))
+}
+
+// ExternalProviderAccountIDEqualFold applies the EqualFold predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldExternalProviderAccountID, v))
+}
+
+// ExternalProviderAccountIDContainsFold applies the ContainsFold predicate on the "external_provider_account_id" field.
+func ExternalProviderAccountIDContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldExternalProviderAccountID, v))
 }
 
 // SchedulableEQ applies the EQ predicate on the "schedulable" field.

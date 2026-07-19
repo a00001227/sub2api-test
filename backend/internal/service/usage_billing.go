@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
@@ -39,6 +40,13 @@ type UsageBillingCommand struct {
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
+
+	// Provider Usage Outbox facts (Phase 21E-6D-6B-2). Snapshot carried into
+	// the billing transaction so a usage.billable.completed event can be
+	// enqueued atomically with the charge. Not used by billing math.
+	BillingMode     string // "token" | "image" | "per_request" (usageLog.BillingMode)
+	ImageSizeTier   string // e.g. "1K"/"2K"/"4K" (usageLog.ImageSize)
+	UsageOccurredAt time.Time
 }
 
 func (c *UsageBillingCommand) Normalize() {

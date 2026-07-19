@@ -187,6 +187,20 @@ func (_c *ProxyCreate) SetNillableExpiryWarnDays(v *int) *ProxyCreate {
 	return _c
 }
 
+// SetRegion sets the "region" field.
+func (_c *ProxyCreate) SetRegion(v string) *ProxyCreate {
+	_c.mutation.SetRegion(v)
+	return _c
+}
+
+// SetNillableRegion sets the "region" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableRegion(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetRegion(*v)
+	}
+	return _c
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -337,6 +351,11 @@ func (_c *ProxyCreate) check() error {
 	if _, ok := _c.mutation.ExpiryWarnDays(); !ok {
 		return &ValidationError{Name: "expiry_warn_days", err: errors.New(`ent: missing required field "Proxy.expiry_warn_days"`)}
 	}
+	if v, ok := _c.mutation.Region(); ok {
+		if err := proxy.RegionValidator(v); err != nil {
+			return &ValidationError{Name: "region", err: fmt.Errorf(`ent: validator failed for field "Proxy.region": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -415,6 +434,10 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiryWarnDays(); ok {
 		_spec.SetField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 		_node.ExpiryWarnDays = value
+	}
+	if value, ok := _c.mutation.Region(); ok {
+		_spec.SetField(proxy.FieldRegion, field.TypeString, value)
+		_node.Region = &value
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -699,6 +722,24 @@ func (u *ProxyUpsert) AddExpiryWarnDays(v int) *ProxyUpsert {
 	return u
 }
 
+// SetRegion sets the "region" field.
+func (u *ProxyUpsert) SetRegion(v string) *ProxyUpsert {
+	u.Set(proxy.FieldRegion, v)
+	return u
+}
+
+// UpdateRegion sets the "region" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateRegion() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldRegion)
+	return u
+}
+
+// ClearRegion clears the value of the "region" field.
+func (u *ProxyUpsert) ClearRegion() *ProxyUpsert {
+	u.SetNull(proxy.FieldRegion)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -972,6 +1013,27 @@ func (u *ProxyUpsertOne) AddExpiryWarnDays(v int) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateExpiryWarnDays() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetRegion sets the "region" field.
+func (u *ProxyUpsertOne) SetRegion(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRegion(v)
+	})
+}
+
+// UpdateRegion sets the "region" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateRegion() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRegion()
+	})
+}
+
+// ClearRegion clears the value of the "region" field.
+func (u *ProxyUpsertOne) ClearRegion() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearRegion()
 	})
 }
 
@@ -1414,6 +1476,27 @@ func (u *ProxyUpsertBulk) AddExpiryWarnDays(v int) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateExpiryWarnDays() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetRegion sets the "region" field.
+func (u *ProxyUpsertBulk) SetRegion(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRegion(v)
+	})
+}
+
+// UpdateRegion sets the "region" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateRegion() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRegion()
+	})
+}
+
+// ClearRegion clears the value of the "region" field.
+func (u *ProxyUpsertBulk) ClearRegion() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearRegion()
 	})
 }
 

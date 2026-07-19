@@ -72,6 +72,8 @@ type APIKeyRepository interface {
 	// UpdateSubKeyBudget 定向更新 sub key 的 label/quota/multiplier/status，
 	// 不触碰 quota_used（由计费路径原子累加）。带 quota_used <= quota 原子守卫。
 	UpdateSubKeyBudget(ctx context.Context, id int64, name string, quota, displayMultiplier float64, status string) error
+	// UpdateSubKeyChannels 定向替换 sub key 的通道集合（主通道 + 白名单）。
+	UpdateSubKeyChannels(ctx context.Context, id int64, groupID *int64, groupIDs []int64) error
 	Delete(ctx context.Context, id int64) error
 	// DeleteWithAudit 在同一事务内先写 deleted_api_key_audits 审计、再软删除该 key。
 	DeleteWithAudit(ctx context.Context, id int64) error
@@ -968,10 +970,70 @@ func (s *APIKeyService) GetLockedBalance(ctx context.Context, userID int64) (flo
 	return s.apiKeyRepo.SumSubKeyRemainingQuotaByUserID(ctx, userID)
 }
 
+// CreateSubKeyOptions 客户密钥创建的通道配置（均可选）。
+type CreateSubKeyOptions struct {
+	// GroupID 客户密钥的主通道；nil = 继承账号密钥的绑定分组。
+	GroupID *int64
+	// AllowedGroupIDs 额外允许通过 URI 前缀选择的通道白名单（不含主通道）。
+	AllowedGroupIDs []int64
+}
+
+// maxSubKeyAllowedGroups 白名单上限，防御性限制。
+const maxSubKeyAllowedGroups = 32
+
+// resolveSubKeyGroups 校验并规范化客户密钥的主通道与白名单。
+// 每个分组都要求：存在、启用、且账号主有权绑定（专属组/订阅组按既有规则）。
+func (s *APIKeyService) resolveSubKeyGroups(ctx context.Context, user *User, defaultGroupID *int64, opts CreateSubKeyOptions) (*int64, []int64, error) {
+	mainGroupID := defaultGroupID
+	if opts.GroupID != nil {
+		mainGroupID = opts.GroupID
+	}
+	validate := func(groupID int64) error {
+		group, err := s.groupRepo.GetByID(ctx, groupID)
+		if err != nil {
+			return fmt.Errorf("get group %d: %w", groupID, err)
+		}
+		if !group.IsActive() {
+			return ErrGroupNotAllowed
+		}
+		if !s.canUserBindGroup(ctx, user, group) {
+			return ErrGroupNotAllowed
+		}
+		return nil
+	}
+	if opts.GroupID != nil {
+		if err := validate(*opts.GroupID); err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(opts.AllowedGroupIDs) > maxSubKeyAllowedGroups {
+		return nil, nil, ErrGroupNotAllowed
+	}
+	seen := make(map[int64]struct{}, len(opts.AllowedGroupIDs))
+	allowed := make([]int64, 0, len(opts.AllowedGroupIDs))
+	for _, id := range opts.AllowedGroupIDs {
+		if id <= 0 {
+			return nil, nil, ErrGroupNotAllowed
+		}
+		if mainGroupID != nil && id == *mainGroupID {
+			continue // 主通道隐式允许，白名单去重
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if err := validate(id); err != nil {
+			return nil, nil, err
+		}
+		seen[id] = struct{}{}
+		allowed = append(allowed, id)
+	}
+	return mainGroupID, allowed, nil
+}
+
 // CreateSubKey creates a sub key under an account key.
 // budgetVirtual is the customer-facing budget; paidAmount is the real amount
 // locked from the account balance (quota). displayMultiplier = budgetVirtual/paidAmount.
-func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, label string, budgetVirtual, paidAmount float64) (*APIKey, error) {
+func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, label string, budgetVirtual, paidAmount float64, opts CreateSubKeyOptions) (*APIKey, error) {
 	if accountKey.ParentKeyID != nil {
 		return nil, ErrAccountKeyRequired
 	}
@@ -1006,6 +1068,12 @@ func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, la
 		return nil, err
 	}
 
+	// 通道解析：主通道（默认继承账号密钥分组）+ 额外白名单，全部校验权限
+	mainGroupID, allowedGroupIDs, err := s.resolveSubKeyGroups(ctx, user, accountKey.GroupID, opts)
+	if err != nil {
+		return nil, err
+	}
+
 	locked, err := s.GetLockedBalance(ctx, accountKey.UserID)
 	if err != nil {
 		return nil, err
@@ -1025,11 +1093,12 @@ func (s *APIKeyService) CreateSubKey(ctx context.Context, accountKey *APIKey, la
 		UserID:            accountKey.UserID,
 		Key:               key,
 		Name:              html.EscapeString(label),
-		GroupID:           accountKey.GroupID,
+		GroupID:           mainGroupID,
 		ParentKeyID:       &accountKey.ID,
 		Status:            StatusAPIKeyActive,
 		Quota:             paidAmount,
 		DisplayMultiplier: displayMultiplier,
+		AllowedGroupIDs:   allowedGroupIDs,
 	}
 	if err := s.apiKeyRepo.Create(ctx, subKey); err != nil {
 		return nil, fmt.Errorf("create sub key: %w", err)
@@ -1054,6 +1123,10 @@ type UpdateSubKeyRequest struct {
 	BudgetVirtual *float64 // new customer-facing budget
 	PaidAmount    *float64 // new real locked amount (quota)
 	Status        *string  // "active" or "disabled"
+	// GroupID 主通道变更（nil = 不变）
+	GroupID *int64
+	// AllowedGroupIDs 通道白名单整体替换（nil = 不变；空切片 = 清空，锁回主通道）
+	AllowedGroupIDs *[]int64
 }
 
 // EffectiveDisplayMultiplier returns the key's display multiplier, treating
@@ -1195,6 +1268,42 @@ func (s *APIKeyService) UpdateSubKey(ctx context.Context, accountKey *APIKey, su
 		}
 	}
 
+	// 通道集合变更（主通道 + 白名单，任一提供即整体重解析）。校验必须先于
+	// 任何写入：预算写入后再因通道无效而报错，会留下"提示失败但预算已变"
+	// 的部分更新。白名单未提供时沿用现有值重新校验：换主通道后隐式允许项
+	// 会被去重，且所有通道都按当前权限重新验证。
+	channelsResolved := false
+	var newMainGroupID *int64
+	var newAllowed []int64
+	if req.GroupID != nil || req.AllowedGroupIDs != nil {
+		user, err := s.userRepo.GetByID(ctx, accountKey.UserID)
+		if err != nil {
+			return nil, err
+		}
+		allowedIn := subKey.AllowedGroupIDs
+		if req.AllowedGroupIDs != nil {
+			allowedIn = *req.AllowedGroupIDs
+		}
+		newMainGroupID, newAllowed, err = s.resolveSubKeyGroups(ctx, user, subKey.GroupID, CreateSubKeyOptions{
+			GroupID:         req.GroupID,
+			AllowedGroupIDs: allowedIn,
+		})
+		if err != nil {
+			return nil, err
+		}
+		channelsResolved = true
+	}
+
+	// 任何一步写入发生后，无论后续成败都必须让 auth 快照与锁定余额缓存失效，
+	// 否则部分写入会被旧缓存掩盖（配额检查用旧 quota、可用余额显示旧值）。
+	wrote := false
+	defer func() {
+		if wrote {
+			s.InvalidateAuthCacheByKey(ctx, subKey.Key)
+			s.invalidateLockedBalance(accountKey.UserID)
+		}
+	}()
+
 	// Targeted write: quota_used and usage counters are owned by the billing
 	// path — a full-row Update would overwrite concurrent consumption with the
 	// stale snapshot read above. The repo re-checks quota_used <= quota
@@ -1205,8 +1314,16 @@ func (s *APIKeyService) UpdateSubKey(ctx context.Context, accountKey *APIKey, su
 		}
 		return nil, err
 	}
-	s.InvalidateAuthCacheByKey(ctx, subKey.Key)
-	s.invalidateLockedBalance(accountKey.UserID)
+	wrote = true
+
+	if channelsResolved {
+		if err := s.apiKeyRepo.UpdateSubKeyChannels(ctx, subKey.ID, newMainGroupID, newAllowed); err != nil {
+			if errors.Is(err, ErrAPIKeyNotFound) {
+				return nil, ErrSubKeyNotFound
+			}
+			return nil, err
+		}
+	}
 
 	// Re-read so the response reflects the true post-update state (including
 	// any quota_used growth during this call).

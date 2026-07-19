@@ -55,6 +55,16 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return nil, err
 	}
 
+	// Provider Usage Outbox (Phase 21E-6D-6B-2): enqueue the billable usage
+	// event in the SAME transaction as the charge, AFTER the dedup claim
+	// succeeded. "user charged" and "provider earning event queued" commit
+	// atomically — charge rolled back ⇒ no event; charge committed ⇒ event
+	// guaranteed. Only accounts linked to a Portal provider produce a row;
+	// enqueue failure aborts the whole charge (safe: idempotent on retry).
+	if err := r.enqueueProviderUsageOutbox(ctx, tx, cmd); err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

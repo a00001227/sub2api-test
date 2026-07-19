@@ -59,4 +59,8 @@ const (
 
 	// ClaudeCodeVersion stores the extracted Claude Code version from User-Agent (e.g. "2.1.22")
 	ClaudeCodeVersion Key = "ctx_claude_code_version"
+
+	// ForcedGroup 通过 URI 前缀（/{slug}/v1/...）选定的分组，由前缀重写中间件设置。
+	// API Key 认证中间件读取后将 apiKey.Group/GroupID 替换为该分组。
+	ForcedGroup Key = "ctx_forced_group"
 )

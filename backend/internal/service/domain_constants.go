@@ -413,6 +413,10 @@ const (
 	// SettingKeyAllowUngroupedKeyScheduling 允许未分组 API Key 调度（默认 false：未分组 Key 返回 403）
 	SettingKeyAllowUngroupedKeyScheduling = "allow_ungrouped_key_scheduling"
 
+	// SettingKeySubKeyChannelPrefixRequired 客户密钥强制通道前缀（默认 false）：
+	// 开启后客户密钥必须通过 /{slug}/... URL 前缀显式选择通道，裸路径请求返回 403
+	SettingKeySubKeyChannelPrefixRequired = "sub_key_channel_prefix_required"
+
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
 

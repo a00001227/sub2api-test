@@ -174,6 +174,9 @@ type SystemSettings struct {
 	// 分组隔离
 	AllowUngroupedKeyScheduling bool `json:"allow_ungrouped_key_scheduling"`
 
+	// 客户密钥强制通道前缀
+	SubKeyChannelPrefixRequired bool `json:"sub_key_channel_prefix_required"`
+
 	// Backend Mode
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 

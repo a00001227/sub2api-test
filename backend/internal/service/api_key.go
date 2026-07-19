@@ -56,6 +56,10 @@ type APIKey struct {
 	// 1 for account keys and legacy sub keys.
 	DisplayMultiplier float64
 
+	// AllowedGroupIDs 客户密钥的通道白名单：除绑定分组外，允许通过 URI 前缀
+	// 选择的额外分组。空 = 锁定在绑定分组。账号密钥不使用此字段。
+	AllowedGroupIDs []int64
+
 	// Rate limit fields
 	RateLimit5h   float64    // Rate limit in USD per 5h (0 = unlimited)
 	RateLimit1d   float64    // Rate limit in USD per 1d (0 = unlimited)

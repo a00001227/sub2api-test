@@ -125,6 +125,11 @@ func ExpiryWarnDays(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiryWarnDays, v))
 }
 
+// Region applies equality check predicate on the "region" field. It's identical to RegionEQ.
+func Region(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRegion, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldCreatedAt, v))
@@ -888,6 +893,81 @@ func ExpiryWarnDaysLT(v int) predicate.Proxy {
 // ExpiryWarnDaysLTE applies the LTE predicate on the "expiry_warn_days" field.
 func ExpiryWarnDaysLTE(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldLTE(FieldExpiryWarnDays, v))
+}
+
+// RegionEQ applies the EQ predicate on the "region" field.
+func RegionEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRegion, v))
+}
+
+// RegionNEQ applies the NEQ predicate on the "region" field.
+func RegionNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldRegion, v))
+}
+
+// RegionIn applies the In predicate on the "region" field.
+func RegionIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldRegion, vs...))
+}
+
+// RegionNotIn applies the NotIn predicate on the "region" field.
+func RegionNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldRegion, vs...))
+}
+
+// RegionGT applies the GT predicate on the "region" field.
+func RegionGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldRegion, v))
+}
+
+// RegionGTE applies the GTE predicate on the "region" field.
+func RegionGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldRegion, v))
+}
+
+// RegionLT applies the LT predicate on the "region" field.
+func RegionLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldRegion, v))
+}
+
+// RegionLTE applies the LTE predicate on the "region" field.
+func RegionLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldRegion, v))
+}
+
+// RegionContains applies the Contains predicate on the "region" field.
+func RegionContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldRegion, v))
+}
+
+// RegionHasPrefix applies the HasPrefix predicate on the "region" field.
+func RegionHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldRegion, v))
+}
+
+// RegionHasSuffix applies the HasSuffix predicate on the "region" field.
+func RegionHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldRegion, v))
+}
+
+// RegionIsNil applies the IsNil predicate on the "region" field.
+func RegionIsNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldIsNull(FieldRegion))
+}
+
+// RegionNotNil applies the NotNil predicate on the "region" field.
+func RegionNotNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotNull(FieldRegion))
+}
+
+// RegionEqualFold applies the EqualFold predicate on the "region" field.
+func RegionEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldRegion, v))
+}
+
+// RegionContainsFold applies the ContainsFold predicate on the "region" field.
+func RegionContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldRegion, v))
 }
 
 // HasAccounts applies the HasEdge predicate on the "accounts" edge.

@@ -40,6 +40,9 @@ func (groupRepoNoop) ListActiveByPlatform(context.Context, string) ([]Group, err
 func (groupRepoNoop) ExistsByName(context.Context, string) (bool, error) {
 	panic("unexpected ExistsByName call")
 }
+func (groupRepoNoop) ExistsBySlugExcluding(context.Context, string, int64) (bool, error) {
+	return false, nil
+}
 func (groupRepoNoop) GetAccountCount(context.Context, int64) (int64, int64, error) {
 	panic("unexpected GetAccountCount call")
 }

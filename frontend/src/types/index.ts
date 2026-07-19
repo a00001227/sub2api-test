@@ -320,6 +320,20 @@ export interface Announcement {
   updated_at: string
 }
 
+export interface Feedback {
+  id: number
+  user_id: number
+  type: string
+  content: string
+  request_id?: string
+  status: 'pending' | 'resolved'
+  admin_reply?: string
+  replied_at?: string
+  created_at: string
+  updated_at: string
+  user_email?: string
+}
+
 export interface UserAnnouncement {
   id: number
   title: string
@@ -501,6 +515,7 @@ export interface OpenAIMessagesDispatchModelConfig {
 export interface Group {
   id: number
   name: string
+  slug?: string // URL 通道标识（如 /{slug}/v1/messages），空 = 未启用
   description: string | null
   platform: GroupPlatform
   rate_multiplier: number
@@ -622,6 +637,7 @@ export interface UpdateApiKeyRequest {
 
 export interface CreateGroupRequest {
   name: string
+  slug?: string
   description?: string | null
   platform?: GroupPlatform
   rate_multiplier?: number
@@ -656,6 +672,7 @@ export interface CreateGroupRequest {
 
 export interface UpdateGroupRequest {
   name?: string
+  slug?: string
   description?: string | null
   platform?: GroupPlatform
   rate_multiplier?: number

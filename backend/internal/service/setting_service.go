@@ -101,6 +101,15 @@ const backendModeCacheTTL = 60 * time.Second
 const backendModeErrorTTL = 5 * time.Second
 const backendModeDBTimeout = 5 * time.Second
 
+// cachedSubKeyPrefixRequired 客户密钥强制通道前缀开关缓存（进程内，60s TTL）
+type cachedSubKeyPrefixRequired struct {
+	required  bool
+	expiresAt int64 // unix nano
+}
+
+var subKeyPrefixRequiredCache atomic.Value // *cachedSubKeyPrefixRequired
+var subKeyPrefixRequiredSF singleflight.Group
+
 // cachedGatewayForwardingSettings 缓存网关转发行为设置（进程内缓存，60s TTL）
 type cachedGatewayForwardingSettings struct {
 	fingerprintUnification           bool
@@ -1981,6 +1990,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// 分组隔离
 	updates[SettingKeyAllowUngroupedKeyScheduling] = strconv.FormatBool(settings.AllowUngroupedKeyScheduling)
+	updates[SettingKeySubKeyChannelPrefixRequired] = strconv.FormatBool(settings.SubKeyChannelPrefixRequired)
 
 	// Backend Mode
 	updates[SettingKeyBackendModeEnabled] = strconv.FormatBool(settings.BackendModeEnabled)
@@ -2118,6 +2128,11 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	backendModeCache.Store(&cachedBackendMode{
 		value:     settings.BackendModeEnabled,
 		expiresAt: time.Now().Add(backendModeCacheTTL).UnixNano(),
+	})
+	subKeyPrefixRequiredSF.Forget("sub_key_prefix_required")
+	subKeyPrefixRequiredCache.Store(&cachedSubKeyPrefixRequired{
+		required:  settings.SubKeyChannelPrefixRequired,
+		expiresAt: time.Now().Add(60 * time.Second).UnixNano(),
 	})
 	gatewayForwardingSF.Forget("gateway_forwarding")
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
@@ -2949,6 +2964,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:        "false",
+		SettingKeySubKeyChannelPrefixRequired:        "false",
 		SettingKeyEnableAnthropicCacheTTL1hInjection: "false",
 		SettingKeyRewriteMessageCacheControl:         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyAntigravityUserAgentVersion:        "",
@@ -3466,6 +3482,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// 分组隔离
 	result.AllowUngroupedKeyScheduling = settings[SettingKeyAllowUngroupedKeyScheduling] == "true"
+	result.SubKeyChannelPrefixRequired = settings[SettingKeySubKeyChannelPrefixRequired] == "true"
 
 	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false,
 	// cch_signing=false, claude_oauth_system_prompt_injection=true)
@@ -4582,6 +4599,41 @@ func (s *SettingService) IsUngroupedKeySchedulingAllowed(ctx context.Context) bo
 		return false // fail-closed: 查询失败时默认不允许
 	}
 	return value == "true"
+}
+
+// IsSubKeyChannelPrefixRequired 查询客户密钥是否强制通道前缀。
+// 该检查发生在每个客户密钥请求上（热路径），使用进程内 atomic.Value 缓存
+// + 60s TTL + singleflight；查询失败按关闭处理（fail-open：不阻断存量客户）。
+func (s *SettingService) IsSubKeyChannelPrefixRequired(ctx context.Context) bool {
+	if cached, ok := subKeyPrefixRequiredCache.Load().(*cachedSubKeyPrefixRequired); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cached.required
+		}
+	}
+	result, _, _ := subKeyPrefixRequiredSF.Do("sub_key_prefix_required", func() (any, error) {
+		if cached, ok := subKeyPrefixRequiredCache.Load().(*cachedSubKeyPrefixRequired); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached.required, nil
+			}
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		value, err := s.settingRepo.GetValue(dbCtx, SettingKeySubKeyChannelPrefixRequired)
+		required := err == nil && value == "true"
+		ttl := 60 * time.Second
+		if err != nil && !errors.Is(err, ErrSettingNotFound) {
+			ttl = 5 * time.Second // 查询异常时短缓存，尽快恢复真实配置
+		}
+		subKeyPrefixRequiredCache.Store(&cachedSubKeyPrefixRequired{
+			required:  required,
+			expiresAt: time.Now().Add(ttl).UnixNano(),
+		})
+		return required, nil
+	})
+	if b, ok := result.(bool); ok {
+		return b
+	}
+	return false
 }
 
 // GetClaudeCodeVersionBounds 获取 Claude Code 版本号上下限要求

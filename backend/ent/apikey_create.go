@@ -113,6 +113,12 @@ func (_c *APIKeyCreate) SetNillableParentKeyID(v *int64) *APIKeyCreate {
 	return _c
 }
 
+// SetAllowedGroupIds sets the "allowed_group_ids" field.
+func (_c *APIKeyCreate) SetAllowedGroupIds(v []int64) *APIKeyCreate {
+	_c.mutation.SetAllowedGroupIds(v)
+	return _c
+}
+
 // SetStatus sets the "status" field.
 func (_c *APIKeyCreate) SetStatus(v string) *APIKeyCreate {
 	_c.mutation.SetStatus(v)
@@ -570,6 +576,10 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 		_spec.SetField(apikey.FieldParentKeyID, field.TypeInt64, value)
 		_node.ParentKeyID = &value
 	}
+	if value, ok := _c.mutation.AllowedGroupIds(); ok {
+		_spec.SetField(apikey.FieldAllowedGroupIds, field.TypeJSON, value)
+		_node.AllowedGroupIds = value
+	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
 		_node.Status = value
@@ -845,6 +855,24 @@ func (u *APIKeyUpsert) AddParentKeyID(v int64) *APIKeyUpsert {
 // ClearParentKeyID clears the value of the "parent_key_id" field.
 func (u *APIKeyUpsert) ClearParentKeyID() *APIKeyUpsert {
 	u.SetNull(apikey.FieldParentKeyID)
+	return u
+}
+
+// SetAllowedGroupIds sets the "allowed_group_ids" field.
+func (u *APIKeyUpsert) SetAllowedGroupIds(v []int64) *APIKeyUpsert {
+	u.Set(apikey.FieldAllowedGroupIds, v)
+	return u
+}
+
+// UpdateAllowedGroupIds sets the "allowed_group_ids" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateAllowedGroupIds() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldAllowedGroupIds)
+	return u
+}
+
+// ClearAllowedGroupIds clears the value of the "allowed_group_ids" field.
+func (u *APIKeyUpsert) ClearAllowedGroupIds() *APIKeyUpsert {
+	u.SetNull(apikey.FieldAllowedGroupIds)
 	return u
 }
 
@@ -1316,6 +1344,27 @@ func (u *APIKeyUpsertOne) UpdateParentKeyID() *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) ClearParentKeyID() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearParentKeyID()
+	})
+}
+
+// SetAllowedGroupIds sets the "allowed_group_ids" field.
+func (u *APIKeyUpsertOne) SetAllowedGroupIds(v []int64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetAllowedGroupIds(v)
+	})
+}
+
+// UpdateAllowedGroupIds sets the "allowed_group_ids" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateAllowedGroupIds() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateAllowedGroupIds()
+	})
+}
+
+// ClearAllowedGroupIds clears the value of the "allowed_group_ids" field.
+func (u *APIKeyUpsertOne) ClearAllowedGroupIds() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearAllowedGroupIds()
 	})
 }
 
@@ -2003,6 +2052,27 @@ func (u *APIKeyUpsertBulk) UpdateParentKeyID() *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) ClearParentKeyID() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearParentKeyID()
+	})
+}
+
+// SetAllowedGroupIds sets the "allowed_group_ids" field.
+func (u *APIKeyUpsertBulk) SetAllowedGroupIds(v []int64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetAllowedGroupIds(v)
+	})
+}
+
+// UpdateAllowedGroupIds sets the "allowed_group_ids" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateAllowedGroupIds() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateAllowedGroupIds()
+	})
+}
+
+// ClearAllowedGroupIds clears the value of the "allowed_group_ids" field.
+func (u *APIKeyUpsertBulk) ClearAllowedGroupIds() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearAllowedGroupIds()
 	})
 }
 

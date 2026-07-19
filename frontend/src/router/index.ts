@@ -502,6 +502,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/feedbacks',
+    name: 'AdminFeedbacks',
+    component: () => import('@/views/admin/FeedbacksView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Feedback',
+      titleKey: 'admin.feedbacks.title',
+      descriptionKey: 'admin.feedbacks.description'
+    }
+  },
+  {
     path: '/admin/proxies',
     name: 'AdminProxies',
     component: () => import('@/views/admin/ProxiesView.vue'),
@@ -547,6 +559,18 @@ const routes: RouteRecordRaw[] = [
       title: 'System Settings',
       titleKey: 'admin.settings.title',
       descriptionKey: 'admin.settings.description'
+    }
+  },
+  {
+    path: '/admin/pricing',
+    name: 'AdminPricingModels',
+    component: () => import('@/views/admin/PricingModelsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Pricing Display Management',
+      titleKey: 'admin.pricingDisplay.title',
+      descriptionKey: 'admin.pricingDisplay.description',
     }
   },
   {

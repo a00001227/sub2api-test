@@ -36,6 +36,8 @@ type APIKey struct {
 	GroupID *int64 `json:"group_id,omitempty"`
 	// NULL = account key; NOT NULL = sub key whose parent is the account key with this ID
 	ParentKeyID *int64 `json:"parent_key_id,omitempty"`
+	// Sub key channel whitelist: extra group IDs selectable via URI prefix (empty = locked to bound group)
+	AllowedGroupIds []int64 `json:"allowed_group_ids,omitempty"`
 	// Status holds the value of the "status" field.
 	Status string `json:"status,omitempty"`
 	// Last usage time of this API key
@@ -125,7 +127,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
+		case apikey.FieldAllowedGroupIds, apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
 			values[i] = new([]byte)
 		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldDisplayMultiplier, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
@@ -206,6 +208,14 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ParentKeyID = new(int64)
 				*_m.ParentKeyID = value.Int64
+			}
+		case apikey.FieldAllowedGroupIds:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field allowed_group_ids", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.AllowedGroupIds); err != nil {
+					return fmt.Errorf("unmarshal field allowed_group_ids: %w", err)
+				}
 			}
 		case apikey.FieldStatus:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -398,6 +408,9 @@ func (_m *APIKey) String() string {
 		builder.WriteString("parent_key_id=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	builder.WriteString("allowed_group_ids=")
+	builder.WriteString(fmt.Sprintf("%v", _m.AllowedGroupIds))
 	builder.WriteString(", ")
 	builder.WriteString("status=")
 	builder.WriteString(_m.Status)

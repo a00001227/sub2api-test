@@ -110,6 +110,10 @@ type createSubKeyRequest struct {
 	Budget        *float64 `json:"budget"`
 	BudgetVirtual *float64 `json:"budgetVirtual"`
 	PaidAmount    *float64 `json:"paidAmount"`
+	// GroupID 主通道（可选，默认继承账号密钥分组）
+	GroupID *int64 `json:"groupId"`
+	// AllowedGroupIDs 额外允许的通道白名单（可选）
+	AllowedGroupIDs []int64 `json:"allowedGroupIds"`
 }
 
 // subKeyDTO renders a sub key with both the customer-facing virtual amounts
@@ -136,11 +140,12 @@ func subKeyDTO(k *service.APIKey) gin.H {
 		"remainingAmount":   remaining,
 		"displayMultiplier": multiplier,
 
-		"group_id":   k.GroupID,
-		"status":     k.Status,
-		"createdAt":  k.CreatedAt,
-		"updatedAt":  k.UpdatedAt,
-		"expires_at": k.ExpiresAt,
+		"group_id":          k.GroupID,
+		"allowed_group_ids": k.AllowedGroupIDs,
+		"status":            k.Status,
+		"createdAt":         k.CreatedAt,
+		"updatedAt":         k.UpdatedAt,
+		"expires_at":        k.ExpiresAt,
 	}
 }
 
@@ -178,13 +183,20 @@ func (h *AccountAPIHandler) CreateSubKey(c *gin.Context) {
 		paidAmount = *req.PaidAmount
 	}
 
-	subKey, err := h.apiKeyService.CreateSubKey(c.Request.Context(), accountKey, req.Label, budgetVirtual, paidAmount)
+	subKey, err := h.apiKeyService.CreateSubKey(c.Request.Context(), accountKey, req.Label, budgetVirtual, paidAmount, service.CreateSubKeyOptions{
+		GroupID:         req.GroupID,
+		AllowedGroupIDs: req.AllowedGroupIDs,
+	})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAccountKeyRequired):
 			middleware.AbortWithError(c, 403, "ACCOUNT_KEY_REQUIRED", err.Error())
 		case errors.Is(err, service.ErrAccountKeyGroupRequired):
 			middleware.AbortWithError(c, 400, "ACCOUNT_KEY_GROUP_REQUIRED", err.Error())
+		case errors.Is(err, service.ErrGroupNotAllowed):
+			middleware.AbortWithError(c, 403, "GROUP_NOT_ALLOWED", err.Error())
+		case errors.Is(err, service.ErrGroupNotFound):
+			middleware.AbortWithError(c, 404, "GROUP_NOT_FOUND", err.Error())
 		case errors.Is(err, service.ErrInvalidBudget):
 			middleware.AbortWithError(c, 400, "INVALID_BUDGET", err.Error())
 		case errors.Is(err, service.ErrInvalidMultiplier):
@@ -282,6 +294,10 @@ type updateSubKeyRequest struct {
 	BudgetVirtual *float64 `json:"budgetVirtual"`
 	PaidAmount    *float64 `json:"paidAmount"`
 	Status        *string  `json:"status"`
+	// GroupID 主通道变更（缺省 = 不变）
+	GroupID *int64 `json:"groupId"`
+	// AllowedGroupIDs 通道白名单整体替换（缺省 = 不变；[] = 清空锁回主通道）
+	AllowedGroupIDs *[]int64 `json:"allowedGroupIds"`
 }
 
 // UpdateSubKey 修改客户密钥。
@@ -306,10 +322,12 @@ func (h *AccountAPIHandler) UpdateSubKey(c *gin.Context) {
 	}
 
 	svcReq := service.UpdateSubKeyRequest{
-		Label:         req.Label,
-		BudgetVirtual: req.BudgetVirtual,
-		PaidAmount:    req.PaidAmount,
-		Status:        req.Status,
+		Label:           req.Label,
+		BudgetVirtual:   req.BudgetVirtual,
+		PaidAmount:      req.PaidAmount,
+		Status:          req.Status,
+		GroupID:         req.GroupID,
+		AllowedGroupIDs: req.AllowedGroupIDs,
 	}
 
 	updated, err := h.apiKeyService.UpdateSubKey(c.Request.Context(), accountKey, subKeyID, svcReq)
@@ -329,6 +347,10 @@ func (h *AccountAPIHandler) UpdateSubKey(c *gin.Context) {
 			middleware.AbortWithError(c, 400, "INSUFFICIENT_AVAILABLE_BALANCE", err.Error())
 		case errors.Is(err, service.ErrInvalidStatus):
 			middleware.AbortWithError(c, 400, "INVALID_STATUS", err.Error())
+		case errors.Is(err, service.ErrGroupNotAllowed):
+			middleware.AbortWithError(c, 403, "GROUP_NOT_ALLOWED", err.Error())
+		case errors.Is(err, service.ErrGroupNotFound):
+			middleware.AbortWithError(c, 404, "GROUP_NOT_FOUND", err.Error())
 		case errors.Is(err, service.ErrAccountKeyGroupRequired):
 			middleware.AbortWithError(c, 400, "ACCOUNT_KEY_GROUP_REQUIRED", err.Error())
 		default:

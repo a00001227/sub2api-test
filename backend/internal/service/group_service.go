@@ -11,6 +11,12 @@ import (
 var (
 	ErrGroupNotFound = infraerrors.NotFound("GROUP_NOT_FOUND", "group not found")
 	ErrGroupExists   = infraerrors.Conflict("GROUP_EXISTS", "group name already exists")
+	// ErrInvalidGroupSlug slug 格式不合法（小写字母/数字/连字符，1-64 位，不以连字符开头结尾）
+	ErrInvalidGroupSlug = infraerrors.BadRequest("INVALID_GROUP_SLUG", "slug must be 1-64 chars of lowercase letters, digits and hyphens, not starting/ending with a hyphen")
+	// ErrReservedGroupSlug slug 与系统路由保留字冲突
+	ErrReservedGroupSlug = infraerrors.BadRequest("RESERVED_GROUP_SLUG", "slug conflicts with a reserved system path")
+	// ErrGroupSlugExists slug 已被其他分组使用
+	ErrGroupSlugExists = infraerrors.Conflict("GROUP_SLUG_EXISTS", "slug is already used by another group")
 )
 
 type GroupRepository interface {
@@ -27,6 +33,8 @@ type GroupRepository interface {
 	ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error)
 
 	ExistsByName(ctx context.Context, name string) (bool, error)
+	// ExistsBySlugExcluding 检查 slug 是否被其他分组占用（excludeID=0 表示不排除）
+	ExistsBySlugExcluding(ctx context.Context, slug string, excludeID int64) (bool, error)
 	GetAccountCount(ctx context.Context, groupID int64) (total int64, active int64, err error)
 	DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error)
 	// GetAccountIDsByGroupIDs 获取多个分组的所有账号 ID（去重）

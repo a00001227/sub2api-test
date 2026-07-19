@@ -285,6 +285,18 @@ func (f PromoCodeUsageFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Val
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromoCodeUsageMutation", m)
 }
 
+// The ProviderConnectSessionFunc type is an adapter to allow the use of ordinary
+// function as ProviderConnectSession mutator.
+type ProviderConnectSessionFunc func(context.Context, *ent.ProviderConnectSessionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ProviderConnectSessionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ProviderConnectSessionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProviderConnectSessionMutation", m)
+}
+
 // The ProxyFunc type is an adapter to allow the use of ordinary
 // function as Proxy mutator.
 type ProxyFunc func(context.Context, *ent.ProxyMutation) (ent.Value, error)
@@ -295,6 +307,18 @@ func (f ProxyFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProxyMutation", m)
+}
+
+// The ProxyAllocationFunc type is an adapter to allow the use of ordinary
+// function as ProxyAllocation mutator.
+type ProxyAllocationFunc func(context.Context, *ent.ProxyAllocationMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ProxyAllocationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ProxyAllocationMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProxyAllocationMutation", m)
 }
 
 // The RedeemCodeFunc type is an adapter to allow the use of ordinary

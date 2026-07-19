@@ -64,6 +64,12 @@ func (Proxy) Fields() []ent.Field {
 		field.Int("expiry_warn_days").
 			Default(7).
 			Comment("Days before expiry to flag as expiring-soon (per proxy)."),
+		field.String("region").
+			MaxLen(20).
+			Optional().Nillable().
+			Comment("Egress region label (e.g. US/JP/SG/EU) for provider-connect " +
+				"auto allocation. NULL = unpartitioned node, excluded from " +
+				"auto allocation; existing manual binding is unaffected."),
 	}
 }
 

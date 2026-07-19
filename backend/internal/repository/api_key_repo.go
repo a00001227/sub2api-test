@@ -55,6 +55,10 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetRateLimit1d(key.RateLimit1d).
 		SetRateLimit7d(key.RateLimit7d)
 
+	if len(key.AllowedGroupIDs) > 0 {
+		builder.SetAllowedGroupIds(key.AllowedGroupIDs)
+	}
+
 	if len(key.IPWhitelist) > 0 {
 		builder.SetIPWhitelist(key.IPWhitelist)
 	}
@@ -133,6 +137,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldUserID,
 			apikey.FieldGroupID,
 			apikey.FieldParentKeyID,
+			apikey.FieldAllowedGroupIds,
 			apikey.FieldName,
 			apikey.FieldStatus,
 			apikey.FieldIPWhitelist,
@@ -283,6 +288,32 @@ func (r *apiKeyRepository) UpdateSubKeyBudget(ctx context.Context, id int64, nam
 			return service.ErrAPIKeyNotFound
 		}
 		return service.ErrBudgetLessThanSpent
+	}
+	return nil
+}
+
+// UpdateSubKeyChannels 定向替换 sub key 的通道集合：主通道（group_id）与
+// 额外白名单（allowed_group_ids），不触碰其他字段。
+func (r *apiKeyRepository) UpdateSubKeyChannels(ctx context.Context, id int64, groupID *int64, groupIDs []int64) error {
+	builder := r.client.APIKey.Update().
+		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
+		SetUpdatedAt(time.Now())
+	if groupID != nil {
+		builder.SetGroupID(*groupID)
+	} else {
+		builder.ClearGroupID()
+	}
+	if len(groupIDs) > 0 {
+		builder.SetAllowedGroupIds(groupIDs)
+	} else {
+		builder.ClearAllowedGroupIds()
+	}
+	affected, err := builder.Save(ctx)
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAPIKeyNotFound
 	}
 	return nil
 }
@@ -796,6 +827,7 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		QuotaUsed:         m.QuotaUsed,
 		ExpiresAt:         m.ExpiresAt,
 		DisplayMultiplier: m.DisplayMultiplier,
+		AllowedGroupIDs:   m.AllowedGroupIds,
 		RateLimit5h:       m.RateLimit5h,
 		RateLimit1d:       m.RateLimit1d,
 		RateLimit7d:       m.RateLimit7d,
@@ -866,6 +898,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 	return &service.Group{
 		ID:                              g.ID,
 		Name:                            g.Name,
+		Slug:                            g.Slug,
 		Description:                     derefString(g.Description),
 		Platform:                        g.Platform,
 		RateMultiplier:                  g.RateMultiplier,

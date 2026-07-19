@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 13 // v13: include parent_key_id + display_multiplier (sub key identity)
+const apiKeyAuthSnapshotVersion = 14 // v14: include allowed_group_ids (sub key channel whitelist)
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -211,6 +211,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		UserID:            apiKey.UserID,
 		GroupID:           apiKey.GroupID,
 		ParentKeyID:       apiKey.ParentKeyID,
+		AllowedGroupIDs:   apiKey.AllowedGroupIDs,
 		Name:              apiKey.Name,
 		Status:            apiKey.Status,
 		IPWhitelist:       apiKey.IPWhitelist,
@@ -292,6 +293,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		UserID:            snapshot.UserID,
 		GroupID:           snapshot.GroupID,
 		ParentKeyID:       snapshot.ParentKeyID,
+		AllowedGroupIDs:   snapshot.AllowedGroupIDs,
 		Key:               key,
 		Name:              snapshot.Name,
 		Status:            snapshot.Status,

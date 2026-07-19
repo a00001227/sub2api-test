@@ -120,6 +120,14 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
 			return
 		}
+
+		// ── URI 前缀选组：替换本次请求的计费/调度分组 ────────────────
+		// 必须在分组可用性/权限检查之前执行，使后续所有检查（组状态、
+		// 专属组授权、订阅加载、限额）全部基于新分组。
+		if !applyForcedGroupIfAny(c, apiKey) {
+			return
+		}
+
 		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
 			return
 		}
@@ -281,6 +289,54 @@ func GetSubscriptionFromContext(c *gin.Context) (*service.UserSubscription, bool
 	}
 	subscription, ok := value.(*service.UserSubscription)
 	return subscription, ok
+}
+
+// applyForcedGroupIfAny 应用 URI 前缀选定的分组（无前缀时为 no-op，返回 true）。
+//
+// 语义：
+//   - 与密钥绑定分组相同 → 直接放行（保留 auth 快照中的分组对象）
+//   - 客户密钥（parent_key_id 非空）→ 目标分组必须在其 AllowedGroupIDs 白名单内，
+//     否则 403。通道选择权归账号主，客户不能自行切换到未授权通道。
+//   - 账号密钥 → 交由后续 abortIfAPIKeyGroupUnavailable / NotAllowed / 订阅加载
+//     等既有检查按新分组校验（专属组、订阅组权限均被覆盖）。
+//
+// 替换后同步清空按原分组预查的 user×group RPM override，使 RPM 检查回退到
+// 按新分组实时查询，避免旧分组的 override 误用于新分组。
+func applyForcedGroupIfAny(c *gin.Context, apiKey *service.APIKey) bool {
+	fg, ok := GetForcedGroupFromContext(c)
+	if !ok {
+		return true
+	}
+
+	// 同组直通：无需替换，绑定分组即目标分组
+	if apiKey.GroupID != nil && *apiKey.GroupID == fg.ID {
+		return true
+	}
+
+	// 客户密钥：白名单校验
+	if apiKey.ParentKeyID != nil {
+		allowed := false
+		for _, id := range apiKey.AllowedGroupIDs {
+			if id == fg.ID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
+			AbortWithError(c, 403, "GROUP_NOT_ALLOWED", "This key is not allowed to use the requested channel")
+			return false
+		}
+	}
+
+	apiKey.Group = fg
+	gid := fg.ID
+	apiKey.GroupID = &gid
+	if apiKey.User != nil {
+		// auth 快照中的 override 是按原分组预查的，换组后必须失效
+		apiKey.User.UserGroupRPMOverride = nil
+	}
+	return true
 }
 
 func setGroupContext(c *gin.Context, group *service.Group) {

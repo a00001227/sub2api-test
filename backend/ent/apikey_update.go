@@ -147,6 +147,24 @@ func (_u *APIKeyUpdate) ClearParentKeyID() *APIKeyUpdate {
 	return _u
 }
 
+// SetAllowedGroupIds sets the "allowed_group_ids" field.
+func (_u *APIKeyUpdate) SetAllowedGroupIds(v []int64) *APIKeyUpdate {
+	_u.mutation.SetAllowedGroupIds(v)
+	return _u
+}
+
+// AppendAllowedGroupIds appends value to the "allowed_group_ids" field.
+func (_u *APIKeyUpdate) AppendAllowedGroupIds(v []int64) *APIKeyUpdate {
+	_u.mutation.AppendAllowedGroupIds(v)
+	return _u
+}
+
+// ClearAllowedGroupIds clears the value of the "allowed_group_ids" field.
+func (_u *APIKeyUpdate) ClearAllowedGroupIds() *APIKeyUpdate {
+	_u.mutation.ClearAllowedGroupIds()
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *APIKeyUpdate) SetStatus(v string) *APIKeyUpdate {
 	_u.mutation.SetStatus(v)
@@ -650,6 +668,17 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.ParentKeyIDCleared() {
 		_spec.ClearField(apikey.FieldParentKeyID, field.TypeInt64)
 	}
+	if value, ok := _u.mutation.AllowedGroupIds(); ok {
+		_spec.SetField(apikey.FieldAllowedGroupIds, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedAllowedGroupIds(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, apikey.FieldAllowedGroupIds, value)
+		})
+	}
+	if _u.mutation.AllowedGroupIdsCleared() {
+		_spec.ClearField(apikey.FieldAllowedGroupIds, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
 	}
@@ -994,6 +1023,24 @@ func (_u *APIKeyUpdateOne) AddParentKeyID(v int64) *APIKeyUpdateOne {
 // ClearParentKeyID clears the value of the "parent_key_id" field.
 func (_u *APIKeyUpdateOne) ClearParentKeyID() *APIKeyUpdateOne {
 	_u.mutation.ClearParentKeyID()
+	return _u
+}
+
+// SetAllowedGroupIds sets the "allowed_group_ids" field.
+func (_u *APIKeyUpdateOne) SetAllowedGroupIds(v []int64) *APIKeyUpdateOne {
+	_u.mutation.SetAllowedGroupIds(v)
+	return _u
+}
+
+// AppendAllowedGroupIds appends value to the "allowed_group_ids" field.
+func (_u *APIKeyUpdateOne) AppendAllowedGroupIds(v []int64) *APIKeyUpdateOne {
+	_u.mutation.AppendAllowedGroupIds(v)
+	return _u
+}
+
+// ClearAllowedGroupIds clears the value of the "allowed_group_ids" field.
+func (_u *APIKeyUpdateOne) ClearAllowedGroupIds() *APIKeyUpdateOne {
+	_u.mutation.ClearAllowedGroupIds()
 	return _u
 }
 
@@ -1529,6 +1576,17 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if _u.mutation.ParentKeyIDCleared() {
 		_spec.ClearField(apikey.FieldParentKeyID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AllowedGroupIds(); ok {
+		_spec.SetField(apikey.FieldAllowedGroupIds, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedAllowedGroupIds(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, apikey.FieldAllowedGroupIds, value)
+		})
+	}
+	if _u.mutation.AllowedGroupIdsCleared() {
+		_spec.ClearField(apikey.FieldAllowedGroupIds, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)

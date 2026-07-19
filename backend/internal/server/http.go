@@ -37,6 +37,7 @@ func ProvideRouter(
 	subscriptionService *service.SubscriptionService,
 	opsService *service.OpsService,
 	settingService *service.SettingService,
+	groupSlugResolver *service.GroupSlugResolver,
 	redisClient *redis.Client,
 ) *gin.Engine {
 	if cfg.Server.Mode == "release" {
@@ -45,6 +46,10 @@ func ProvideRouter(
 
 	r := gin.New()
 	r.Use(middleware2.Recovery())
+	// 分组 URL 前缀重写（/{slug}/v1/... → /v1/...）：必须紧随 Recovery、先于
+	// 其余全部中间件注册——重写命中时会经 HandleContext 重新分发并中止原链，
+	// 保证日志/CORS/前端中间件只基于剥离后的路径执行一次。
+	r.Use(middleware2.GroupPrefixRewrite(r, groupSlugResolver))
 	if len(cfg.Server.TrustedProxies) > 0 {
 		if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 			log.Printf("Failed to set trusted proxies: %v", err)

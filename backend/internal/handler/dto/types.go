@@ -85,6 +85,7 @@ type APIKey struct {
 type Group struct {
 	ID             int64   `json:"id"`
 	Name           string  `json:"name"`
+	Slug           string  `json:"slug"`
 	Description    string  `json:"description"`
 	Platform       string  `json:"platform"`
 	RateMultiplier float64 `json:"rate_multiplier"`

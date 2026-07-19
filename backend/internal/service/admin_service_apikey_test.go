@@ -239,6 +239,9 @@ func (s *groupRepoStubForGroupUpdate) ListActiveByPlatform(context.Context, stri
 func (s *groupRepoStubForGroupUpdate) ExistsByName(context.Context, string) (bool, error) {
 	panic("unexpected")
 }
+func (s *groupRepoStubForGroupUpdate) ExistsBySlugExcluding(context.Context, string, int64) (bool, error) {
+	return false, nil
+}
 func (s *groupRepoStubForGroupUpdate) GetAccountCount(context.Context, int64) (int64, int64, error) {
 	panic("unexpected")
 }

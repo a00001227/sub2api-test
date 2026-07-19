@@ -48,6 +48,9 @@ func (APIKey) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("NULL = account key; NOT NULL = sub key whose parent is the account key with this ID"),
+		field.JSON("allowed_group_ids", []int64{}).
+			Optional().
+			Comment("Sub key channel whitelist: extra group IDs selectable via URI prefix (empty = locked to bound group)"),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),

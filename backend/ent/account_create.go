@@ -265,6 +265,20 @@ func (_c *AccountCreate) SetNillableAutoPauseOnExpired(v *bool) *AccountCreate {
 	return _c
 }
 
+// SetExternalProviderAccountID sets the "external_provider_account_id" field.
+func (_c *AccountCreate) SetExternalProviderAccountID(v string) *AccountCreate {
+	_c.mutation.SetExternalProviderAccountID(v)
+	return _c
+}
+
+// SetNillableExternalProviderAccountID sets the "external_provider_account_id" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableExternalProviderAccountID(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetExternalProviderAccountID(*v)
+	}
+	return _c
+}
+
 // SetSchedulable sets the "schedulable" field.
 func (_c *AccountCreate) SetSchedulable(v bool) *AccountCreate {
 	_c.mutation.SetSchedulable(v)
@@ -576,6 +590,11 @@ func (_c *AccountCreate) check() error {
 	if _, ok := _c.mutation.AutoPauseOnExpired(); !ok {
 		return &ValidationError{Name: "auto_pause_on_expired", err: errors.New(`ent: missing required field "Account.auto_pause_on_expired"`)}
 	}
+	if v, ok := _c.mutation.ExternalProviderAccountID(); ok {
+		if err := account.ExternalProviderAccountIDValidator(v); err != nil {
+			return &ValidationError{Name: "external_provider_account_id", err: fmt.Errorf(`ent: validator failed for field "Account.external_provider_account_id": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.Schedulable(); !ok {
 		return &ValidationError{Name: "schedulable", err: errors.New(`ent: missing required field "Account.schedulable"`)}
 	}
@@ -686,6 +705,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.AutoPauseOnExpired(); ok {
 		_spec.SetField(account.FieldAutoPauseOnExpired, field.TypeBool, value)
 		_node.AutoPauseOnExpired = value
+	}
+	if value, ok := _c.mutation.ExternalProviderAccountID(); ok {
+		_spec.SetField(account.FieldExternalProviderAccountID, field.TypeString, value)
+		_node.ExternalProviderAccountID = &value
 	}
 	if value, ok := _c.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
@@ -1131,6 +1154,24 @@ func (u *AccountUpsert) SetAutoPauseOnExpired(v bool) *AccountUpsert {
 // UpdateAutoPauseOnExpired sets the "auto_pause_on_expired" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateAutoPauseOnExpired() *AccountUpsert {
 	u.SetExcluded(account.FieldAutoPauseOnExpired)
+	return u
+}
+
+// SetExternalProviderAccountID sets the "external_provider_account_id" field.
+func (u *AccountUpsert) SetExternalProviderAccountID(v string) *AccountUpsert {
+	u.Set(account.FieldExternalProviderAccountID, v)
+	return u
+}
+
+// UpdateExternalProviderAccountID sets the "external_provider_account_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateExternalProviderAccountID() *AccountUpsert {
+	u.SetExcluded(account.FieldExternalProviderAccountID)
+	return u
+}
+
+// ClearExternalProviderAccountID clears the value of the "external_provider_account_id" field.
+func (u *AccountUpsert) ClearExternalProviderAccountID() *AccountUpsert {
+	u.SetNull(account.FieldExternalProviderAccountID)
 	return u
 }
 
@@ -1689,6 +1730,27 @@ func (u *AccountUpsertOne) SetAutoPauseOnExpired(v bool) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateAutoPauseOnExpired() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateAutoPauseOnExpired()
+	})
+}
+
+// SetExternalProviderAccountID sets the "external_provider_account_id" field.
+func (u *AccountUpsertOne) SetExternalProviderAccountID(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetExternalProviderAccountID(v)
+	})
+}
+
+// UpdateExternalProviderAccountID sets the "external_provider_account_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateExternalProviderAccountID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateExternalProviderAccountID()
+	})
+}
+
+// ClearExternalProviderAccountID clears the value of the "external_provider_account_id" field.
+func (u *AccountUpsertOne) ClearExternalProviderAccountID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearExternalProviderAccountID()
 	})
 }
 
@@ -2439,6 +2501,27 @@ func (u *AccountUpsertBulk) SetAutoPauseOnExpired(v bool) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateAutoPauseOnExpired() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateAutoPauseOnExpired()
+	})
+}
+
+// SetExternalProviderAccountID sets the "external_provider_account_id" field.
+func (u *AccountUpsertBulk) SetExternalProviderAccountID(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetExternalProviderAccountID(v)
+	})
+}
+
+// UpdateExternalProviderAccountID sets the "external_provider_account_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateExternalProviderAccountID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateExternalProviderAccountID()
+	})
+}
+
+// ClearExternalProviderAccountID clears the value of the "external_provider_account_id" field.
+func (u *AccountUpsertBulk) ClearExternalProviderAccountID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearExternalProviderAccountID()
 	})
 }
 

@@ -104,6 +104,9 @@ func (s *groupRepoStubForAdmin) ListActiveByPlatform(_ context.Context, _ string
 func (s *groupRepoStubForAdmin) ExistsByName(_ context.Context, _ string) (bool, error) {
 	panic("unexpected ExistsByName call")
 }
+func (s *groupRepoStubForAdmin) ExistsBySlugExcluding(_ context.Context, _ string, _ int64) (bool, error) {
+	return false, nil
+}
 
 func (s *groupRepoStubForAdmin) GetAccountCount(_ context.Context, _ int64) (int64, int64, error) {
 	panic("unexpected GetAccountCount call")
@@ -622,6 +625,9 @@ func (s *groupRepoStubForFallbackCycle) ListActiveByPlatform(_ context.Context, 
 func (s *groupRepoStubForFallbackCycle) ExistsByName(_ context.Context, _ string) (bool, error) {
 	panic("unexpected ExistsByName call")
 }
+func (s *groupRepoStubForFallbackCycle) ExistsBySlugExcluding(_ context.Context, _ string, _ int64) (bool, error) {
+	return false, nil
+}
 
 func (s *groupRepoStubForFallbackCycle) GetAccountCount(_ context.Context, _ int64) (int64, int64, error) {
 	panic("unexpected GetAccountCount call")
@@ -696,6 +702,9 @@ func (s *groupRepoStubForInvalidRequestFallback) ListActiveByPlatform(_ context.
 
 func (s *groupRepoStubForInvalidRequestFallback) ExistsByName(_ context.Context, _ string) (bool, error) {
 	panic("unexpected ExistsByName call")
+}
+func (s *groupRepoStubForInvalidRequestFallback) ExistsBySlugExcluding(_ context.Context, _ string, _ int64) (bool, error) {
+	return false, nil
 }
 
 func (s *groupRepoStubForInvalidRequestFallback) GetAccountCount(_ context.Context, _ int64) (int64, int64, error) {

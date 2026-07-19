@@ -55,6 +55,8 @@ const (
 	FieldExpiresAt = "expires_at"
 	// FieldAutoPauseOnExpired holds the string denoting the auto_pause_on_expired field in the database.
 	FieldAutoPauseOnExpired = "auto_pause_on_expired"
+	// FieldExternalProviderAccountID holds the string denoting the external_provider_account_id field in the database.
+	FieldExternalProviderAccountID = "external_provider_account_id"
 	// FieldSchedulable holds the string denoting the schedulable field in the database.
 	FieldSchedulable = "schedulable"
 	// FieldRateLimitedAt holds the string denoting the rate_limited_at field in the database.
@@ -134,6 +136,7 @@ var Columns = []string{
 	FieldLastUsedAt,
 	FieldExpiresAt,
 	FieldAutoPauseOnExpired,
+	FieldExternalProviderAccountID,
 	FieldSchedulable,
 	FieldRateLimitedAt,
 	FieldRateLimitResetAt,
@@ -197,6 +200,8 @@ var (
 	StatusValidator func(string) error
 	// DefaultAutoPauseOnExpired holds the default value on creation for the "auto_pause_on_expired" field.
 	DefaultAutoPauseOnExpired bool
+	// ExternalProviderAccountIDValidator is a validator for the "external_provider_account_id" field. It is called by the builders before save.
+	ExternalProviderAccountIDValidator func(string) error
 	// DefaultSchedulable holds the default value on creation for the "schedulable" field.
 	DefaultSchedulable bool
 	// SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
@@ -299,6 +304,11 @@ func ByExpiresAt(opts ...sql.OrderTermOption) OrderOption {
 // ByAutoPauseOnExpired orders the results by the auto_pause_on_expired field.
 func ByAutoPauseOnExpired(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAutoPauseOnExpired, opts...).ToFunc()
+}
+
+// ByExternalProviderAccountID orders the results by the external_provider_account_id field.
+func ByExternalProviderAccountID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExternalProviderAccountID, opts...).ToFunc()
 }
 
 // BySchedulable orders the results by the schedulable field.

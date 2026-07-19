@@ -140,6 +140,15 @@ func (Account) Fields() []ent.Field {
 			Default(true).
 			Comment("Auto pause scheduling when account expires."),
 
+		// external_provider_account_id: Provider Portal 渠道商账号归属引用
+		// （Portal 侧 pa_<uuid>）。NULL = 非渠道商接入账号（存量/管理员手建/
+		// import）。非 NULL 时唯一——部分唯一索引由 SQL 迁移创建，保证一个
+		// Portal 账号引用至多对应一个 Sub2API 账号。
+		field.String("external_provider_account_id").
+			MaxLen(64).
+			Optional().Nillable().
+			Comment("Provider Portal account reference (pa_<uuid>); NULL for non-portal accounts."),
+
 		// ========== 调度和速率限制相关字段 ==========
 		// 这些字段在 migrations/005_schema_parity.sql 中添加
 

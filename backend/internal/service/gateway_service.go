@@ -9013,6 +9013,15 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.CacheCreationTokens = usageLog.CacheCreationTokens
 		cmd.CacheReadTokens = usageLog.CacheReadTokens
 		cmd.ImageCount = usageLog.ImageCount
+		// Provider Usage Outbox facts (Phase 21E-6D-6B-2) — snapshot only,
+		// not used by billing math.
+		cmd.UsageOccurredAt = usageLog.CreatedAt
+		if usageLog.BillingMode != nil {
+			cmd.BillingMode = *usageLog.BillingMode
+		}
+		if usageLog.ImageSize != nil {
+			cmd.ImageSizeTier = *usageLog.ImageSize
+		}
 		if usageLog.ServiceTier != nil {
 			cmd.ServiceTier = *usageLog.ServiceTier
 		}

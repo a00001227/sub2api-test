@@ -38,7 +38,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pricingmodel"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/providerconnectsession"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/proxyallocation"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
@@ -107,8 +109,12 @@ type Client struct {
 	PromoCode *PromoCodeClient
 	// PromoCodeUsage is the client for interacting with the PromoCodeUsage builders.
 	PromoCodeUsage *PromoCodeUsageClient
+	// ProviderConnectSession is the client for interacting with the ProviderConnectSession builders.
+	ProviderConnectSession *ProviderConnectSessionClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
+	// ProxyAllocation is the client for interacting with the ProxyAllocation builders.
+	ProxyAllocation *ProxyAllocationClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
 	RedeemCode *RedeemCodeClient
 	// SecuritySecret is the client for interacting with the SecuritySecret builders.
@@ -169,7 +175,9 @@ func (c *Client) init() {
 	c.PricingModel = NewPricingModelClient(c.config)
 	c.PromoCode = NewPromoCodeClient(c.config)
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
+	c.ProviderConnectSession = NewProviderConnectSessionClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
+	c.ProxyAllocation = NewProxyAllocationClient(c.config)
 	c.RedeemCode = NewRedeemCodeClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
 	c.Setting = NewSettingClient(c.config)
@@ -298,7 +306,9 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PricingModel:                  NewPricingModelClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
+		ProviderConnectSession:        NewProviderConnectSessionClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
+		ProxyAllocation:               NewProxyAllocationClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
@@ -354,7 +364,9 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PricingModel:                  NewPricingModelClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
+		ProviderConnectSession:        NewProviderConnectSessionClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
+		ProxyAllocation:               NewProxyAllocationClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
@@ -403,11 +415,11 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Feedback, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession,
-		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
-		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
-		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
-		c.UserSubscription,
+		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.ProviderConnectSession,
+		c.Proxy, c.ProxyAllocation, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -423,11 +435,11 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Feedback, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession,
-		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
-		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
-		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
-		c.UserSubscription,
+		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.ProviderConnectSession,
+		c.Proxy, c.ProxyAllocation, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -482,8 +494,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PromoCode.mutate(ctx, m)
 	case *PromoCodeUsageMutation:
 		return c.PromoCodeUsage.mutate(ctx, m)
+	case *ProviderConnectSessionMutation:
+		return c.ProviderConnectSession.mutate(ctx, m)
 	case *ProxyMutation:
 		return c.Proxy.mutate(ctx, m)
+	case *ProxyAllocationMutation:
+		return c.ProxyAllocation.mutate(ctx, m)
 	case *RedeemCodeMutation:
 		return c.RedeemCode.mutate(ctx, m)
 	case *SecuritySecretMutation:
@@ -4139,6 +4155,139 @@ func (c *PromoCodeUsageClient) mutate(ctx context.Context, m *PromoCodeUsageMuta
 	}
 }
 
+// ProviderConnectSessionClient is a client for the ProviderConnectSession schema.
+type ProviderConnectSessionClient struct {
+	config
+}
+
+// NewProviderConnectSessionClient returns a client for the ProviderConnectSession from the given config.
+func NewProviderConnectSessionClient(c config) *ProviderConnectSessionClient {
+	return &ProviderConnectSessionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `providerconnectsession.Hooks(f(g(h())))`.
+func (c *ProviderConnectSessionClient) Use(hooks ...Hook) {
+	c.hooks.ProviderConnectSession = append(c.hooks.ProviderConnectSession, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `providerconnectsession.Intercept(f(g(h())))`.
+func (c *ProviderConnectSessionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ProviderConnectSession = append(c.inters.ProviderConnectSession, interceptors...)
+}
+
+// Create returns a builder for creating a ProviderConnectSession entity.
+func (c *ProviderConnectSessionClient) Create() *ProviderConnectSessionCreate {
+	mutation := newProviderConnectSessionMutation(c.config, OpCreate)
+	return &ProviderConnectSessionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ProviderConnectSession entities.
+func (c *ProviderConnectSessionClient) CreateBulk(builders ...*ProviderConnectSessionCreate) *ProviderConnectSessionCreateBulk {
+	return &ProviderConnectSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ProviderConnectSessionClient) MapCreateBulk(slice any, setFunc func(*ProviderConnectSessionCreate, int)) *ProviderConnectSessionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ProviderConnectSessionCreateBulk{err: fmt.Errorf("calling to ProviderConnectSessionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ProviderConnectSessionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ProviderConnectSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ProviderConnectSession.
+func (c *ProviderConnectSessionClient) Update() *ProviderConnectSessionUpdate {
+	mutation := newProviderConnectSessionMutation(c.config, OpUpdate)
+	return &ProviderConnectSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ProviderConnectSessionClient) UpdateOne(_m *ProviderConnectSession) *ProviderConnectSessionUpdateOne {
+	mutation := newProviderConnectSessionMutation(c.config, OpUpdateOne, withProviderConnectSession(_m))
+	return &ProviderConnectSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ProviderConnectSessionClient) UpdateOneID(id int64) *ProviderConnectSessionUpdateOne {
+	mutation := newProviderConnectSessionMutation(c.config, OpUpdateOne, withProviderConnectSessionID(id))
+	return &ProviderConnectSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ProviderConnectSession.
+func (c *ProviderConnectSessionClient) Delete() *ProviderConnectSessionDelete {
+	mutation := newProviderConnectSessionMutation(c.config, OpDelete)
+	return &ProviderConnectSessionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ProviderConnectSessionClient) DeleteOne(_m *ProviderConnectSession) *ProviderConnectSessionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ProviderConnectSessionClient) DeleteOneID(id int64) *ProviderConnectSessionDeleteOne {
+	builder := c.Delete().Where(providerconnectsession.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ProviderConnectSessionDeleteOne{builder}
+}
+
+// Query returns a query builder for ProviderConnectSession.
+func (c *ProviderConnectSessionClient) Query() *ProviderConnectSessionQuery {
+	return &ProviderConnectSessionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeProviderConnectSession},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ProviderConnectSession entity by its id.
+func (c *ProviderConnectSessionClient) Get(ctx context.Context, id int64) (*ProviderConnectSession, error) {
+	return c.Query().Where(providerconnectsession.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ProviderConnectSessionClient) GetX(ctx context.Context, id int64) *ProviderConnectSession {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ProviderConnectSessionClient) Hooks() []Hook {
+	return c.hooks.ProviderConnectSession
+}
+
+// Interceptors returns the client interceptors.
+func (c *ProviderConnectSessionClient) Interceptors() []Interceptor {
+	return c.inters.ProviderConnectSession
+}
+
+func (c *ProviderConnectSessionClient) mutate(ctx context.Context, m *ProviderConnectSessionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ProviderConnectSessionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ProviderConnectSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ProviderConnectSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ProviderConnectSessionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ProviderConnectSession mutation op: %q", m.Op())
+	}
+}
+
 // ProxyClient is a client for the Proxy schema.
 type ProxyClient struct {
 	config
@@ -4303,6 +4452,139 @@ func (c *ProxyClient) mutate(ctx context.Context, m *ProxyMutation) (Value, erro
 		return (&ProxyDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown Proxy mutation op: %q", m.Op())
+	}
+}
+
+// ProxyAllocationClient is a client for the ProxyAllocation schema.
+type ProxyAllocationClient struct {
+	config
+}
+
+// NewProxyAllocationClient returns a client for the ProxyAllocation from the given config.
+func NewProxyAllocationClient(c config) *ProxyAllocationClient {
+	return &ProxyAllocationClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `proxyallocation.Hooks(f(g(h())))`.
+func (c *ProxyAllocationClient) Use(hooks ...Hook) {
+	c.hooks.ProxyAllocation = append(c.hooks.ProxyAllocation, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `proxyallocation.Intercept(f(g(h())))`.
+func (c *ProxyAllocationClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ProxyAllocation = append(c.inters.ProxyAllocation, interceptors...)
+}
+
+// Create returns a builder for creating a ProxyAllocation entity.
+func (c *ProxyAllocationClient) Create() *ProxyAllocationCreate {
+	mutation := newProxyAllocationMutation(c.config, OpCreate)
+	return &ProxyAllocationCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ProxyAllocation entities.
+func (c *ProxyAllocationClient) CreateBulk(builders ...*ProxyAllocationCreate) *ProxyAllocationCreateBulk {
+	return &ProxyAllocationCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ProxyAllocationClient) MapCreateBulk(slice any, setFunc func(*ProxyAllocationCreate, int)) *ProxyAllocationCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ProxyAllocationCreateBulk{err: fmt.Errorf("calling to ProxyAllocationClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ProxyAllocationCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ProxyAllocationCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ProxyAllocation.
+func (c *ProxyAllocationClient) Update() *ProxyAllocationUpdate {
+	mutation := newProxyAllocationMutation(c.config, OpUpdate)
+	return &ProxyAllocationUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ProxyAllocationClient) UpdateOne(_m *ProxyAllocation) *ProxyAllocationUpdateOne {
+	mutation := newProxyAllocationMutation(c.config, OpUpdateOne, withProxyAllocation(_m))
+	return &ProxyAllocationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ProxyAllocationClient) UpdateOneID(id int64) *ProxyAllocationUpdateOne {
+	mutation := newProxyAllocationMutation(c.config, OpUpdateOne, withProxyAllocationID(id))
+	return &ProxyAllocationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ProxyAllocation.
+func (c *ProxyAllocationClient) Delete() *ProxyAllocationDelete {
+	mutation := newProxyAllocationMutation(c.config, OpDelete)
+	return &ProxyAllocationDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ProxyAllocationClient) DeleteOne(_m *ProxyAllocation) *ProxyAllocationDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ProxyAllocationClient) DeleteOneID(id int64) *ProxyAllocationDeleteOne {
+	builder := c.Delete().Where(proxyallocation.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ProxyAllocationDeleteOne{builder}
+}
+
+// Query returns a query builder for ProxyAllocation.
+func (c *ProxyAllocationClient) Query() *ProxyAllocationQuery {
+	return &ProxyAllocationQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeProxyAllocation},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ProxyAllocation entity by its id.
+func (c *ProxyAllocationClient) Get(ctx context.Context, id int64) (*ProxyAllocation, error) {
+	return c.Query().Where(proxyallocation.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ProxyAllocationClient) GetX(ctx context.Context, id int64) *ProxyAllocation {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ProxyAllocationClient) Hooks() []Hook {
+	return c.hooks.ProxyAllocation
+}
+
+// Interceptors returns the client interceptors.
+func (c *ProxyAllocationClient) Interceptors() []Interceptor {
+	return c.inters.ProxyAllocation
+}
+
+func (c *ProxyAllocationClient) mutate(ctx context.Context, m *ProxyAllocationMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ProxyAllocationCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ProxyAllocationUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ProxyAllocationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ProxyAllocationDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ProxyAllocation mutation op: %q", m.Op())
 	}
 }
 
@@ -6498,10 +6780,10 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Feedback, Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PricingModel,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Hook
+		PromoCode, PromoCodeUsage, ProviderConnectSession, Proxy, ProxyAllocation,
+		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6509,10 +6791,10 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Feedback, Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PricingModel,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Interceptor
+		PromoCode, PromoCodeUsage, ProviderConnectSession, Proxy, ProxyAllocation,
+		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

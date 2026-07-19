@@ -356,6 +356,26 @@ func (_u *AccountUpdate) SetNillableAutoPauseOnExpired(v *bool) *AccountUpdate {
 	return _u
 }
 
+// SetExternalProviderAccountID sets the "external_provider_account_id" field.
+func (_u *AccountUpdate) SetExternalProviderAccountID(v string) *AccountUpdate {
+	_u.mutation.SetExternalProviderAccountID(v)
+	return _u
+}
+
+// SetNillableExternalProviderAccountID sets the "external_provider_account_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableExternalProviderAccountID(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetExternalProviderAccountID(*v)
+	}
+	return _u
+}
+
+// ClearExternalProviderAccountID clears the value of the "external_provider_account_id" field.
+func (_u *AccountUpdate) ClearExternalProviderAccountID() *AccountUpdate {
+	_u.mutation.ClearExternalProviderAccountID()
+	return _u
+}
+
 // SetSchedulable sets the "schedulable" field.
 func (_u *AccountUpdate) SetSchedulable(v bool) *AccountUpdate {
 	_u.mutation.SetSchedulable(v)
@@ -682,6 +702,11 @@ func (_u *AccountUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ExternalProviderAccountID(); ok {
+		if err := account.ExternalProviderAccountIDValidator(v); err != nil {
+			return &ValidationError{Name: "external_provider_account_id", err: fmt.Errorf(`ent: validator failed for field "Account.external_provider_account_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SessionWindowStatus(); ok {
 		if err := account.SessionWindowStatusValidator(v); err != nil {
 			return &ValidationError{Name: "session_window_status", err: fmt.Errorf(`ent: validator failed for field "Account.session_window_status": %w`, err)}
@@ -791,6 +816,12 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AutoPauseOnExpired(); ok {
 		_spec.SetField(account.FieldAutoPauseOnExpired, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ExternalProviderAccountID(); ok {
+		_spec.SetField(account.FieldExternalProviderAccountID, field.TypeString, value)
+	}
+	if _u.mutation.ExternalProviderAccountIDCleared() {
+		_spec.ClearField(account.FieldExternalProviderAccountID, field.TypeString)
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
@@ -1319,6 +1350,26 @@ func (_u *AccountUpdateOne) SetNillableAutoPauseOnExpired(v *bool) *AccountUpdat
 	return _u
 }
 
+// SetExternalProviderAccountID sets the "external_provider_account_id" field.
+func (_u *AccountUpdateOne) SetExternalProviderAccountID(v string) *AccountUpdateOne {
+	_u.mutation.SetExternalProviderAccountID(v)
+	return _u
+}
+
+// SetNillableExternalProviderAccountID sets the "external_provider_account_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableExternalProviderAccountID(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetExternalProviderAccountID(*v)
+	}
+	return _u
+}
+
+// ClearExternalProviderAccountID clears the value of the "external_provider_account_id" field.
+func (_u *AccountUpdateOne) ClearExternalProviderAccountID() *AccountUpdateOne {
+	_u.mutation.ClearExternalProviderAccountID()
+	return _u
+}
+
 // SetSchedulable sets the "schedulable" field.
 func (_u *AccountUpdateOne) SetSchedulable(v bool) *AccountUpdateOne {
 	_u.mutation.SetSchedulable(v)
@@ -1658,6 +1709,11 @@ func (_u *AccountUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ExternalProviderAccountID(); ok {
+		if err := account.ExternalProviderAccountIDValidator(v); err != nil {
+			return &ValidationError{Name: "external_provider_account_id", err: fmt.Errorf(`ent: validator failed for field "Account.external_provider_account_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SessionWindowStatus(); ok {
 		if err := account.SessionWindowStatusValidator(v); err != nil {
 			return &ValidationError{Name: "session_window_status", err: fmt.Errorf(`ent: validator failed for field "Account.session_window_status": %w`, err)}
@@ -1784,6 +1840,12 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.AutoPauseOnExpired(); ok {
 		_spec.SetField(account.FieldAutoPauseOnExpired, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ExternalProviderAccountID(); ok {
+		_spec.SetField(account.FieldExternalProviderAccountID, field.TypeString, value)
+	}
+	if _u.mutation.ExternalProviderAccountIDCleared() {
+		_spec.ClearField(account.FieldExternalProviderAccountID, field.TypeString)
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
