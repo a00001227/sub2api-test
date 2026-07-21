@@ -299,6 +299,10 @@ func tryServeOverrideFile(c *gin.Context, overrideDir, cleanPath string) bool {
 func shouldBypassEmbeddedFrontend(path string) bool {
 	trimmed := strings.TrimSpace(path)
 	return strings.HasPrefix(trimmed, "/api/") ||
+		// Provider Portal internal API (Phase 21E-6C-2B-1): mounted at /internal,
+		// not /api/v1. Must bypass the SPA fallback or these JSON endpoints
+		// return index.html and the Portal fails to parse the response.
+		strings.HasPrefix(trimmed, "/internal/") ||
 		strings.HasPrefix(trimmed, "/v1/") ||
 		strings.HasPrefix(trimmed, "/v1beta/") ||
 		strings.HasPrefix(trimmed, "/backend-api/") ||
