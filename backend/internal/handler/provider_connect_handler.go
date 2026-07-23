@@ -56,12 +56,18 @@ func (h *ProviderConnectHandler) AccountMetrics(c *gin.Context) {
 }
 
 // AvailableRegions handles
-// GET /internal/provider-accounts/available-regions
+// GET /internal/provider-accounts/available-regions?provider_type=claude
 //
-// 返回脱敏的 region 能力（id/label/capacity 档位）。绝不含 proxy/IP/host，
-// 供 Portal 后端透传给 Provider 前端，浏览器不得直连本接口。
+// 返回脱敏的 region 能力（id/label/capacity 档位），容量按 provider_type 对应
+// 的平台分桶（claude 与 codex 各自独立）。绝不含 proxy/IP/host，供 Portal 后端
+// 透传给 Provider 前端，浏览器不得直连本接口。
 func (h *ProviderConnectHandler) AvailableRegions(c *gin.Context) {
-	regions, err := h.allocator.AvailableRegions(c.Request.Context())
+	platform, ok := service.PlatformForProviderType(c.Query("provider_type"))
+	if !ok {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_PROVIDER_TYPE", "invalid provider_type"))
+		return
+	}
+	regions, err := h.allocator.AvailableRegions(c.Request.Context(), platform)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

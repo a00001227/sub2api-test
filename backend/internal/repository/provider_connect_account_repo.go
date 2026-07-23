@@ -64,7 +64,7 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 	// (1 = exclusive, N = shared up to N, 0 = unlimited). Count + insert run in
 	// one tx so two concurrent binds can't both slip past the limit.
 	if in.ProxyID != nil {
-		if err := ensureProxyBindingCapacity(ctx, tx, *in.ProxyID); err != nil {
+		if err := ensureProxyBindingCapacity(ctx, tx, *in.ProxyID, in.Platform); err != nil {
 			return 0, err
 		}
 	}
@@ -147,10 +147,15 @@ func (r *providerConnectAccountRepository) ReleaseAllocationByExternalRef(
 	return nil
 }
 
-// ensureProxyBindingCapacity 在事务内校验代理还有绑定余量。先 FOR UPDATE 锁定
-// 代理行以串行化对同一代理的并发绑定，再统计已绑定的活跃账号数；当
-// max_bindings>0 且已达上限时返回 PROXY_CAPACITY_FULL。max_bindings=0 视为不限。
-func ensureProxyBindingCapacity(ctx context.Context, tx *dbent.Tx, proxyID int64) error {
+// ensureProxyBindingCapacity 在事务内校验代理对某个平台还有绑定余量。先
+// FOR UPDATE 锁定代理行以串行化对同一代理的并发绑定，再统计该代理上**同平台**
+// 已绑定的账号数；当 max_bindings>0 且已达上限时返回 PROXY_CAPACITY_FULL。
+// max_bindings=0 视为不限。
+//
+// 容量按 platform 分桶（方案 B3）：max_bindings 的语义是"每个平台各自的上限"，
+// 而非该代理的总账号数。因此 claude 与 codex 各占独立的名额、互不挤占：
+// max_bindings=1 时，同一个代理可以绑 1 个 claude + 1 个 openai。
+func ensureProxyBindingCapacity(ctx context.Context, tx *dbent.Tx, proxyID int64, platform string) error {
 	p, err := tx.Proxy.Query().
 		Where(dbproxy.IDEQ(proxyID)).
 		ForUpdate().
@@ -164,12 +169,15 @@ func ensureProxyBindingCapacity(ctx context.Context, tx *dbent.Tx, proxyID int64
 	if p.MaxBindings <= 0 {
 		return nil // unlimited
 	}
-	// Count accounts currently bound to this proxy. sub2api hard-deletes
-	// accounts, so a removed account drops out of the count automatically and
-	// frees capacity; a disabled account still holds its proxy (it may resume),
-	// so it is intentionally counted.
+	// Count accounts of THIS platform currently bound to this proxy. sub2api
+	// hard-deletes accounts, so a removed account drops out of the count
+	// automatically and frees capacity; a disabled account still holds its
+	// proxy (it may resume), so it is intentionally counted.
 	bound, err := tx.Account.Query().
-		Where(account.ProxyIDEQ(proxyID)).
+		Where(
+			account.ProxyIDEQ(proxyID),
+			account.PlatformEQ(platform),
+		).
 		Count(ctx)
 	if err != nil {
 		return err

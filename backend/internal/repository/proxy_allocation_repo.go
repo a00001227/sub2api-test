@@ -38,15 +38,15 @@ const selectLeastLoadedProxySQL = `
 	  AND p.deleted_at IS NULL
 	  AND p.region = $1
 	  AND (p.expires_at IS NULL OR p.expires_at > NOW())
-	  -- Capacity model: a proxy is selectable while the number of accounts
-	  -- bound to it (accounts.proxy_id) is below its max_bindings.
-	  -- max_bindings = 0 means unlimited. This replaces the former
-	  -- proxy_allocations exclusive-allocation predicate. The bind itself is
-	  -- serialized + re-checked under FOR UPDATE in CreateConnectedAccount, so
-	  -- this is the common-path filter, not the ultimate guard.
+	  -- Capacity model (B3, per-platform): a proxy is selectable while the
+	  -- number of accounts of THIS platform ($2) bound to it (accounts.proxy_id)
+	  -- is below its max_bindings. max_bindings = 0 means unlimited. So each
+	  -- platform gets its own quota on the shared proxy (claude and codex don't
+	  -- contend). The bind itself is serialized + re-checked under FOR UPDATE in
+	  -- CreateConnectedAccount, so this is the common-path filter, not the guard.
 	  AND (
 	      p.max_bindings = 0
-	      OR (SELECT COUNT(*) FROM accounts a WHERE a.proxy_id = p.id) < p.max_bindings
+	      OR (SELECT COUNT(*) FROM accounts a WHERE a.proxy_id = p.id AND a.platform = $2) < p.max_bindings
 	  )
 	ORDER BY p.id ASC
 	LIMIT 1
@@ -54,10 +54,10 @@ const selectLeastLoadedProxySQL = `
 `
 
 // SelectLeastLoadedActiveProxyForUpdate 在独立事务内选中并锁定一个候选
-// 代理。返回 nil, nil 表示该 region 无可用容量（由 service 层转为
-// ErrRegionNoCapacity）。
+// 代理（对指定 platform 仍有余量）。返回 nil, nil 表示该 region 对该 platform
+// 无可用容量（由 service 层转为 ErrRegionNoCapacity）。
 func (r *proxyAllocationRepository) SelectLeastLoadedActiveProxyForUpdate(
-	ctx context.Context, region string,
+	ctx context.Context, region, platform string,
 ) (*service.Proxy, error) {
 	tx, err := r.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
@@ -66,7 +66,7 @@ func (r *proxyAllocationRepository) SelectLeastLoadedActiveProxyForUpdate(
 	// 出错路径回滚；成功路径显式提交（提交即释放行锁——见类型注释）。
 	defer func() { _ = tx.Rollback() }()
 
-	row := tx.QueryRowContext(ctx, selectLeastLoadedProxySQL, region)
+	row := tx.QueryRowContext(ctx, selectLeastLoadedProxySQL, region, platform)
 	var p service.Proxy
 	var expiresAt sql.NullTime
 	if err := row.Scan(
@@ -96,8 +96,12 @@ func (r *proxyAllocationRepository) SelectLeastLoadedActiveProxyForUpdate(
 // 已绑定数用「预聚合 JOIN」而非每代理一条关联子查询：把 accounts 整表按
 // proxy_id GROUP BY 一次，再 LEFT JOIN 回 proxies。这样无论有多少代理，
 // accounts 只被聚合一次（O(1) 次聚合而非 O(代理数) 次子查询），几千代理
-// 下仍稳定在毫秒级。语义与原关联子查询完全等价（同样不按 deleted_at 过滤
-// accounts，与 selectLeastLoadedProxySQL 的绑定计数口径保持一致）。
+// 下仍稳定在毫秒级。
+//
+// 容量按 platform 分桶（B3）：内层聚合只统计 platform = $1 的账号，因此
+// total_capacity（= Σ max_bindings）表示"每个平台各自的上限之和"，used 表示
+// 该平台已用。available_slots = 该平台上限 − 该平台已用，与 selectLeastLoaded
+// 的按平台计数口径一致。
 const regionCapacitySQL = `
 	SELECT p.region,
 	       MAX(p.region_zh) AS region_zh,
@@ -109,6 +113,7 @@ const regionCapacitySQL = `
 	LEFT JOIN (
 	    SELECT proxy_id, COUNT(*) AS cnt
 	    FROM accounts
+	    WHERE platform = $1
 	    GROUP BY proxy_id
 	) ac ON ac.proxy_id = p.id
 	WHERE p.status = 'active'
@@ -119,11 +124,11 @@ const regionCapacitySQL = `
 	ORDER BY p.region ASC
 `
 
-// RegionCapacity 返回每个 region 的可用容量（未占用的活跃代理数）。
+// RegionCapacity 返回每个 region 对指定 platform 的可用容量。
 func (r *proxyAllocationRepository) RegionCapacity(
-	ctx context.Context,
+	ctx context.Context, platform string,
 ) ([]service.RegionCapacity, error) {
-	rows, err := r.sqlDB.QueryContext(ctx, regionCapacitySQL)
+	rows, err := r.sqlDB.QueryContext(ctx, regionCapacitySQL, platform)
 	if err != nil {
 		return nil, err
 	}

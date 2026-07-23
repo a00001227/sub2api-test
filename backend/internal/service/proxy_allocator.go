@@ -31,9 +31,11 @@ var (
 // SelectLeastLoadedActiveProxyForUpdate 必须在单事务内以
 // FOR UPDATE SKIP LOCKED 语义完成「筛选 + 锁定 + 返回」。
 type ProxyAllocationRepository interface {
-	SelectLeastLoadedActiveProxyForUpdate(ctx context.Context, region string) (*Proxy, error)
-	// RegionCapacity 返回每个 region 的可用容量（未被占用的活跃代理数）。
-	RegionCapacity(ctx context.Context) ([]RegionCapacity, error)
+	// SelectLeastLoadedActiveProxyForUpdate 选中一个对该 platform 仍有余量的
+	// 代理（容量按 platform 分桶：max_bindings 是每平台上限，见 B3）。
+	SelectLeastLoadedActiveProxyForUpdate(ctx context.Context, region, platform string) (*Proxy, error)
+	// RegionCapacity 返回每个 region 对指定 platform 的可用容量。
+	RegionCapacity(ctx context.Context, platform string) ([]RegionCapacity, error)
 }
 
 // RegionCapacity 是仓储层返回的单个 region 容量（未脱敏前只有 region+slots）。
@@ -106,66 +108,71 @@ func regionLabelFor(code string) string {
 // 上千并发点击下，缓存把 DB 读压降到"每实例每 TTL 至多一次"。
 const availableRegionsCacheTTL = 15 * time.Second
 
-// availableRegionsCacheKey 单条全局键：available-regions 无参数、全局唯一。
-const availableRegionsCacheKey = "available-regions"
-
 // regionCapacityCache 是 AvailableRegions 的进程内 TTL 缓存 + singleflight
-// 防击穿。刻意做成内嵌小结构而非 Redis：available-regions 是全局只读数据，
+// 防击穿。刻意做成内嵌小结构而非 Redis：available-regions 是只读数据，
 // 进程内缓存在多实例下最坏也只是"每实例每 TTL 查一次库"，代价可忽略，且
 // 零新依赖、不动 wire DI。future：若需跨实例共享一份，可把 load 后的写入
 // 改接 Redis（对外行为不变）。
+//
+// 容量按 platform 分桶后（B3），缓存也按 platform 键分别缓存：claude 和
+// codex 各自一份快照，互不覆盖。
+type cacheEntry struct {
+	data  []AvailableRegion
+	expAt time.Time
+}
+
 type regionCapacityCache struct {
 	ttl   time.Duration
 	sf    singleflight.Group
 	mu    sync.RWMutex
-	data  []AvailableRegion
-	expAt time.Time
+	items map[string]cacheEntry
 }
 
 func newRegionCapacityCache(ttl time.Duration) *regionCapacityCache {
 	if ttl <= 0 {
 		ttl = availableRegionsCacheTTL
 	}
-	return &regionCapacityCache{ttl: ttl}
+	return &regionCapacityCache{ttl: ttl, items: make(map[string]cacheEntry)}
 }
 
-// get 返回未过期的缓存快照。第二返回值表示是否命中。
-func (c *regionCapacityCache) get() ([]AvailableRegion, bool) {
+// get 返回某个 key 未过期的缓存快照。第二返回值表示是否命中。
+func (c *regionCapacityCache) get(key string) ([]AvailableRegion, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.data == nil || time.Now().After(c.expAt) {
+	e, ok := c.items[key]
+	if !ok || time.Now().After(e.expAt) {
 		return nil, false
 	}
-	return c.data, true
+	return e.data, true
 }
 
-func (c *regionCapacityCache) set(v []AvailableRegion) {
+func (c *regionCapacityCache) set(key string, v []AvailableRegion) {
 	c.mu.Lock()
-	c.data = v
-	c.expAt = time.Now().Add(c.ttl)
+	c.items[key] = cacheEntry{data: v, expAt: time.Now().Add(c.ttl)}
 	c.mu.Unlock()
 }
 
 // getOrLoad 命中即返回；未命中时用 singleflight 保证并发下只有一个
 // goroutine 真正 load（查库），其余共享其结果 —— 防止 TTL 到期瞬间的
 // 缓存击穿。load 出错不写缓存，直接透传错误（fail-open：调用方仍可自行
-// 决定降级）。
+// 决定降级）。key 通常是 platform，使不同平台各自缓存。
 func (c *regionCapacityCache) getOrLoad(
+	key string,
 	load func() ([]AvailableRegion, error),
 ) ([]AvailableRegion, error) {
-	if v, ok := c.get(); ok {
+	if v, ok := c.get(key); ok {
 		return v, nil
 	}
-	res, err, _ := c.sf.Do(availableRegionsCacheKey, func() (interface{}, error) {
+	res, err, _ := c.sf.Do(key, func() (interface{}, error) {
 		// 双检：等锁期间可能已有别的请求填好缓存。
-		if v, ok := c.get(); ok {
+		if v, ok := c.get(key); ok {
 			return v, nil
 		}
 		v, err := load()
 		if err != nil {
 			return nil, err
 		}
-		c.set(v)
+		c.set(key, v)
 		return v, nil
 	})
 	if err != nil {
@@ -188,15 +195,17 @@ func NewProxyAllocator(repo ProxyAllocationRepository) *ProxyAllocator {
 	}
 }
 
-// AvailableRegions 返回脱敏的 region 能力列表（含可用容量）。供 Portal
-// 内部 API 透传给 Provider，前端据此禁用无容量项。
+// AvailableRegions 返回脱敏的 region 能力列表（含指定 platform 的可用容量）。
+// 供 Portal 内部 API 透传给 Provider，前端据此禁用无容量项。platform 为空
+// 时按空字符串处理（不会匹配任何账号 → 容量为满代理容量），调用方应传入
+// 已解析的平台（anthropic/openai/gemini）。
 //
-// 结果走进程内 TTL 缓存 + singleflight（见 regionCapacityCache）：这是纯
-// 展示型只读、弱一致数据，缓存不影响正确性（强一致仲裁在授权落库时），
-// 却能在上千并发点击下把 DB 读压降到每实例每 TTL 至多一次。
-func (a *ProxyAllocator) AvailableRegions(ctx context.Context) ([]AvailableRegion, error) {
-	return a.cache.getOrLoad(func() ([]AvailableRegion, error) {
-		caps, err := a.repo.RegionCapacity(ctx)
+// 结果走进程内 TTL 缓存 + singleflight（见 regionCapacityCache），按 platform
+// 分键缓存：这是纯展示型只读、弱一致数据，缓存不影响正确性（强一致仲裁在
+// 授权落库时），却能在上千并发点击下把 DB 读压降到每实例每 TTL 至多一次。
+func (a *ProxyAllocator) AvailableRegions(ctx context.Context, platform string) ([]AvailableRegion, error) {
+	return a.cache.getOrLoad(platform, func() ([]AvailableRegion, error) {
+		caps, err := a.repo.RegionCapacity(ctx, platform)
 		if err != nil {
 			return nil, err
 		}
@@ -220,15 +229,15 @@ func (a *ProxyAllocator) AvailableRegions(ctx context.Context) ([]AvailableRegio
 	})
 }
 
-// SelectProxy 为指定 region 选择一个活跃、未过期、当前绑定账号数最少的代理。
-// region 大小写不敏感（存储约定大写标签，如 US/JP/SG/EU）。
+// SelectProxy 为指定 region + platform 选择一个活跃、未过期、该平台绑定账号
+// 数最少的代理。region 大小写不敏感（存储约定大写标签，如 US/JP/SG/EU）。
 // 无可用代理返回 ErrRegionNoCapacity —— 调用方不得静默降级为直连。
-func (a *ProxyAllocator) SelectProxy(ctx context.Context, region string) (*Proxy, error) {
+func (a *ProxyAllocator) SelectProxy(ctx context.Context, region, platform string) (*Proxy, error) {
 	region = strings.ToUpper(strings.TrimSpace(region))
 	if region == "" {
 		return nil, ErrRegionRequired
 	}
-	proxy, err := a.repo.SelectLeastLoadedActiveProxyForUpdate(ctx, region)
+	proxy, err := a.repo.SelectLeastLoadedActiveProxyForUpdate(ctx, region, platform)
 	if err != nil {
 		return nil, err
 	}

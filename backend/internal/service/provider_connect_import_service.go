@@ -132,8 +132,8 @@ func (s *ProviderConnectImportService) ImportCredential(
 		return &ImportCredentialResult{Status: "already_exists", Sub2apiAccountID: id}, nil
 	}
 
-	// Step 3: 按 region 分配代理（无容量返回 REGION_NO_CAPACITY；不降级直连）。
-	proxy, err := s.allocator.SelectProxy(ctx, region)
+	// Step 3: 按 region + platform 分配代理（无容量返回 REGION_NO_CAPACITY；不降级直连）。
+	proxy, err := s.allocator.SelectProxy(ctx, region, platform)
 	if err != nil {
 		return nil, err // ErrRegionNoCapacity / ErrRegionRequired，均为安全错误码
 	}

@@ -52,6 +52,13 @@ var providerTypeToPlatform = map[string]string{
 	"gemini": PlatformGemini,
 }
 
+// PlatformForProviderType 把 Portal 的 provider_type 解析为 Sub2API 账号平台
+// （容量按平台分桶用）。未知类型返回 ok=false。大小写不敏感。
+func PlatformForProviderType(providerType string) (string, bool) {
+	p, ok := providerTypeToPlatform[strings.ToLower(strings.TrimSpace(providerType))]
+	return p, ok
+}
+
 // connectTokenExchanger 是完成流程对 OAuthService 的最小依赖面。
 type connectTokenExchanger interface {
 	ExchangeCode(ctx context.Context, input *ExchangeCodeInput) (*TokenInfo, error)

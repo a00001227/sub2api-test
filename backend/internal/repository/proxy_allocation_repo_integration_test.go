@@ -53,12 +53,34 @@ func (s *ProxyAllocationRepoSuite) insertProxyCap(name, status string, expiresAt
 }
 
 func (s *ProxyAllocationRepoSuite) bindAccounts(proxyID int64, n int) {
+	s.bindAccountsPlatform(proxyID, n, "anthropic")
+}
+
+func (s *ProxyAllocationRepoSuite) bindAccountsPlatform(proxyID int64, n int, platform string) {
 	for i := 0; i < n; i++ {
 		_, err := integrationDB.ExecContext(s.ctx, `
 			INSERT INTO accounts (name, platform, type, credentials, proxy_id)
-			VALUES ($1,'anthropic','oauth','{}',$2)`, s.T().Name(), proxyID)
+			VALUES ($1,$2,'oauth','{}',$3)`, s.T().Name(), platform, proxyID)
 		s.Require().NoError(err)
 	}
+}
+
+// 1c) 容量按 platform 分桶（B3）：max_bindings=1 的代理被 anthropic 占满后，
+// openai 仍可选到它 —— 两个平台各自独立计数、互不挤占。
+func (s *ProxyAllocationRepoSuite) TestCapacityIsPerPlatform() {
+	proxy := s.insertProxy("shared-x", "active", nil) // max_bindings=1
+	s.bindAccountsPlatform(proxy, 1, "anthropic")     // anthropic 占满
+
+	// anthropic 视角：已满 → 无候选。
+	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "anthropic")
+	s.Require().NoError(err)
+	s.Require().Nil(p, "anthropic is full on this proxy")
+
+	// openai 视角：独立名额，仍可选中同一个代理。
+	p, err = s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "openai")
+	s.Require().NoError(err)
+	s.Require().NotNil(p)
+	s.Require().Equal(proxy, p.ID, "openai has its own quota on the same shared proxy")
 }
 
 // 1) region 匹配 + 容量已满的代理被排除（max_bindings=1，busy 已绑 → 选 idle）。
@@ -67,7 +89,7 @@ func (s *ProxyAllocationRepoSuite) TestSelectsAvailableInRegion() {
 	idle := s.insertProxy("idle", "active", nil)
 	s.bindAccounts(busy, 1) // busy now at capacity
 
-	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "anthropic")
 	s.Require().NoError(err)
 	s.Require().NotNil(p)
 	s.Require().Equal(idle, p.ID, "a full proxy must be excluded, the free one wins")
@@ -78,14 +100,14 @@ func (s *ProxyAllocationRepoSuite) TestCapacityRespectsMaxBindings() {
 	shared := s.insertProxyCap("shared", "active", nil, 2)
 	// 1 bound: still under capacity (2) → selectable.
 	s.bindAccounts(shared, 1)
-	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "anthropic")
 	s.Require().NoError(err)
 	s.Require().NotNil(p)
 	s.Require().Equal(shared, p.ID, "proxy under max_bindings must be selectable")
 
 	// 2 bound: at capacity → excluded, no candidate left.
 	s.bindAccounts(shared, 1)
-	p, err = s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	p, err = s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "anthropic")
 	s.Require().NoError(err)
 	s.Require().Nil(p, "proxy at max_bindings must be excluded")
 }
@@ -93,7 +115,7 @@ func (s *ProxyAllocationRepoSuite) TestCapacityRespectsMaxBindings() {
 // 2) 无可用容量：nil, nil。
 func (s *ProxyAllocationRepoSuite) TestNoCapacityReturnsNil() {
 	s.insertProxy("inactive", "expired", nil)
-	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "anthropic")
 	s.Require().NoError(err)
 	s.Require().Nil(p)
 }
@@ -104,7 +126,7 @@ func (s *ProxyAllocationRepoSuite) TestExpiredProxyFiltered() {
 	s.insertProxy("stale", "active", &past)
 	fresh := s.insertProxy("fresh", "active", nil)
 
-	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "anthropic")
 	s.Require().NoError(err)
 	s.Require().NotNil(p)
 	s.Require().Equal(fresh, p.ID, "expired proxy must be excluded")
@@ -129,7 +151,7 @@ func (s *ProxyAllocationRepoSuite) TestConcurrentSelectSkipsLocked() {
 	s.Require().NoError(err)
 
 	// B：并发选择——必须跳过 A 锁定的行，拿到另一个候选。
-	bProxy, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	bProxy, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region, "anthropic")
 	s.Require().NoError(err)
 	s.Require().NotNil(bProxy)
 	s.Require().NotEqual(aID, bProxy.ID, "concurrent selects must not collide")

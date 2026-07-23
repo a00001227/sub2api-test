@@ -125,12 +125,18 @@ func (s *ProviderConnectService) CreateOnboardingSession(
 	if _, ok := providerConnectAllowedTypes[providerType]; !ok {
 		return nil, ErrConnectInvalidProviderType
 	}
+	// 容量按 platform 分桶（B3）：把 provider_type 解析为账号平台
+	// （claude→anthropic、codex→openai），供分配器按平台各自计数。
+	platform, ok := providerTypeToPlatform[providerType]
+	if !ok {
+		return nil, ErrConnectInvalidProviderType
+	}
 	if err := validateConnectCallbackURL(input.CallbackURL); err != nil {
 		return nil, err
 	}
 
 	// 2) 分配代理（region 校验在 allocator 内；无容量即失败，不降级直连）
-	proxy, err := s.allocator.SelectProxy(ctx, input.Region)
+	proxy, err := s.allocator.SelectProxy(ctx, input.Region, platform)
 	if err != nil {
 		return nil, err
 	}
