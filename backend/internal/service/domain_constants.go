@@ -481,3 +481,7 @@ const AdminAPIKeyPrefix = "admin-"
 // SettingKeyAllowUserViewErrorRequests controls whether end users can view
 // their own failed requests on the usage page. Default false (opt-in).
 const SettingKeyAllowUserViewErrorRequests = "allow_user_view_error_requests"
+
+// SettingKeyProxyDefaultMaxBindings is the default max_bindings applied to a
+// newly created proxy when the create form does not specify one. 1 = exclusive.
+const SettingKeyProxyDefaultMaxBindings = "proxy_default_max_bindings"

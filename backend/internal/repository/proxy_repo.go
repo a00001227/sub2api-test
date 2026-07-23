@@ -39,7 +39,14 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 		SetPort(proxyIn.Port).
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
-		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+		SetExpiryWarnDays(proxyIn.ExpiryWarnDays).
+		SetMaxBindings(proxyIn.MaxBindings)
+	if proxyIn.Region != nil {
+		builder.SetRegion(*proxyIn.Region)
+	}
+	if proxyIn.RegionZh != nil {
+		builder.SetRegionZh(*proxyIn.RegionZh)
+	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	}
@@ -98,7 +105,18 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 		SetPort(proxyIn.Port).
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
-		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+		SetExpiryWarnDays(proxyIn.ExpiryWarnDays).
+		SetMaxBindings(proxyIn.MaxBindings)
+	if proxyIn.Region != nil {
+		builder.SetRegion(*proxyIn.Region)
+	} else {
+		builder.ClearRegion()
+	}
+	if proxyIn.RegionZh != nil {
+		builder.SetRegionZh(*proxyIn.RegionZh)
+	} else {
+		builder.ClearRegionZh()
+	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	} else {
@@ -454,6 +472,9 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		FallbackMode:   m.FallbackMode,
 		BackupProxyID:  m.BackupProxyID,
 		ExpiryWarnDays: m.ExpiryWarnDays,
+		Region:         m.Region,
+		RegionZh:       m.RegionZh,
+		MaxBindings:    m.MaxBindings,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username

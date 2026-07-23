@@ -287,6 +287,12 @@ type Proxy struct {
 	FallbackMode   string     `json:"fallback_mode"`
 	BackupProxyID  *int64     `json:"backup_proxy_id"`
 	ExpiryWarnDays int        `json:"expiry_warn_days"`
+	// BindRegion 是入库的绑定分区标签（provider-connect 自动分配用），区别于
+	// ProxyWithAccountCount.Region（运行时 IP 地理探测结果）。空 = 未分区。
+	BindRegion *string `json:"bind_region,omitempty"`
+	// BindRegionZh 是绑定分区的中文展示名（探测自动填充）。仅展示。
+	BindRegionZh *string `json:"bind_region_zh,omitempty"`
+	MaxBindings  int     `json:"max_bindings"`
 }
 
 type ProxyWithAccountCount struct {

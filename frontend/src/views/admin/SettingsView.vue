@@ -3109,6 +3109,23 @@
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
+                    {{ t("admin.settings.defaults.proxyDefaultMaxBindings") }}
+                  </label>
+                  <input
+                    v-model.number="form.proxy_default_max_bindings"
+                    type="number"
+                    min="0"
+                    class="input"
+                    placeholder="1"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.defaults.proxyDefaultMaxBindingsHint") }}
+                  </p>
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
                     {{ t("admin.settings.defaults.defaultUserRpmLimit") }}
                   </label>
                   <input
@@ -7667,6 +7684,7 @@ const form = reactive<SettingsForm>({
   login_agreement_updated_at: "2026-03-31",
   login_agreement_documents: defaultLoginAgreementDocuments(),
   default_balance: 0,
+  proxy_default_max_bindings: 1,
   default_platform_quotas: normalizePlatformQuotasMap() as DefaultPlatformQuotasMap,
   affiliate_rebate_rate: 20,
   affiliate_rebate_freeze_hours: 0,

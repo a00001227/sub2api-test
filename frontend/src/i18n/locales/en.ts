@@ -4366,6 +4366,11 @@ export default {
       fallbackProxy: 'Backup proxy',
       fallbackDirect: 'Direct connection',
       backupProxy: 'Backup proxy',
+      bindRegion: 'Bind region',
+      bindRegionPlaceholder: 'e.g. Ashburn / Tokyo (English)',
+      bindRegionHint: 'Enter the English city name (used as the match key). Leave empty to auto-detect on create; a value you enter is never overwritten by probing.',
+      maxBindings: 'Max bindings',
+      maxBindingsHint: 'Accounts allowed to bind: 1 = exclusive, N = shared, 0 = unlimited',
     },
 
     // Redeem Codes
@@ -5735,6 +5740,8 @@ export default {
           'Rebate percentage credited to inviter after recharge (0-100%, e.g. 10 means 10%)',
         defaultConcurrency: 'Default Concurrency',
         defaultConcurrencyHint: 'Maximum concurrent requests for new users',
+        proxyDefaultMaxBindings: 'Proxy default max bindings',
+        proxyDefaultMaxBindingsHint: 'Default accounts a new proxy accepts when unspecified: 1 = exclusive, N = shared, 0 = unlimited',
         defaultUserRpmLimit: 'Default User RPM Limit',
         defaultUserRpmLimitHint: 'Default max requests per minute for new users; 0 = unlimited. Only applied at new user creation.',
         defaultSubscriptions: 'Default Subscriptions',

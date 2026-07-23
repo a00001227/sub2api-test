@@ -747,6 +747,9 @@ export interface Proxy {
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days: number
+  bind_region?: string | null  // 绑定分区标签（入库；区别于 region 地理探测结果）
+  bind_region_zh?: string | null  // 绑定分区中文名（探测回写；展示用）
+  max_bindings?: number        // 最大绑定账号数
   created_at: string
   updated_at: string
 }
@@ -1106,6 +1109,8 @@ export interface CreateProxyRequest {
   fallback_mode?: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days?: number
+  region?: string | null       // 绑定分区标签（provider-connect 自动分配用）
+  max_bindings?: number        // 最大绑定账号数；1=独占，N=共用，0=不限
 }
 
 export interface UpdateProxyRequest {
@@ -1120,6 +1125,8 @@ export interface UpdateProxyRequest {
   fallback_mode?: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days?: number
+  region?: string | null
+  max_bindings?: number
 }
 
 export interface AdminDataPayload {

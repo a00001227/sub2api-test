@@ -27,31 +27,35 @@ func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 
 // CreateProxyRequest represents create proxy request
 type CreateProxyRequest struct {
-	Name           string `json:"name" binding:"required"`
-	Protocol       string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
-	Host           string `json:"host" binding:"required"`
-	Port           int    `json:"port" binding:"required,min=1,max=65535"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	ExpiresAt      *int64 `json:"expires_at"`
-	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
-	BackupProxyID  *int64 `json:"backup_proxy_id"`
-	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	Name           string  `json:"name" binding:"required"`
+	Protocol       string  `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
+	Host           string  `json:"host" binding:"required"`
+	Port           int     `json:"port" binding:"required,min=1,max=65535"`
+	Username       string  `json:"username"`
+	Password       string  `json:"password"`
+	ExpiresAt      *int64  `json:"expires_at"`
+	FallbackMode   string  `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID  *int64  `json:"backup_proxy_id"`
+	ExpiryWarnDays int     `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	Region         *string `json:"region"`
+	MaxBindings    *int    `json:"max_bindings" binding:"omitempty,min=0"`
 }
 
 // UpdateProxyRequest represents update proxy request
 type UpdateProxyRequest struct {
-	Name           string `json:"name"`
-	Protocol       string `json:"protocol" binding:"omitempty,oneof=http https socks5 socks5h"`
-	Host           string `json:"host"`
-	Port           int    `json:"port" binding:"omitempty,min=1,max=65535"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	Status         string `json:"status" binding:"omitempty,oneof=active inactive"`
-	ExpiresAt      *int64 `json:"expires_at"`
-	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
-	BackupProxyID  *int64 `json:"backup_proxy_id"`
-	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	Name           string  `json:"name"`
+	Protocol       string  `json:"protocol" binding:"omitempty,oneof=http https socks5 socks5h"`
+	Host           string  `json:"host"`
+	Port           int     `json:"port" binding:"omitempty,min=1,max=65535"`
+	Username       string  `json:"username"`
+	Password       string  `json:"password"`
+	Status         string  `json:"status" binding:"omitempty,oneof=active inactive"`
+	ExpiresAt      *int64  `json:"expires_at"`
+	FallbackMode   string  `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID  *int64  `json:"backup_proxy_id"`
+	ExpiryWarnDays int     `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	Region         *string `json:"region"`
+	MaxBindings    *int    `json:"max_bindings" binding:"omitempty,min=0"`
 }
 
 // List handles listing all proxies with pagination
@@ -159,6 +163,8 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 			FallbackMode:   strings.TrimSpace(req.FallbackMode),
 			BackupProxyID:  req.BackupProxyID,
 			ExpiryWarnDays: req.ExpiryWarnDays,
+			Region:         normalizeProxyRegion(req.Region),
+			MaxBindings:    req.MaxBindings,
 		})
 		if err != nil {
 			return nil, err
@@ -199,6 +205,8 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		FallbackMode:   strings.TrimSpace(req.FallbackMode),
 		BackupProxyID:  req.BackupProxyID,
 		ExpiryWarnDays: req.ExpiryWarnDays,
+		Region:         normalizeProxyRegion(req.Region),
+		MaxBindings:    req.MaxBindings,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -393,4 +401,19 @@ func (h *ProxyHandler) BatchCreate(c *gin.Context) {
 		"created": created,
 		"skipped": skipped,
 	})
+}
+
+// normalizeProxyRegion trims and upper-cases the binding region label, returning
+// nil for an empty/absent value (NULL region = not partitioned for
+// provider-connect auto allocation). Upper-casing matches SelectProxy, which
+// upper-cases the requested region before matching.
+func normalizeProxyRegion(region *string) *string {
+	if region == nil {
+		return nil
+	}
+	v := strings.ToUpper(strings.TrimSpace(*region))
+	if v == "" {
+		return nil
+	}
+	return &v
 }

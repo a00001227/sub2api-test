@@ -1,0 +1,13 @@
+-- Configurable proxy binding capacity. Replaces the provider-connect exclusive
+-- allocation model (proxy_allocations) with a per-proxy capacity counter.
+-- Forward-only; additive; existing proxies untouched.
+--
+-- max_bindings semantics:
+--   1  = exclusive (one AI account per proxy) — the default
+--   N  = shared by up to N accounts
+--   0  = unlimited (legacy shared behavior)
+--
+-- Provider-connect enforces this on bind by counting active accounts already
+-- bound to the proxy (accounts.proxy_id). Native admin binding is unaffected
+-- (all new account creation flows through provider-connect).
+ALTER TABLE proxies ADD COLUMN IF NOT EXISTS max_bindings integer NOT NULL DEFAULT 1;

@@ -38,11 +38,16 @@ func TestProxyAllocationRepoSuite(t *testing.T) {
 }
 
 func (s *ProxyAllocationRepoSuite) insertProxy(name, status string, expiresAt *time.Time) int64 {
+	return s.insertProxyCap(name, status, expiresAt, 1)
+}
+
+// insertProxyCap inserts a proxy with an explicit max_bindings capacity.
+func (s *ProxyAllocationRepoSuite) insertProxyCap(name, status string, expiresAt *time.Time, maxBindings int) int64 {
 	var id int64
 	err := integrationDB.QueryRowContext(s.ctx, `
-		INSERT INTO proxies (name, protocol, host, port, status, region, expires_at)
-		VALUES ($1,'http','127.0.0.1',8080,$2,$3,$4)
-		RETURNING id`, name, status, s.region, expiresAt).Scan(&id)
+		INSERT INTO proxies (name, protocol, host, port, status, region, expires_at, max_bindings)
+		VALUES ($1,'http','127.0.0.1',8080,$2,$3,$4,$5)
+		RETURNING id`, name, status, s.region, expiresAt, maxBindings).Scan(&id)
 	s.Require().NoError(err)
 	return id
 }
@@ -56,16 +61,33 @@ func (s *ProxyAllocationRepoSuite) bindAccounts(proxyID int64, n int) {
 	}
 }
 
-// 1) region 匹配 + 最少绑定优先。
-func (s *ProxyAllocationRepoSuite) TestSelectsLeastLoadedInRegion() {
-	busy := s.insertProxy("busy", "active", nil)
+// 1) region 匹配 + 容量已满的代理被排除（max_bindings=1，busy 已绑 → 选 idle）。
+func (s *ProxyAllocationRepoSuite) TestSelectsAvailableInRegion() {
+	busy := s.insertProxy("busy", "active", nil) // max_bindings=1
 	idle := s.insertProxy("idle", "active", nil)
-	s.bindAccounts(busy, 3)
+	s.bindAccounts(busy, 1) // busy now at capacity
 
 	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
 	s.Require().NoError(err)
 	s.Require().NotNil(p)
-	s.Require().Equal(idle, p.ID, "least-loaded proxy must win")
+	s.Require().Equal(idle, p.ID, "a full proxy must be excluded, the free one wins")
+}
+
+// 1b) max_bindings=N：容量未满时仍可选，达到 N 后被排除。
+func (s *ProxyAllocationRepoSuite) TestCapacityRespectsMaxBindings() {
+	shared := s.insertProxyCap("shared", "active", nil, 2)
+	// 1 bound: still under capacity (2) → selectable.
+	s.bindAccounts(shared, 1)
+	p, err := s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	s.Require().NoError(err)
+	s.Require().NotNil(p)
+	s.Require().Equal(shared, p.ID, "proxy under max_bindings must be selectable")
+
+	// 2 bound: at capacity → excluded, no candidate left.
+	s.bindAccounts(shared, 1)
+	p, err = s.repo.SelectLeastLoadedActiveProxyForUpdate(s.ctx, s.region)
+	s.Require().NoError(err)
+	s.Require().Nil(p, "proxy at max_bindings must be excluded")
 }
 
 // 2) 无可用容量：nil, nil。

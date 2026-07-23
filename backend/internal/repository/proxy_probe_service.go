@@ -44,15 +44,18 @@ const (
 	defaultProxyProbeResponseMaxBytes = int64(1024 * 1024)
 )
 
-// probeURLs 按优先级排列的探测 URL 列表
-// 某些 AI API 专用代理只允许访问特定域名，因此需要多个备选
+// probeURLs 按优先级排列的探测 URL 列表（英文，city 作为 region 匹配键）。
+// 某些 AI API 专用代理只允许访问特定域名，因此需要多个备选。
 var probeURLs = []struct {
 	url    string
 	parser string // "ip-api" or "httpbin"
 }{
-	{"http://ip-api.com/json/?lang=zh-CN", "ip-api"},
+	{"http://ip-api.com/json/?lang=en", "ip-api"},
 	{"http://httpbin.org/ip", "httpbin"},
 }
+
+// zhProbeURL 中文补探：仅用于取 city 的中文名（region_zh 展示）。
+const zhProbeURL = "http://ip-api.com/json/?lang=zh-CN"
 
 type proxyProbeService struct {
 	insecureSkipVerify bool
@@ -77,6 +80,14 @@ func (s *proxyProbeService) ProbeProxy(ctx context.Context, proxyURL string) (*s
 	for _, probe := range probeURLs {
 		exitInfo, latencyMs, err := s.probeWithURL(ctx, client, probe.url, probe.parser)
 		if err == nil {
+			// Best-effort second probe for the localized (zh) city name. Never
+			// fails the whole probe: on error the zh name is simply left empty
+			// and the frontend falls back to the English region.
+			if exitInfo != nil && exitInfo.City != "" {
+				if zhInfo, _, zerr := s.probeWithURL(ctx, client, zhProbeURL, "ip-api"); zerr == nil && zhInfo != nil {
+					exitInfo.CityZh = zhInfo.City
+				}
+			}
 			return exitInfo, latencyMs, nil
 		}
 		lastErr = err

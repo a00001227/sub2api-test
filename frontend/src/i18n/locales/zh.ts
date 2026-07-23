@@ -4487,6 +4487,11 @@ export default {
       fallbackProxy: '指定备用代理',
       fallbackDirect: '回退直连',
       backupProxy: '备用代理',
+      bindRegion: '绑定分区',
+      bindRegionPlaceholder: '如 Ashburn / Tokyo（英文）',
+      bindRegionHint: '请填英文城市名（作匹配键）。留空则创建后自动探测填充；填了则不被探测覆盖。',
+      maxBindings: '最大绑定数',
+      maxBindingsHint: '可绑定的账号数：1=独占，N=共用，0=不限',
     },
 
     // Redeem Codes Management
@@ -5891,6 +5896,8 @@ export default {
         affiliateRebateRateHint: '充值后返给邀请人的比例（0-100%，例如填写 10 表示返利 10%）',
         defaultConcurrency: '默认并发数',
         defaultConcurrencyHint: '新用户的最大并发请求数',
+        proxyDefaultMaxBindings: '代理默认最大绑定数',
+        proxyDefaultMaxBindingsHint: '新建代理未指定时的默认绑定账号数：1=独占，N=共用，0=不限',
         defaultUserRpmLimit: '默认用户 RPM 限制',
         defaultUserRpmLimitHint: '新用户默认每分钟最大请求数，0 = 不限制；仅作用于新用户创建时初始化',
         defaultSubscriptions: '默认订阅列表',

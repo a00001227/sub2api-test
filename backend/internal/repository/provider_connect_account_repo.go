@@ -3,12 +3,12 @@ package repository
 import (
 	"context"
 	"fmt"
-	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
-	dbproxyalloc "github.com/Wei-Shaw/sub2api/ent/proxyallocation"
+	dbproxy "github.com/Wei-Shaw/sub2api/ent/proxy"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -58,6 +58,17 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Capacity check (replaces the former proxy_allocations exclusive INSERT):
+	// lock the proxy row FOR UPDATE to serialize concurrent binds to the same
+	// proxy, then ensure the accounts already bound are below max_bindings
+	// (1 = exclusive, N = shared up to N, 0 = unlimited). Count + insert run in
+	// one tx so two concurrent binds can't both slip past the limit.
+	if in.ProxyID != nil {
+		if err := ensureProxyBindingCapacity(ctx, tx, *in.ProxyID); err != nil {
+			return 0, err
+		}
+	}
+
 	builder := tx.Account.Create().
 		SetName(in.Name).
 		SetPlatform(in.Platform).
@@ -84,26 +95,6 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 	}
 	if _, err := tx.AccountGroup.CreateBulk(agBuilders...).Save(ctx); err != nil {
 		return 0, err
-	}
-
-	// Phase 21E-6E proxy-exclusive: record the exclusive proxy allocation in
-	// the SAME transaction. The partial unique index (uq_proxy_alloc_active_
-	// proxy) guarantees exclusivity — if the proxy was concurrently taken, this
-	// INSERT fails, the whole create rolls back, and no half-bound account or
-	// double-allocated proxy is left. Only when a proxy is actually bound.
-	if in.ProxyID != nil {
-		ab := tx.ProxyAllocation.Create().
-			SetProxyID(*in.ProxyID).
-			SetExternalProviderAccountID(in.ExternalProviderAccountID).
-			SetAccountID(row.ID).
-			SetAllocationStatus("assigned").
-			SetAssignedAt(time.Now())
-		if in.Region != nil {
-			ab = ab.SetRegion(*in.Region)
-		}
-		if _, err := ab.Save(ctx); err != nil {
-			return 0, err
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -143,19 +134,49 @@ func (r *providerConnectAccountRepository) FindAccountIDByExternalRef(
 	return row.ID, true, nil
 }
 
-// ReleaseAllocationByExternalRef 把某 provider 账号的活跃占用（reserved/assigned）
-// 置为 released，代理回到可分配池。幂等：无活跃占用时更新 0 行、返回 nil。
+// ReleaseAllocationByExternalRef 在容量计数模型下为 no-op：绑定关系即
+// accounts.proxy_id，代理的可用容量由"活跃账号计数 < max_bindings"实时决定，
+// 账号被移除/失效后计数自动下降、代理自动回到可用池，无需显式释放记录。
+// 保留此方法以满足 completion service 的接口契约（幂等、始终成功）。
 func (r *providerConnectAccountRepository) ReleaseAllocationByExternalRef(
 	ctx context.Context, externalRef, reason string,
 ) error {
-	_, err := r.client.ProxyAllocation.Update().
-		Where(
-			dbproxyalloc.ExternalProviderAccountIDEQ(externalRef),
-			dbproxyalloc.AllocationStatusIn("reserved", "assigned"),
-		).
-		SetAllocationStatus("released").
-		SetReleasedAt(time.Now()).
-		SetReleaseReason(reason).
-		Save(ctx)
-	return err
+	_ = ctx
+	_ = externalRef
+	_ = reason
+	return nil
+}
+
+// ensureProxyBindingCapacity 在事务内校验代理还有绑定余量。先 FOR UPDATE 锁定
+// 代理行以串行化对同一代理的并发绑定，再统计已绑定的活跃账号数；当
+// max_bindings>0 且已达上限时返回 PROXY_CAPACITY_FULL。max_bindings=0 视为不限。
+func ensureProxyBindingCapacity(ctx context.Context, tx *dbent.Tx, proxyID int64) error {
+	p, err := tx.Proxy.Query().
+		Where(dbproxy.IDEQ(proxyID)).
+		ForUpdate().
+		Only(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return service.ErrProxyNotFound
+		}
+		return err
+	}
+	if p.MaxBindings <= 0 {
+		return nil // unlimited
+	}
+	// Count accounts currently bound to this proxy. sub2api hard-deletes
+	// accounts, so a removed account drops out of the count automatically and
+	// frees capacity; a disabled account still holds its proxy (it may resume),
+	// so it is intentionally counted.
+	bound, err := tx.Account.Query().
+		Where(account.ProxyIDEQ(proxyID)).
+		Count(ctx)
+	if err != nil {
+		return err
+	}
+	if bound >= p.MaxBindings {
+		return infraerrors.Conflict("PROXY_CAPACITY_FULL",
+			"proxy binding capacity reached")
+	}
+	return nil
 }

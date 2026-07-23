@@ -227,6 +227,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		CustomEndpoints:                        dto.ParseCustomEndpoints(settings.CustomEndpoints),
 		DefaultConcurrency:                     settings.DefaultConcurrency,
 		DefaultBalance:                         settings.DefaultBalance,
+		ProxyDefaultMaxBindings:                settings.ProxyDefaultMaxBindings,
 		RiskControlEnabled:                     settings.RiskControlEnabled,
 		CyberSessionBlockEnabled:               settings.CyberSessionBlockEnabled,
 		CyberSessionBlockTTLSeconds:            settings.CyberSessionBlockTTLSeconds,
@@ -516,6 +517,7 @@ type UpdateSettingsRequest struct {
 	// 默认配置
 	DefaultConcurrency                        int                               `json:"default_concurrency"`
 	DefaultBalance                            float64                           `json:"default_balance"`
+	ProxyDefaultMaxBindings                   *int                              `json:"proxy_default_max_bindings"`
 	AffiliateRebateRate                       *float64                          `json:"affiliate_rebate_rate"`
 	AffiliateRebateFreezeHours                *int                              `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays               *int                              `json:"affiliate_rebate_duration_days"`
@@ -1600,6 +1602,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CustomEndpoints:                        customEndpointsJSON,
 		DefaultConcurrency:                     req.DefaultConcurrency,
 		DefaultBalance:                         req.DefaultBalance,
+		ProxyDefaultMaxBindings:                proxyDefaultMaxBindingsFromReq(req.ProxyDefaultMaxBindings),
 		AffiliateRebateRate:                    affiliateRebateRate,
 		AffiliateRebateFreezeHours:             affiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            affiliateRebateDurationDays,
@@ -2074,6 +2077,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CustomEndpoints:                        dto.ParseCustomEndpoints(updatedSettings.CustomEndpoints),
 		DefaultConcurrency:                     updatedSettings.DefaultConcurrency,
 		DefaultBalance:                         updatedSettings.DefaultBalance,
+		ProxyDefaultMaxBindings:                updatedSettings.ProxyDefaultMaxBindings,
 		AffiliateRebateRate:                    updatedSettings.AffiliateRebateRate,
 		AffiliateRebateFreezeHours:             updatedSettings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            updatedSettings.AffiliateRebateDurationDays,
@@ -2178,6 +2182,15 @@ func mapDingTalkValidateError(err error) string {
 	default:
 		return "dingtalk_corp_config_invalid"
 	}
+}
+
+// proxyDefaultMaxBindingsFromReq resolves the request's optional global default
+// max_bindings, falling back to 1 (exclusive) when absent or negative.
+func proxyDefaultMaxBindingsFromReq(v *int) int {
+	if v == nil || *v < 0 {
+		return 1
+	}
+	return *v
 }
 
 func hasPaymentFields(req UpdateSettingsRequest) bool {

@@ -1236,6 +1236,8 @@ var (
 		{Name: "fallback_mode", Type: field.TypeString, Size: 20, Default: "none"},
 		{Name: "expiry_warn_days", Type: field.TypeInt, Default: 7},
 		{Name: "region", Type: field.TypeString, Nullable: true, Size: 20},
+		{Name: "region_zh", Type: field.TypeString, Nullable: true, Size: 40},
+		{Name: "max_bindings", Type: field.TypeInt, Default: 1},
 		{Name: "backup_proxy_id", Type: field.TypeInt64, Unique: true, Nullable: true},
 	}
 	// ProxiesTable holds the schema information for the "proxies" table.
@@ -1246,7 +1248,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "proxies_proxies_backup_proxy",
-				Columns:    []*schema.Column{ProxiesColumns[15]},
+				Columns:    []*schema.Column{ProxiesColumns[17]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1270,44 +1272,7 @@ var (
 			{
 				Name:    "proxy_backup_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{ProxiesColumns[15]},
-			},
-		},
-	}
-	// ProxyAllocationsColumns holds the columns for the "proxy_allocations" table.
-	ProxyAllocationsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeInt64, Increment: true},
-		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "proxy_id", Type: field.TypeInt64},
-		{Name: "external_provider_account_id", Type: field.TypeString, Size: 64},
-		{Name: "account_id", Type: field.TypeInt64, Nullable: true},
-		{Name: "region", Type: field.TypeString, Nullable: true, Size: 20},
-		{Name: "allocation_status", Type: field.TypeString, Size: 20, Default: "assigned"},
-		{Name: "assigned_at", Type: field.TypeTime, Nullable: true},
-		{Name: "released_at", Type: field.TypeTime, Nullable: true},
-		{Name: "release_reason", Type: field.TypeString, Nullable: true, Size: 64},
-	}
-	// ProxyAllocationsTable holds the schema information for the "proxy_allocations" table.
-	ProxyAllocationsTable = &schema.Table{
-		Name:       "proxy_allocations",
-		Columns:    ProxyAllocationsColumns,
-		PrimaryKey: []*schema.Column{ProxyAllocationsColumns[0]},
-		Indexes: []*schema.Index{
-			{
-				Name:    "proxyallocation_region_allocation_status",
-				Unique:  false,
-				Columns: []*schema.Column{ProxyAllocationsColumns[6], ProxyAllocationsColumns[7]},
-			},
-			{
-				Name:    "proxyallocation_proxy_id_allocation_status",
-				Unique:  false,
-				Columns: []*schema.Column{ProxyAllocationsColumns[3], ProxyAllocationsColumns[7]},
-			},
-			{
-				Name:    "proxyallocation_external_provider_account_id_allocation_status",
-				Unique:  false,
-				Columns: []*schema.Column{ProxyAllocationsColumns[4], ProxyAllocationsColumns[7]},
+				Columns: []*schema.Column{ProxiesColumns[17]},
 			},
 		},
 	}
@@ -1964,7 +1929,6 @@ var (
 		PromoCodeUsagesTable,
 		ProviderConnectSessionsTable,
 		ProxiesTable,
-		ProxyAllocationsTable,
 		RedeemCodesTable,
 		SecuritySecretsTable,
 		SettingsTable,
@@ -2075,9 +2039,6 @@ func init() {
 	ProxiesTable.ForeignKeys[0].RefTable = ProxiesTable
 	ProxiesTable.Annotation = &entsql.Annotation{
 		Table: "proxies",
-	}
-	ProxyAllocationsTable.Annotation = &entsql.Annotation{
-		Table: "proxy_allocations",
 	}
 	RedeemCodesTable.ForeignKeys[0].RefTable = GroupsTable
 	RedeemCodesTable.ForeignKeys[1].RefTable = UsersTable

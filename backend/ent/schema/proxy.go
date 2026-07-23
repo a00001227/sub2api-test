@@ -70,6 +70,18 @@ func (Proxy) Fields() []ent.Field {
 			Comment("Egress region label (e.g. US/JP/SG/EU) for provider-connect " +
 				"auto allocation. NULL = unpartitioned node, excluded from " +
 				"auto allocation; existing manual binding is unaffected."),
+		field.String("region_zh").
+			MaxLen(40).
+			Optional().Nillable().
+			Comment("Localized (zh) display name of the region/city, auto-filled " +
+				"from proxy geo-probe at create time. Display only — matching and " +
+				"grouping always use the English `region`."),
+		field.Int("max_bindings").
+			Default(1).
+			Comment("Max AI accounts that may bind to this proxy. 1 = exclusive " +
+				"(one account per IP), N = shared by up to N, 0 = unlimited. " +
+				"Provider-connect enforces this on bind; default is set per-proxy " +
+				"(falls back to the global default at create time)."),
 	}
 }
 

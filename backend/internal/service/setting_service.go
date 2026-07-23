@@ -1917,6 +1917,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// 默认配置
 	updates[SettingKeyDefaultConcurrency] = strconv.Itoa(settings.DefaultConcurrency)
 	updates[SettingKeyDefaultBalance] = strconv.FormatFloat(settings.DefaultBalance, 'f', 8, 64)
+	updates[SettingKeyProxyDefaultMaxBindings] = strconv.Itoa(normalizeProxyDefaultMaxBindings(settings.ProxyDefaultMaxBindings))
 	settings.AffiliateRebateRate = clampAffiliateRebateRate(settings.AffiliateRebateRate)
 	updates[SettingKeyAffiliateRebateRate] = strconv.FormatFloat(settings.AffiliateRebateRate, 'f', 8, 64)
 	if settings.AffiliateRebateFreezeHours < 0 {
@@ -2657,6 +2658,28 @@ func (s *SettingService) GetDefaultBalance(ctx context.Context) float64 {
 	return s.cfg.Default.UserBalance
 }
 
+// normalizeProxyDefaultMaxBindings 约束全局默认绑定数的合法范围：
+// 允许 0（不限）及正整数；负数视为 1（独占）。
+func normalizeProxyDefaultMaxBindings(v int) int {
+	if v < 0 {
+		return 1
+	}
+	return v
+}
+
+// GetProxyDefaultMaxBindings 返回新建代理未指定 max_bindings 时的全局默认值。
+// 未配置/非法时回退为 1（独占）。
+func (s *SettingService) GetProxyDefaultMaxBindings(ctx context.Context) int {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyProxyDefaultMaxBindings)
+	if err != nil {
+		return 1
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && v >= 0 {
+		return v
+	}
+	return 1
+}
+
 // GetDefaultUserRPMLimit 获取新用户默认 RPM 限制（0 = 不限制）。未配置则返回 0。
 func (s *SettingService) GetDefaultUserRPMLimit(ctx context.Context) int {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyDefaultUserRPMLimit)
@@ -2881,6 +2904,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOIDCConnectUserInfoUsernamePath:           "",
 		SettingKeyDefaultConcurrency:                        strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                            strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
+		SettingKeyProxyDefaultMaxBindings:                   "1",
 		SettingKeyAffiliateRebateRate:                       strconv.FormatFloat(AffiliateRebateRateDefault, 'f', 8, 64),
 		SettingKeyAffiliateRebateFreezeHours:                strconv.Itoa(AffiliateRebateFreezeHoursDefault),
 		SettingKeyAffiliateRebateDurationDays:               strconv.Itoa(AffiliateRebateDurationDaysDefault),
@@ -3059,6 +3083,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.DefaultBalance = balance
 	} else {
 		result.DefaultBalance = s.cfg.Default.UserBalance
+	}
+	if v, err := strconv.Atoi(settings[SettingKeyProxyDefaultMaxBindings]); err == nil {
+		result.ProxyDefaultMaxBindings = normalizeProxyDefaultMaxBindings(v)
+	} else {
+		result.ProxyDefaultMaxBindings = 1
 	}
 	if rebateRate, err := strconv.ParseFloat(settings[SettingKeyAffiliateRebateRate], 64); err == nil {
 		result.AffiliateRebateRate = clampAffiliateRebateRate(rebateRate)

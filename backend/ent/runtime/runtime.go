@@ -30,7 +30,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/providerconnectsession"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
-	"github.com/Wei-Shaw/sub2api/ent/proxyallocation"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
@@ -1592,67 +1591,14 @@ func init() {
 	proxyDescRegion := proxyFields[11].Descriptor()
 	// proxy.RegionValidator is a validator for the "region" field. It is called by the builders before save.
 	proxy.RegionValidator = proxyDescRegion.Validators[0].(func(string) error)
-	proxyallocationMixin := schema.ProxyAllocation{}.Mixin()
-	proxyallocationMixinFields0 := proxyallocationMixin[0].Fields()
-	_ = proxyallocationMixinFields0
-	proxyallocationFields := schema.ProxyAllocation{}.Fields()
-	_ = proxyallocationFields
-	// proxyallocationDescCreatedAt is the schema descriptor for created_at field.
-	proxyallocationDescCreatedAt := proxyallocationMixinFields0[0].Descriptor()
-	// proxyallocation.DefaultCreatedAt holds the default value on creation for the created_at field.
-	proxyallocation.DefaultCreatedAt = proxyallocationDescCreatedAt.Default.(func() time.Time)
-	// proxyallocationDescUpdatedAt is the schema descriptor for updated_at field.
-	proxyallocationDescUpdatedAt := proxyallocationMixinFields0[1].Descriptor()
-	// proxyallocation.DefaultUpdatedAt holds the default value on creation for the updated_at field.
-	proxyallocation.DefaultUpdatedAt = proxyallocationDescUpdatedAt.Default.(func() time.Time)
-	// proxyallocation.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
-	proxyallocation.UpdateDefaultUpdatedAt = proxyallocationDescUpdatedAt.UpdateDefault.(func() time.Time)
-	// proxyallocationDescExternalProviderAccountID is the schema descriptor for external_provider_account_id field.
-	proxyallocationDescExternalProviderAccountID := proxyallocationFields[1].Descriptor()
-	// proxyallocation.ExternalProviderAccountIDValidator is a validator for the "external_provider_account_id" field. It is called by the builders before save.
-	proxyallocation.ExternalProviderAccountIDValidator = func() func(string) error {
-		validators := proxyallocationDescExternalProviderAccountID.Validators
-		fns := [...]func(string) error{
-			validators[0].(func(string) error),
-			validators[1].(func(string) error),
-		}
-		return func(external_provider_account_id string) error {
-			for _, fn := range fns {
-				if err := fn(external_provider_account_id); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	}()
-	// proxyallocationDescRegion is the schema descriptor for region field.
-	proxyallocationDescRegion := proxyallocationFields[3].Descriptor()
-	// proxyallocation.RegionValidator is a validator for the "region" field. It is called by the builders before save.
-	proxyallocation.RegionValidator = proxyallocationDescRegion.Validators[0].(func(string) error)
-	// proxyallocationDescAllocationStatus is the schema descriptor for allocation_status field.
-	proxyallocationDescAllocationStatus := proxyallocationFields[4].Descriptor()
-	// proxyallocation.DefaultAllocationStatus holds the default value on creation for the allocation_status field.
-	proxyallocation.DefaultAllocationStatus = proxyallocationDescAllocationStatus.Default.(string)
-	// proxyallocation.AllocationStatusValidator is a validator for the "allocation_status" field. It is called by the builders before save.
-	proxyallocation.AllocationStatusValidator = func() func(string) error {
-		validators := proxyallocationDescAllocationStatus.Validators
-		fns := [...]func(string) error{
-			validators[0].(func(string) error),
-			validators[1].(func(string) error),
-		}
-		return func(allocation_status string) error {
-			for _, fn := range fns {
-				if err := fn(allocation_status); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	}()
-	// proxyallocationDescReleaseReason is the schema descriptor for release_reason field.
-	proxyallocationDescReleaseReason := proxyallocationFields[7].Descriptor()
-	// proxyallocation.ReleaseReasonValidator is a validator for the "release_reason" field. It is called by the builders before save.
-	proxyallocation.ReleaseReasonValidator = proxyallocationDescReleaseReason.Validators[0].(func(string) error)
+	// proxyDescRegionZh is the schema descriptor for region_zh field.
+	proxyDescRegionZh := proxyFields[12].Descriptor()
+	// proxy.RegionZhValidator is a validator for the "region_zh" field. It is called by the builders before save.
+	proxy.RegionZhValidator = proxyDescRegionZh.Validators[0].(func(string) error)
+	// proxyDescMaxBindings is the schema descriptor for max_bindings field.
+	proxyDescMaxBindings := proxyFields[13].Descriptor()
+	// proxy.DefaultMaxBindings holds the default value on creation for the max_bindings field.
+	proxy.DefaultMaxBindings = proxyDescMaxBindings.Default.(int)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.

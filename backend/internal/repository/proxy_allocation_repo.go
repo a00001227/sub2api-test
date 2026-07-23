@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -37,14 +38,15 @@ const selectLeastLoadedProxySQL = `
 	  AND p.deleted_at IS NULL
 	  AND p.region = $1
 	  AND (p.expires_at IS NULL OR p.expires_at > NOW())
-	  -- Phase 21E-6E proxy-exclusive: exclude proxies already held by an
-	  -- active provider allocation. One proxy backs at most one provider
-	  -- account. The DB-level partial unique index is the ultimate guard;
-	  -- this predicate makes the common path pick a genuinely free proxy.
-	  AND NOT EXISTS (
-	      SELECT 1 FROM proxy_allocations pa
-	      WHERE pa.proxy_id = p.id
-	        AND pa.allocation_status IN ('reserved', 'assigned')
+	  -- Capacity model: a proxy is selectable while the number of accounts
+	  -- bound to it (accounts.proxy_id) is below its max_bindings.
+	  -- max_bindings = 0 means unlimited. This replaces the former
+	  -- proxy_allocations exclusive-allocation predicate. The bind itself is
+	  -- serialized + re-checked under FOR UPDATE in CreateConnectedAccount, so
+	  -- this is the common-path filter, not the ultimate guard.
+	  AND (
+	      p.max_bindings = 0
+	      OR (SELECT COUNT(*) FROM accounts a WHERE a.proxy_id = p.id) < p.max_bindings
 	  )
 	ORDER BY p.id ASC
 	LIMIT 1
@@ -86,20 +88,29 @@ func (r *proxyAllocationRepository) SelectLeastLoadedActiveProxyForUpdate(
 	return &p, nil
 }
 
-// regionCapacitySQL 计算每个 region 的可用容量（Phase 21E-6E proxy-exclusive）：
-// available_slots = 该 region 活跃未过期代理数 − 该 region 活跃占用数。
-// 独占语义下，一个未被占用的代理 = 一个可导入槽位。
+// regionCapacitySQL 计算每个 region 的可用容量（容量计数模型）：
+// available_slots = Σ(每代理容量) − Σ(每代理已绑定账号数)。
+// 每代理容量 = max_bindings；max_bindings=0（不限）按一个较大常量计入，
+// 使其始终显示为"有余量"。已绑定数来自 accounts.proxy_id。
+//
+// 已绑定数用「预聚合 JOIN」而非每代理一条关联子查询：把 accounts 整表按
+// proxy_id GROUP BY 一次，再 LEFT JOIN 回 proxies。这样无论有多少代理，
+// accounts 只被聚合一次（O(1) 次聚合而非 O(代理数) 次子查询），几千代理
+// 下仍稳定在毫秒级。语义与原关联子查询完全等价（同样不按 deleted_at 过滤
+// accounts，与 selectLeastLoadedProxySQL 的绑定计数口径保持一致）。
 const regionCapacitySQL = `
 	SELECT p.region,
-	       COUNT(*) AS total_active,
-	       COUNT(*) FILTER (
-	           WHERE EXISTS (
-	               SELECT 1 FROM proxy_allocations pa
-	               WHERE pa.proxy_id = p.id
-	                 AND pa.allocation_status IN ('reserved','assigned')
-	           )
-	       ) AS used
+	       MAX(p.region_zh) AS region_zh,
+	       COALESCE(SUM(
+	           CASE WHEN p.max_bindings = 0 THEN 999 ELSE p.max_bindings END
+	       ), 0) AS total_capacity,
+	       COALESCE(SUM(COALESCE(ac.cnt, 0)), 0) AS used
 	FROM proxies p
+	LEFT JOIN (
+	    SELECT proxy_id, COUNT(*) AS cnt
+	    FROM accounts
+	    GROUP BY proxy_id
+	) ac ON ac.proxy_id = p.id
 	WHERE p.status = 'active'
 	  AND p.deleted_at IS NULL
 	  AND p.region IS NOT NULL
@@ -121,18 +132,23 @@ func (r *proxyAllocationRepository) RegionCapacity(
 	var out []service.RegionCapacity
 	for rows.Next() {
 		var region string
+		var regionZh sql.NullString
 		var total, used int
-		if err := rows.Scan(&region, &total, &used); err != nil {
+		if err := rows.Scan(&region, &regionZh, &total, &used); err != nil {
 			return nil, err
 		}
 		avail := total - used
 		if avail < 0 {
 			avail = 0
 		}
-		out = append(out, service.RegionCapacity{
+		rc := service.RegionCapacity{
 			Region:         region,
 			AvailableSlots: avail,
-		})
+		}
+		if regionZh.Valid {
+			rc.RegionZh = strings.TrimSpace(regionZh.String)
+		}
+		out = append(out, rc)
 	}
 	return out, rows.Err()
 }

@@ -195,6 +195,13 @@
                 {{ formatLocation(row) }}
               </span>
               <span v-else class="text-sm text-gray-400">-</span>
+              <span
+                v-if="row.bind_region"
+                class="badge badge-gray"
+                :title="t('admin.proxies.bindRegion')"
+              >
+                {{ row.bind_region_zh || row.bind_region }}
+              </span>
             </div>
           </template>
 
@@ -528,6 +535,29 @@
           <Select v-model="createForm.backup_proxy_id" :options="backupProxyOptions()" />
         </div>
 
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="input-label">{{ t('admin.proxies.bindRegion') }}</label>
+            <input
+              v-model="createForm.region"
+              type="text"
+              class="input"
+              :placeholder="t('admin.proxies.bindRegionPlaceholder')"
+            />
+            <p class="input-hint mt-1">{{ t('admin.proxies.bindRegionHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.proxies.maxBindings') }}</label>
+            <input
+              v-model.number="createForm.max_bindings"
+              type="number"
+              min="0"
+              class="input"
+            />
+            <p class="input-hint mt-1">{{ t('admin.proxies.maxBindingsHint') }}</p>
+          </div>
+        </div>
+
       </form>
 
       <!-- Batch Add Form -->
@@ -759,6 +789,29 @@
         <div v-if="editForm.fallback_mode === 'proxy'">
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="input-label">{{ t('admin.proxies.bindRegion') }}</label>
+            <input
+              v-model="editForm.region"
+              type="text"
+              class="input"
+              :placeholder="t('admin.proxies.bindRegionPlaceholder')"
+            />
+            <p class="input-hint mt-1">{{ t('admin.proxies.bindRegionHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.proxies.maxBindings') }}</label>
+            <input
+              v-model.number="editForm.max_bindings"
+              type="number"
+              min="0"
+              class="input"
+            />
+            <p class="input-hint mt-1">{{ t('admin.proxies.maxBindingsHint') }}</p>
+          </div>
         </div>
 
       </form>
@@ -1132,6 +1185,8 @@ const createForm = reactive({
   fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
   backup_proxy_id: null as number | null,
   expiry_warn_days: 7 as number,
+  region: '' as string,
+  max_bindings: 1 as number,
 })
 
 const editForm = reactive({
@@ -1146,6 +1201,8 @@ const editForm = reactive({
   fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
   backup_proxy_id: null as number | null,
   expiry_warn_days: 7 as number,
+  region: '' as string,
+  max_bindings: 1 as number,
 })
 
 const allProxiesForBackup = ref<Proxy[]>([])
@@ -1390,6 +1447,8 @@ const handleCreateProxy = async () => {
       fallback_mode: createForm.fallback_mode,
       backup_proxy_id: createForm.fallback_mode === 'proxy' ? createForm.backup_proxy_id : null,
       expiry_warn_days: createForm.expiry_warn_days,
+      region: createForm.region.trim() || null,
+      max_bindings: createForm.max_bindings,
     })
     appStore.showSuccess(t('admin.proxies.proxyCreated'))
     closeCreateModal()
@@ -1415,6 +1474,8 @@ const handleEdit = (proxy: Proxy) => {
   editForm.fallback_mode = proxy.fallback_mode || 'none'
   editForm.backup_proxy_id = proxy.backup_proxy_id ?? null
   editForm.expiry_warn_days = proxy.expiry_warn_days ?? 7
+  editForm.region = proxy.bind_region ?? ''
+  editForm.max_bindings = proxy.max_bindings ?? 1
   editPasswordVisible.value = false
   editPasswordDirty.value = false
   showEditModal.value = true
@@ -1455,6 +1516,8 @@ const handleUpdateProxy = async () => {
       fallback_mode: editForm.fallback_mode,
       backup_proxy_id: editForm.fallback_mode === 'proxy' ? editForm.backup_proxy_id : null,
       expiry_warn_days: editForm.expiry_warn_days,
+      region: editForm.region.trim() || null,
+      max_bindings: editForm.max_bindings,
     }
 
     // Only include password if user actually modified the field

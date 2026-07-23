@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -14,11 +15,12 @@ import (
 // 覆盖（proxy_allocation_repo_integration_test.go）。
 
 type fakeAllocationRepo struct {
-	got     string // 记录传入的 region（已归一化）
-	proxy   *Proxy
-	err     error
-	caps    []RegionCapacity
-	capsErr error
+	got      string // 记录传入的 region（已归一化）
+	proxy    *Proxy
+	err      error
+	caps     []RegionCapacity
+	capsErr  error
+	capCalls int // RegionCapacity 被真正调用（查库）的次数
 }
 
 func (f *fakeAllocationRepo) SelectLeastLoadedActiveProxyForUpdate(_ context.Context, region string) (*Proxy, error) {
@@ -27,6 +29,7 @@ func (f *fakeAllocationRepo) SelectLeastLoadedActiveProxyForUpdate(_ context.Con
 }
 
 func (f *fakeAllocationRepo) RegionCapacity(_ context.Context) ([]RegionCapacity, error) {
+	f.capCalls++
 	return f.caps, f.capsErr
 }
 
@@ -61,11 +64,22 @@ func TestProxyAllocator_AvailableRegions(t *testing.T) {
 	}
 	require.Equal(t, "Los Angeles", byID["lax"].Label)
 	require.True(t, byID["lax"].Available)
-	require.Equal(t, 3, byID["lax"].AvailableSlots)
+	require.Equal(t, CapacityLimited, byID["lax"].Capacity, "3 slots → limited")
 
 	require.False(t, byID["sgp"].Available, "0 slots → not available")
+	require.Equal(t, CapacityFull, byID["sgp"].Capacity, "0 slots → full")
 	require.Equal(t, "United States", byID["US"].Label)
 	require.Equal(t, "zzz", byID["zzz"].Label, "unknown code falls back to code")
+}
+
+// 容量档位映射：0=full，1..threshold=limited，>threshold=ample。
+func TestCapacityTierFromSlots(t *testing.T) {
+	require.Equal(t, CapacityFull, capacityTierFromSlots(0))
+	require.Equal(t, CapacityFull, capacityTierFromSlots(-3), "负数(理论上不会有)也视为满")
+	require.Equal(t, CapacityLimited, capacityTierFromSlots(1))
+	require.Equal(t, CapacityLimited, capacityTierFromSlots(capacityLimitedThreshold))
+	require.Equal(t, CapacityAmple, capacityTierFromSlots(capacityLimitedThreshold+1))
+	require.Equal(t, CapacityAmple, capacityTierFromSlots(100))
 }
 
 func TestProxyAllocator_NoCapacity(t *testing.T) {
@@ -96,4 +110,58 @@ func TestProxyAllocator_NoCapacityIsNotFound(t *testing.T) {
 	var appErr *infraerrors.ApplicationError
 	require.ErrorAs(t, ErrRegionNoCapacity, &appErr)
 	require.Equal(t, "REGION_NO_CAPACITY", appErr.Reason)
+}
+
+// AvailableRegions 缓存：TTL 内多次调用只查库一次（进程内缓存生效）。
+func TestProxyAllocator_AvailableRegions_Cached(t *testing.T) {
+	repo := &fakeAllocationRepo{caps: []RegionCapacity{{Region: "lax", AvailableSlots: 3}}}
+	a := NewProxyAllocator(repo)
+
+	for i := 0; i < 5; i++ {
+		out, err := a.AvailableRegions(context.Background())
+		require.NoError(t, err)
+		require.Len(t, out, 1)
+		require.Equal(t, "Los Angeles", out[0].Label)
+	}
+	require.Equal(t, 1, repo.capCalls, "TTL 内多次调用应只查库一次")
+}
+
+// AvailableRegions 缓存：并发调用经 singleflight 收敛为一次查库（防击穿）。
+func TestProxyAllocator_AvailableRegions_SingleflightCollapsesConcurrent(t *testing.T) {
+	repo := &fakeAllocationRepo{caps: []RegionCapacity{{Region: "lax", AvailableSlots: 1}}}
+	a := NewProxyAllocator(repo)
+
+	const n = 50
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := a.AvailableRegions(context.Background())
+			require.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+	// 并发首轮：singleflight 应把 N 个并发请求收敛为极少数几次真实查库
+	// （理想 1 次；宽松断言避免调度抖动导致偶发 flake）。
+	require.LessOrEqual(t, repo.capCalls, 2, "并发请求应被 singleflight 收敛")
+}
+
+// AvailableRegions 缓存：load 出错不写缓存，下次调用会重试查库（fail-open）。
+func TestProxyAllocator_AvailableRegions_ErrorNotCached(t *testing.T) {
+	boom := errors.New("db down")
+	repo := &fakeAllocationRepo{capsErr: boom}
+	a := NewProxyAllocator(repo)
+
+	_, err := a.AvailableRegions(context.Background())
+	require.ErrorIs(t, err, boom)
+	require.Equal(t, 1, repo.capCalls)
+
+	// 恢复后应能重新查库并成功（错误未被缓存）。
+	repo.capsErr = nil
+	repo.caps = []RegionCapacity{{Region: "US", AvailableSlots: 2}}
+	out, err := a.AvailableRegions(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, 2, repo.capCalls, "错误不缓存，恢复后应再次查库")
 }

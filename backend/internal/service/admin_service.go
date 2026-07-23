@@ -402,6 +402,8 @@ type CreateProxyInput struct {
 	FallbackMode   string
 	BackupProxyID  *int64
 	ExpiryWarnDays int
+	Region         *string
+	MaxBindings    *int
 }
 
 type UpdateProxyInput struct {
@@ -416,6 +418,8 @@ type UpdateProxyInput struct {
 	FallbackMode   string
 	BackupProxyID  *int64
 	ExpiryWarnDays int
+	Region         *string
+	MaxBindings    *int
 }
 
 type GenerateRedeemCodesInput struct {
@@ -479,6 +483,7 @@ type ProxyQualityCheckItem struct {
 type ProxyExitInfo struct {
 	IP          string
 	City        string
+	CityZh      string
 	Region      string
 	Country     string
 	CountryCode string
@@ -3151,6 +3156,17 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
 	}
 
+	// max_bindings：表单未指定时取全局默认（系统设置，回退 1=独占）。
+	maxBindings := 1
+	if input.MaxBindings != nil {
+		maxBindings = *input.MaxBindings
+	} else if s.settingService != nil {
+		maxBindings = s.settingService.GetProxyDefaultMaxBindings(ctx)
+	}
+	if maxBindings < 0 {
+		maxBindings = 1
+	}
+
 	proxy := &Proxy{
 		Name:           input.Name,
 		Protocol:       input.Protocol,
@@ -3163,6 +3179,8 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		FallbackMode:   mode,
 		BackupProxyID:  input.BackupProxyID,
 		ExpiryWarnDays: input.ExpiryWarnDays,
+		Region:         input.Region,
+		MaxBindings:    maxBindings,
 	}
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
 		return nil, err
@@ -3221,6 +3239,14 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	proxy.FallbackMode = mode
 	proxy.BackupProxyID = input.BackupProxyID
 	proxy.ExpiryWarnDays = input.ExpiryWarnDays
+	// 绑定分区 region 与容量 max_bindings（provider-connect 用）。指针语义：
+	// nil = 不改动现有值，便于部分更新不误清。
+	if input.Region != nil {
+		proxy.Region = input.Region
+	}
+	if input.MaxBindings != nil {
+		proxy.MaxBindings = *input.MaxBindings
+	}
 
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
 		return nil, err
@@ -3706,6 +3732,34 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 		City:        exitInfo.City,
 		UpdatedAt:   time.Now(),
 	})
+
+	// X-a: auto-fill the binding region from the geo-probe, but ONLY when the
+	// proxy has no region yet — never overwrite an admin-entered value. This
+	// runs on create (the only caller); TestProxy never reaches here, so a
+	// manual "test connection" can't clobber region. Best-effort: probe/geo
+	// gaps just leave region empty (proxy stays out of provider auto-allocation).
+	s.autoFillProxyRegion(ctx, proxy.ID, exitInfo.City, exitInfo.CityZh)
+}
+
+// autoFillProxyRegion writes region (English city, the match key) + region_zh
+// (localized city, display only) only if the proxy's region is currently empty.
+func (s *adminServiceImpl) autoFillProxyRegion(ctx context.Context, proxyID int64, cityEn, cityZh string) {
+	city := strings.ToUpper(strings.TrimSpace(cityEn))
+	if city == "" {
+		return
+	}
+	cur, err := s.proxyRepo.GetByID(ctx, proxyID)
+	if err != nil || cur == nil {
+		return
+	}
+	if cur.Region != nil && strings.TrimSpace(*cur.Region) != "" {
+		return // admin already set it — respect the manual value (X-a)
+	}
+	cur.Region = &city
+	if zh := strings.TrimSpace(cityZh); zh != "" {
+		cur.RegionZh = &zh
+	}
+	_ = s.proxyRepo.Update(ctx, cur)
 }
 
 // checkMixedChannelRisk 检查分组中是否存在混合渠道（Antigravity + Anthropic）

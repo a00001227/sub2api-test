@@ -58,7 +58,7 @@ func (h *ProviderConnectHandler) AccountMetrics(c *gin.Context) {
 // AvailableRegions handles
 // GET /internal/provider-accounts/available-regions
 //
-// 返回脱敏的 region 能力（id/label/available_slots）。绝不含 proxy/IP/host。
+// 返回脱敏的 region 能力（id/label/capacity 档位）。绝不含 proxy/IP/host，
 // 供 Portal 后端透传给 Provider 前端，浏览器不得直连本接口。
 func (h *ProviderConnectHandler) AvailableRegions(c *gin.Context) {
 	regions, err := h.allocator.AvailableRegions(c.Request.Context())

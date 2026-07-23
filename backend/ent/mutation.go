@@ -38,7 +38,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/providerconnectsession"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
-	"github.com/Wei-Shaw/sub2api/ent/proxyallocation"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
@@ -89,7 +88,6 @@ const (
 	TypePromoCodeUsage                = "PromoCodeUsage"
 	TypeProviderConnectSession        = "ProviderConnectSession"
 	TypeProxy                         = "Proxy"
-	TypeProxyAllocation               = "ProxyAllocation"
 	TypeRedeemCode                    = "RedeemCode"
 	TypeSecuritySecret                = "SecuritySecret"
 	TypeSetting                       = "Setting"
@@ -31752,6 +31750,9 @@ type ProxyMutation struct {
 	expiry_warn_days    *int
 	addexpiry_warn_days *int
 	region              *string
+	region_zh           *string
+	max_bindings        *int
+	addmax_bindings     *int
 	clearedFields       map[string]struct{}
 	accounts            map[int64]struct{}
 	removedaccounts     map[int64]struct{}
@@ -32519,6 +32520,111 @@ func (m *ProxyMutation) ResetRegion() {
 	delete(m.clearedFields, proxy.FieldRegion)
 }
 
+// SetRegionZh sets the "region_zh" field.
+func (m *ProxyMutation) SetRegionZh(s string) {
+	m.region_zh = &s
+}
+
+// RegionZh returns the value of the "region_zh" field in the mutation.
+func (m *ProxyMutation) RegionZh() (r string, exists bool) {
+	v := m.region_zh
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRegionZh returns the old "region_zh" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldRegionZh(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRegionZh is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRegionZh requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRegionZh: %w", err)
+	}
+	return oldValue.RegionZh, nil
+}
+
+// ClearRegionZh clears the value of the "region_zh" field.
+func (m *ProxyMutation) ClearRegionZh() {
+	m.region_zh = nil
+	m.clearedFields[proxy.FieldRegionZh] = struct{}{}
+}
+
+// RegionZhCleared returns if the "region_zh" field was cleared in this mutation.
+func (m *ProxyMutation) RegionZhCleared() bool {
+	_, ok := m.clearedFields[proxy.FieldRegionZh]
+	return ok
+}
+
+// ResetRegionZh resets all changes to the "region_zh" field.
+func (m *ProxyMutation) ResetRegionZh() {
+	m.region_zh = nil
+	delete(m.clearedFields, proxy.FieldRegionZh)
+}
+
+// SetMaxBindings sets the "max_bindings" field.
+func (m *ProxyMutation) SetMaxBindings(i int) {
+	m.max_bindings = &i
+	m.addmax_bindings = nil
+}
+
+// MaxBindings returns the value of the "max_bindings" field in the mutation.
+func (m *ProxyMutation) MaxBindings() (r int, exists bool) {
+	v := m.max_bindings
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMaxBindings returns the old "max_bindings" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldMaxBindings(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMaxBindings is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMaxBindings requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMaxBindings: %w", err)
+	}
+	return oldValue.MaxBindings, nil
+}
+
+// AddMaxBindings adds i to the "max_bindings" field.
+func (m *ProxyMutation) AddMaxBindings(i int) {
+	if m.addmax_bindings != nil {
+		*m.addmax_bindings += i
+	} else {
+		m.addmax_bindings = &i
+	}
+}
+
+// AddedMaxBindings returns the value that was added to the "max_bindings" field in this mutation.
+func (m *ProxyMutation) AddedMaxBindings() (r int, exists bool) {
+	v := m.addmax_bindings
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetMaxBindings resets all changes to the "max_bindings" field.
+func (m *ProxyMutation) ResetMaxBindings() {
+	m.max_bindings = nil
+	m.addmax_bindings = nil
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by ids.
 func (m *ProxyMutation) AddAccountIDs(ids ...int64) {
 	if m.accounts == nil {
@@ -32634,7 +32740,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 15)
+	fields := make([]string, 0, 17)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -32680,6 +32786,12 @@ func (m *ProxyMutation) Fields() []string {
 	if m.region != nil {
 		fields = append(fields, proxy.FieldRegion)
 	}
+	if m.region_zh != nil {
+		fields = append(fields, proxy.FieldRegionZh)
+	}
+	if m.max_bindings != nil {
+		fields = append(fields, proxy.FieldMaxBindings)
+	}
 	return fields
 }
 
@@ -32718,6 +32830,10 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.ExpiryWarnDays()
 	case proxy.FieldRegion:
 		return m.Region()
+	case proxy.FieldRegionZh:
+		return m.RegionZh()
+	case proxy.FieldMaxBindings:
+		return m.MaxBindings()
 	}
 	return nil, false
 }
@@ -32757,6 +32873,10 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldExpiryWarnDays(ctx)
 	case proxy.FieldRegion:
 		return m.OldRegion(ctx)
+	case proxy.FieldRegionZh:
+		return m.OldRegionZh(ctx)
+	case proxy.FieldMaxBindings:
+		return m.OldMaxBindings(ctx)
 	}
 	return nil, fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -32871,6 +32991,20 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRegion(v)
 		return nil
+	case proxy.FieldRegionZh:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRegionZh(v)
+		return nil
+	case proxy.FieldMaxBindings:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMaxBindings(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -32885,6 +33019,9 @@ func (m *ProxyMutation) AddedFields() []string {
 	if m.addexpiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
+	if m.addmax_bindings != nil {
+		fields = append(fields, proxy.FieldMaxBindings)
+	}
 	return fields
 }
 
@@ -32897,6 +33034,8 @@ func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedPort()
 	case proxy.FieldExpiryWarnDays:
 		return m.AddedExpiryWarnDays()
+	case proxy.FieldMaxBindings:
+		return m.AddedMaxBindings()
 	}
 	return nil, false
 }
@@ -32919,6 +33058,13 @@ func (m *ProxyMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddExpiryWarnDays(v)
+		return nil
+	case proxy.FieldMaxBindings:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMaxBindings(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy numeric field %s", name)
@@ -32945,6 +33091,9 @@ func (m *ProxyMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(proxy.FieldRegion) {
 		fields = append(fields, proxy.FieldRegion)
+	}
+	if m.FieldCleared(proxy.FieldRegionZh) {
+		fields = append(fields, proxy.FieldRegionZh)
 	}
 	return fields
 }
@@ -32977,6 +33126,9 @@ func (m *ProxyMutation) ClearField(name string) error {
 		return nil
 	case proxy.FieldRegion:
 		m.ClearRegion()
+		return nil
+	case proxy.FieldRegionZh:
+		m.ClearRegionZh()
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy nullable field %s", name)
@@ -33030,6 +33182,12 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldRegion:
 		m.ResetRegion()
+		return nil
+	case proxy.FieldRegionZh:
+		m.ResetRegionZh()
+		return nil
+	case proxy.FieldMaxBindings:
+		m.ResetMaxBindings()
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)
@@ -33135,986 +33293,6 @@ func (m *ProxyMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy edge %s", name)
-}
-
-// ProxyAllocationMutation represents an operation that mutates the ProxyAllocation nodes in the graph.
-type ProxyAllocationMutation struct {
-	config
-	op                           Op
-	typ                          string
-	id                           *int64
-	created_at                   *time.Time
-	updated_at                   *time.Time
-	proxy_id                     *int64
-	addproxy_id                  *int64
-	external_provider_account_id *string
-	account_id                   *int64
-	addaccount_id                *int64
-	region                       *string
-	allocation_status            *string
-	assigned_at                  *time.Time
-	released_at                  *time.Time
-	release_reason               *string
-	clearedFields                map[string]struct{}
-	done                         bool
-	oldValue                     func(context.Context) (*ProxyAllocation, error)
-	predicates                   []predicate.ProxyAllocation
-}
-
-var _ ent.Mutation = (*ProxyAllocationMutation)(nil)
-
-// proxyallocationOption allows management of the mutation configuration using functional options.
-type proxyallocationOption func(*ProxyAllocationMutation)
-
-// newProxyAllocationMutation creates new mutation for the ProxyAllocation entity.
-func newProxyAllocationMutation(c config, op Op, opts ...proxyallocationOption) *ProxyAllocationMutation {
-	m := &ProxyAllocationMutation{
-		config:        c,
-		op:            op,
-		typ:           TypeProxyAllocation,
-		clearedFields: make(map[string]struct{}),
-	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
-}
-
-// withProxyAllocationID sets the ID field of the mutation.
-func withProxyAllocationID(id int64) proxyallocationOption {
-	return func(m *ProxyAllocationMutation) {
-		var (
-			err   error
-			once  sync.Once
-			value *ProxyAllocation
-		)
-		m.oldValue = func(ctx context.Context) (*ProxyAllocation, error) {
-			once.Do(func() {
-				if m.done {
-					err = errors.New("querying old values post mutation is not allowed")
-				} else {
-					value, err = m.Client().ProxyAllocation.Get(ctx, id)
-				}
-			})
-			return value, err
-		}
-		m.id = &id
-	}
-}
-
-// withProxyAllocation sets the old ProxyAllocation of the mutation.
-func withProxyAllocation(node *ProxyAllocation) proxyallocationOption {
-	return func(m *ProxyAllocationMutation) {
-		m.oldValue = func(context.Context) (*ProxyAllocation, error) {
-			return node, nil
-		}
-		m.id = &node.ID
-	}
-}
-
-// Client returns a new `ent.Client` from the mutation. If the mutation was
-// executed in a transaction (ent.Tx), a transactional client is returned.
-func (m ProxyAllocationMutation) Client() *Client {
-	client := &Client{config: m.config}
-	client.init()
-	return client
-}
-
-// Tx returns an `ent.Tx` for mutations that were executed in transactions;
-// it returns an error otherwise.
-func (m ProxyAllocationMutation) Tx() (*Tx, error) {
-	if _, ok := m.driver.(*txDriver); !ok {
-		return nil, errors.New("ent: mutation is not running in a transaction")
-	}
-	tx := &Tx{config: m.config}
-	tx.init()
-	return tx, nil
-}
-
-// ID returns the ID value in the mutation. Note that the ID is only available
-// if it was provided to the builder or after it was returned from the database.
-func (m *ProxyAllocationMutation) ID() (id int64, exists bool) {
-	if m.id == nil {
-		return
-	}
-	return *m.id, true
-}
-
-// IDs queries the database and returns the entity ids that match the mutation's predicate.
-// That means, if the mutation is applied within a transaction with an isolation level such
-// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
-// or updated by the mutation.
-func (m *ProxyAllocationMutation) IDs(ctx context.Context) ([]int64, error) {
-	switch {
-	case m.op.Is(OpUpdateOne | OpDeleteOne):
-		id, exists := m.ID()
-		if exists {
-			return []int64{id}, nil
-		}
-		fallthrough
-	case m.op.Is(OpUpdate | OpDelete):
-		return m.Client().ProxyAllocation.Query().Where(m.predicates...).IDs(ctx)
-	default:
-		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
-	}
-}
-
-// SetCreatedAt sets the "created_at" field.
-func (m *ProxyAllocationMutation) SetCreatedAt(t time.Time) {
-	m.created_at = &t
-}
-
-// CreatedAt returns the value of the "created_at" field in the mutation.
-func (m *ProxyAllocationMutation) CreatedAt() (r time.Time, exists bool) {
-	v := m.created_at
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldCreatedAt returns the old "created_at" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
-	}
-	return oldValue.CreatedAt, nil
-}
-
-// ResetCreatedAt resets all changes to the "created_at" field.
-func (m *ProxyAllocationMutation) ResetCreatedAt() {
-	m.created_at = nil
-}
-
-// SetUpdatedAt sets the "updated_at" field.
-func (m *ProxyAllocationMutation) SetUpdatedAt(t time.Time) {
-	m.updated_at = &t
-}
-
-// UpdatedAt returns the value of the "updated_at" field in the mutation.
-func (m *ProxyAllocationMutation) UpdatedAt() (r time.Time, exists bool) {
-	v := m.updated_at
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldUpdatedAt returns the old "updated_at" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
-	}
-	return oldValue.UpdatedAt, nil
-}
-
-// ResetUpdatedAt resets all changes to the "updated_at" field.
-func (m *ProxyAllocationMutation) ResetUpdatedAt() {
-	m.updated_at = nil
-}
-
-// SetProxyID sets the "proxy_id" field.
-func (m *ProxyAllocationMutation) SetProxyID(i int64) {
-	m.proxy_id = &i
-	m.addproxy_id = nil
-}
-
-// ProxyID returns the value of the "proxy_id" field in the mutation.
-func (m *ProxyAllocationMutation) ProxyID() (r int64, exists bool) {
-	v := m.proxy_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldProxyID returns the old "proxy_id" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldProxyID(ctx context.Context) (v int64, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldProxyID is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldProxyID requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldProxyID: %w", err)
-	}
-	return oldValue.ProxyID, nil
-}
-
-// AddProxyID adds i to the "proxy_id" field.
-func (m *ProxyAllocationMutation) AddProxyID(i int64) {
-	if m.addproxy_id != nil {
-		*m.addproxy_id += i
-	} else {
-		m.addproxy_id = &i
-	}
-}
-
-// AddedProxyID returns the value that was added to the "proxy_id" field in this mutation.
-func (m *ProxyAllocationMutation) AddedProxyID() (r int64, exists bool) {
-	v := m.addproxy_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// ResetProxyID resets all changes to the "proxy_id" field.
-func (m *ProxyAllocationMutation) ResetProxyID() {
-	m.proxy_id = nil
-	m.addproxy_id = nil
-}
-
-// SetExternalProviderAccountID sets the "external_provider_account_id" field.
-func (m *ProxyAllocationMutation) SetExternalProviderAccountID(s string) {
-	m.external_provider_account_id = &s
-}
-
-// ExternalProviderAccountID returns the value of the "external_provider_account_id" field in the mutation.
-func (m *ProxyAllocationMutation) ExternalProviderAccountID() (r string, exists bool) {
-	v := m.external_provider_account_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldExternalProviderAccountID returns the old "external_provider_account_id" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldExternalProviderAccountID(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldExternalProviderAccountID is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldExternalProviderAccountID requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldExternalProviderAccountID: %w", err)
-	}
-	return oldValue.ExternalProviderAccountID, nil
-}
-
-// ResetExternalProviderAccountID resets all changes to the "external_provider_account_id" field.
-func (m *ProxyAllocationMutation) ResetExternalProviderAccountID() {
-	m.external_provider_account_id = nil
-}
-
-// SetAccountID sets the "account_id" field.
-func (m *ProxyAllocationMutation) SetAccountID(i int64) {
-	m.account_id = &i
-	m.addaccount_id = nil
-}
-
-// AccountID returns the value of the "account_id" field in the mutation.
-func (m *ProxyAllocationMutation) AccountID() (r int64, exists bool) {
-	v := m.account_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldAccountID returns the old "account_id" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldAccountID(ctx context.Context) (v *int64, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldAccountID is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldAccountID requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldAccountID: %w", err)
-	}
-	return oldValue.AccountID, nil
-}
-
-// AddAccountID adds i to the "account_id" field.
-func (m *ProxyAllocationMutation) AddAccountID(i int64) {
-	if m.addaccount_id != nil {
-		*m.addaccount_id += i
-	} else {
-		m.addaccount_id = &i
-	}
-}
-
-// AddedAccountID returns the value that was added to the "account_id" field in this mutation.
-func (m *ProxyAllocationMutation) AddedAccountID() (r int64, exists bool) {
-	v := m.addaccount_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// ClearAccountID clears the value of the "account_id" field.
-func (m *ProxyAllocationMutation) ClearAccountID() {
-	m.account_id = nil
-	m.addaccount_id = nil
-	m.clearedFields[proxyallocation.FieldAccountID] = struct{}{}
-}
-
-// AccountIDCleared returns if the "account_id" field was cleared in this mutation.
-func (m *ProxyAllocationMutation) AccountIDCleared() bool {
-	_, ok := m.clearedFields[proxyallocation.FieldAccountID]
-	return ok
-}
-
-// ResetAccountID resets all changes to the "account_id" field.
-func (m *ProxyAllocationMutation) ResetAccountID() {
-	m.account_id = nil
-	m.addaccount_id = nil
-	delete(m.clearedFields, proxyallocation.FieldAccountID)
-}
-
-// SetRegion sets the "region" field.
-func (m *ProxyAllocationMutation) SetRegion(s string) {
-	m.region = &s
-}
-
-// Region returns the value of the "region" field in the mutation.
-func (m *ProxyAllocationMutation) Region() (r string, exists bool) {
-	v := m.region
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldRegion returns the old "region" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldRegion(ctx context.Context) (v *string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldRegion is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldRegion requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldRegion: %w", err)
-	}
-	return oldValue.Region, nil
-}
-
-// ClearRegion clears the value of the "region" field.
-func (m *ProxyAllocationMutation) ClearRegion() {
-	m.region = nil
-	m.clearedFields[proxyallocation.FieldRegion] = struct{}{}
-}
-
-// RegionCleared returns if the "region" field was cleared in this mutation.
-func (m *ProxyAllocationMutation) RegionCleared() bool {
-	_, ok := m.clearedFields[proxyallocation.FieldRegion]
-	return ok
-}
-
-// ResetRegion resets all changes to the "region" field.
-func (m *ProxyAllocationMutation) ResetRegion() {
-	m.region = nil
-	delete(m.clearedFields, proxyallocation.FieldRegion)
-}
-
-// SetAllocationStatus sets the "allocation_status" field.
-func (m *ProxyAllocationMutation) SetAllocationStatus(s string) {
-	m.allocation_status = &s
-}
-
-// AllocationStatus returns the value of the "allocation_status" field in the mutation.
-func (m *ProxyAllocationMutation) AllocationStatus() (r string, exists bool) {
-	v := m.allocation_status
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldAllocationStatus returns the old "allocation_status" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldAllocationStatus(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldAllocationStatus is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldAllocationStatus requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldAllocationStatus: %w", err)
-	}
-	return oldValue.AllocationStatus, nil
-}
-
-// ResetAllocationStatus resets all changes to the "allocation_status" field.
-func (m *ProxyAllocationMutation) ResetAllocationStatus() {
-	m.allocation_status = nil
-}
-
-// SetAssignedAt sets the "assigned_at" field.
-func (m *ProxyAllocationMutation) SetAssignedAt(t time.Time) {
-	m.assigned_at = &t
-}
-
-// AssignedAt returns the value of the "assigned_at" field in the mutation.
-func (m *ProxyAllocationMutation) AssignedAt() (r time.Time, exists bool) {
-	v := m.assigned_at
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldAssignedAt returns the old "assigned_at" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldAssignedAt(ctx context.Context) (v *time.Time, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldAssignedAt is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldAssignedAt requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldAssignedAt: %w", err)
-	}
-	return oldValue.AssignedAt, nil
-}
-
-// ClearAssignedAt clears the value of the "assigned_at" field.
-func (m *ProxyAllocationMutation) ClearAssignedAt() {
-	m.assigned_at = nil
-	m.clearedFields[proxyallocation.FieldAssignedAt] = struct{}{}
-}
-
-// AssignedAtCleared returns if the "assigned_at" field was cleared in this mutation.
-func (m *ProxyAllocationMutation) AssignedAtCleared() bool {
-	_, ok := m.clearedFields[proxyallocation.FieldAssignedAt]
-	return ok
-}
-
-// ResetAssignedAt resets all changes to the "assigned_at" field.
-func (m *ProxyAllocationMutation) ResetAssignedAt() {
-	m.assigned_at = nil
-	delete(m.clearedFields, proxyallocation.FieldAssignedAt)
-}
-
-// SetReleasedAt sets the "released_at" field.
-func (m *ProxyAllocationMutation) SetReleasedAt(t time.Time) {
-	m.released_at = &t
-}
-
-// ReleasedAt returns the value of the "released_at" field in the mutation.
-func (m *ProxyAllocationMutation) ReleasedAt() (r time.Time, exists bool) {
-	v := m.released_at
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldReleasedAt returns the old "released_at" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldReleasedAt(ctx context.Context) (v *time.Time, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldReleasedAt is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldReleasedAt requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldReleasedAt: %w", err)
-	}
-	return oldValue.ReleasedAt, nil
-}
-
-// ClearReleasedAt clears the value of the "released_at" field.
-func (m *ProxyAllocationMutation) ClearReleasedAt() {
-	m.released_at = nil
-	m.clearedFields[proxyallocation.FieldReleasedAt] = struct{}{}
-}
-
-// ReleasedAtCleared returns if the "released_at" field was cleared in this mutation.
-func (m *ProxyAllocationMutation) ReleasedAtCleared() bool {
-	_, ok := m.clearedFields[proxyallocation.FieldReleasedAt]
-	return ok
-}
-
-// ResetReleasedAt resets all changes to the "released_at" field.
-func (m *ProxyAllocationMutation) ResetReleasedAt() {
-	m.released_at = nil
-	delete(m.clearedFields, proxyallocation.FieldReleasedAt)
-}
-
-// SetReleaseReason sets the "release_reason" field.
-func (m *ProxyAllocationMutation) SetReleaseReason(s string) {
-	m.release_reason = &s
-}
-
-// ReleaseReason returns the value of the "release_reason" field in the mutation.
-func (m *ProxyAllocationMutation) ReleaseReason() (r string, exists bool) {
-	v := m.release_reason
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldReleaseReason returns the old "release_reason" field's value of the ProxyAllocation entity.
-// If the ProxyAllocation object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *ProxyAllocationMutation) OldReleaseReason(ctx context.Context) (v *string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldReleaseReason is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldReleaseReason requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldReleaseReason: %w", err)
-	}
-	return oldValue.ReleaseReason, nil
-}
-
-// ClearReleaseReason clears the value of the "release_reason" field.
-func (m *ProxyAllocationMutation) ClearReleaseReason() {
-	m.release_reason = nil
-	m.clearedFields[proxyallocation.FieldReleaseReason] = struct{}{}
-}
-
-// ReleaseReasonCleared returns if the "release_reason" field was cleared in this mutation.
-func (m *ProxyAllocationMutation) ReleaseReasonCleared() bool {
-	_, ok := m.clearedFields[proxyallocation.FieldReleaseReason]
-	return ok
-}
-
-// ResetReleaseReason resets all changes to the "release_reason" field.
-func (m *ProxyAllocationMutation) ResetReleaseReason() {
-	m.release_reason = nil
-	delete(m.clearedFields, proxyallocation.FieldReleaseReason)
-}
-
-// Where appends a list predicates to the ProxyAllocationMutation builder.
-func (m *ProxyAllocationMutation) Where(ps ...predicate.ProxyAllocation) {
-	m.predicates = append(m.predicates, ps...)
-}
-
-// WhereP appends storage-level predicates to the ProxyAllocationMutation builder. Using this method,
-// users can use type-assertion to append predicates that do not depend on any generated package.
-func (m *ProxyAllocationMutation) WhereP(ps ...func(*sql.Selector)) {
-	p := make([]predicate.ProxyAllocation, len(ps))
-	for i := range ps {
-		p[i] = ps[i]
-	}
-	m.Where(p...)
-}
-
-// Op returns the operation name.
-func (m *ProxyAllocationMutation) Op() Op {
-	return m.op
-}
-
-// SetOp allows setting the mutation operation.
-func (m *ProxyAllocationMutation) SetOp(op Op) {
-	m.op = op
-}
-
-// Type returns the node type of this mutation (ProxyAllocation).
-func (m *ProxyAllocationMutation) Type() string {
-	return m.typ
-}
-
-// Fields returns all fields that were changed during this mutation. Note that in
-// order to get all numeric fields that were incremented/decremented, call
-// AddedFields().
-func (m *ProxyAllocationMutation) Fields() []string {
-	fields := make([]string, 0, 10)
-	if m.created_at != nil {
-		fields = append(fields, proxyallocation.FieldCreatedAt)
-	}
-	if m.updated_at != nil {
-		fields = append(fields, proxyallocation.FieldUpdatedAt)
-	}
-	if m.proxy_id != nil {
-		fields = append(fields, proxyallocation.FieldProxyID)
-	}
-	if m.external_provider_account_id != nil {
-		fields = append(fields, proxyallocation.FieldExternalProviderAccountID)
-	}
-	if m.account_id != nil {
-		fields = append(fields, proxyallocation.FieldAccountID)
-	}
-	if m.region != nil {
-		fields = append(fields, proxyallocation.FieldRegion)
-	}
-	if m.allocation_status != nil {
-		fields = append(fields, proxyallocation.FieldAllocationStatus)
-	}
-	if m.assigned_at != nil {
-		fields = append(fields, proxyallocation.FieldAssignedAt)
-	}
-	if m.released_at != nil {
-		fields = append(fields, proxyallocation.FieldReleasedAt)
-	}
-	if m.release_reason != nil {
-		fields = append(fields, proxyallocation.FieldReleaseReason)
-	}
-	return fields
-}
-
-// Field returns the value of a field with the given name. The second boolean
-// return value indicates that this field was not set, or was not defined in the
-// schema.
-func (m *ProxyAllocationMutation) Field(name string) (ent.Value, bool) {
-	switch name {
-	case proxyallocation.FieldCreatedAt:
-		return m.CreatedAt()
-	case proxyallocation.FieldUpdatedAt:
-		return m.UpdatedAt()
-	case proxyallocation.FieldProxyID:
-		return m.ProxyID()
-	case proxyallocation.FieldExternalProviderAccountID:
-		return m.ExternalProviderAccountID()
-	case proxyallocation.FieldAccountID:
-		return m.AccountID()
-	case proxyallocation.FieldRegion:
-		return m.Region()
-	case proxyallocation.FieldAllocationStatus:
-		return m.AllocationStatus()
-	case proxyallocation.FieldAssignedAt:
-		return m.AssignedAt()
-	case proxyallocation.FieldReleasedAt:
-		return m.ReleasedAt()
-	case proxyallocation.FieldReleaseReason:
-		return m.ReleaseReason()
-	}
-	return nil, false
-}
-
-// OldField returns the old value of the field from the database. An error is
-// returned if the mutation operation is not UpdateOne, or the query to the
-// database failed.
-func (m *ProxyAllocationMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
-	switch name {
-	case proxyallocation.FieldCreatedAt:
-		return m.OldCreatedAt(ctx)
-	case proxyallocation.FieldUpdatedAt:
-		return m.OldUpdatedAt(ctx)
-	case proxyallocation.FieldProxyID:
-		return m.OldProxyID(ctx)
-	case proxyallocation.FieldExternalProviderAccountID:
-		return m.OldExternalProviderAccountID(ctx)
-	case proxyallocation.FieldAccountID:
-		return m.OldAccountID(ctx)
-	case proxyallocation.FieldRegion:
-		return m.OldRegion(ctx)
-	case proxyallocation.FieldAllocationStatus:
-		return m.OldAllocationStatus(ctx)
-	case proxyallocation.FieldAssignedAt:
-		return m.OldAssignedAt(ctx)
-	case proxyallocation.FieldReleasedAt:
-		return m.OldReleasedAt(ctx)
-	case proxyallocation.FieldReleaseReason:
-		return m.OldReleaseReason(ctx)
-	}
-	return nil, fmt.Errorf("unknown ProxyAllocation field %s", name)
-}
-
-// SetField sets the value of a field with the given name. It returns an error if
-// the field is not defined in the schema, or if the type mismatched the field
-// type.
-func (m *ProxyAllocationMutation) SetField(name string, value ent.Value) error {
-	switch name {
-	case proxyallocation.FieldCreatedAt:
-		v, ok := value.(time.Time)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetCreatedAt(v)
-		return nil
-	case proxyallocation.FieldUpdatedAt:
-		v, ok := value.(time.Time)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetUpdatedAt(v)
-		return nil
-	case proxyallocation.FieldProxyID:
-		v, ok := value.(int64)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetProxyID(v)
-		return nil
-	case proxyallocation.FieldExternalProviderAccountID:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetExternalProviderAccountID(v)
-		return nil
-	case proxyallocation.FieldAccountID:
-		v, ok := value.(int64)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetAccountID(v)
-		return nil
-	case proxyallocation.FieldRegion:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetRegion(v)
-		return nil
-	case proxyallocation.FieldAllocationStatus:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetAllocationStatus(v)
-		return nil
-	case proxyallocation.FieldAssignedAt:
-		v, ok := value.(time.Time)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetAssignedAt(v)
-		return nil
-	case proxyallocation.FieldReleasedAt:
-		v, ok := value.(time.Time)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetReleasedAt(v)
-		return nil
-	case proxyallocation.FieldReleaseReason:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetReleaseReason(v)
-		return nil
-	}
-	return fmt.Errorf("unknown ProxyAllocation field %s", name)
-}
-
-// AddedFields returns all numeric fields that were incremented/decremented during
-// this mutation.
-func (m *ProxyAllocationMutation) AddedFields() []string {
-	var fields []string
-	if m.addproxy_id != nil {
-		fields = append(fields, proxyallocation.FieldProxyID)
-	}
-	if m.addaccount_id != nil {
-		fields = append(fields, proxyallocation.FieldAccountID)
-	}
-	return fields
-}
-
-// AddedField returns the numeric value that was incremented/decremented on a field
-// with the given name. The second boolean return value indicates that this field
-// was not set, or was not defined in the schema.
-func (m *ProxyAllocationMutation) AddedField(name string) (ent.Value, bool) {
-	switch name {
-	case proxyallocation.FieldProxyID:
-		return m.AddedProxyID()
-	case proxyallocation.FieldAccountID:
-		return m.AddedAccountID()
-	}
-	return nil, false
-}
-
-// AddField adds the value to the field with the given name. It returns an error if
-// the field is not defined in the schema, or if the type mismatched the field
-// type.
-func (m *ProxyAllocationMutation) AddField(name string, value ent.Value) error {
-	switch name {
-	case proxyallocation.FieldProxyID:
-		v, ok := value.(int64)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.AddProxyID(v)
-		return nil
-	case proxyallocation.FieldAccountID:
-		v, ok := value.(int64)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.AddAccountID(v)
-		return nil
-	}
-	return fmt.Errorf("unknown ProxyAllocation numeric field %s", name)
-}
-
-// ClearedFields returns all nullable fields that were cleared during this
-// mutation.
-func (m *ProxyAllocationMutation) ClearedFields() []string {
-	var fields []string
-	if m.FieldCleared(proxyallocation.FieldAccountID) {
-		fields = append(fields, proxyallocation.FieldAccountID)
-	}
-	if m.FieldCleared(proxyallocation.FieldRegion) {
-		fields = append(fields, proxyallocation.FieldRegion)
-	}
-	if m.FieldCleared(proxyallocation.FieldAssignedAt) {
-		fields = append(fields, proxyallocation.FieldAssignedAt)
-	}
-	if m.FieldCleared(proxyallocation.FieldReleasedAt) {
-		fields = append(fields, proxyallocation.FieldReleasedAt)
-	}
-	if m.FieldCleared(proxyallocation.FieldReleaseReason) {
-		fields = append(fields, proxyallocation.FieldReleaseReason)
-	}
-	return fields
-}
-
-// FieldCleared returns a boolean indicating if a field with the given name was
-// cleared in this mutation.
-func (m *ProxyAllocationMutation) FieldCleared(name string) bool {
-	_, ok := m.clearedFields[name]
-	return ok
-}
-
-// ClearField clears the value of the field with the given name. It returns an
-// error if the field is not defined in the schema.
-func (m *ProxyAllocationMutation) ClearField(name string) error {
-	switch name {
-	case proxyallocation.FieldAccountID:
-		m.ClearAccountID()
-		return nil
-	case proxyallocation.FieldRegion:
-		m.ClearRegion()
-		return nil
-	case proxyallocation.FieldAssignedAt:
-		m.ClearAssignedAt()
-		return nil
-	case proxyallocation.FieldReleasedAt:
-		m.ClearReleasedAt()
-		return nil
-	case proxyallocation.FieldReleaseReason:
-		m.ClearReleaseReason()
-		return nil
-	}
-	return fmt.Errorf("unknown ProxyAllocation nullable field %s", name)
-}
-
-// ResetField resets all changes in the mutation for the field with the given name.
-// It returns an error if the field is not defined in the schema.
-func (m *ProxyAllocationMutation) ResetField(name string) error {
-	switch name {
-	case proxyallocation.FieldCreatedAt:
-		m.ResetCreatedAt()
-		return nil
-	case proxyallocation.FieldUpdatedAt:
-		m.ResetUpdatedAt()
-		return nil
-	case proxyallocation.FieldProxyID:
-		m.ResetProxyID()
-		return nil
-	case proxyallocation.FieldExternalProviderAccountID:
-		m.ResetExternalProviderAccountID()
-		return nil
-	case proxyallocation.FieldAccountID:
-		m.ResetAccountID()
-		return nil
-	case proxyallocation.FieldRegion:
-		m.ResetRegion()
-		return nil
-	case proxyallocation.FieldAllocationStatus:
-		m.ResetAllocationStatus()
-		return nil
-	case proxyallocation.FieldAssignedAt:
-		m.ResetAssignedAt()
-		return nil
-	case proxyallocation.FieldReleasedAt:
-		m.ResetReleasedAt()
-		return nil
-	case proxyallocation.FieldReleaseReason:
-		m.ResetReleaseReason()
-		return nil
-	}
-	return fmt.Errorf("unknown ProxyAllocation field %s", name)
-}
-
-// AddedEdges returns all edge names that were set/added in this mutation.
-func (m *ProxyAllocationMutation) AddedEdges() []string {
-	edges := make([]string, 0, 0)
-	return edges
-}
-
-// AddedIDs returns all IDs (to other nodes) that were added for the given edge
-// name in this mutation.
-func (m *ProxyAllocationMutation) AddedIDs(name string) []ent.Value {
-	return nil
-}
-
-// RemovedEdges returns all edge names that were removed in this mutation.
-func (m *ProxyAllocationMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 0)
-	return edges
-}
-
-// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
-// the given name in this mutation.
-func (m *ProxyAllocationMutation) RemovedIDs(name string) []ent.Value {
-	return nil
-}
-
-// ClearedEdges returns all edge names that were cleared in this mutation.
-func (m *ProxyAllocationMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 0)
-	return edges
-}
-
-// EdgeCleared returns a boolean which indicates if the edge with the given name
-// was cleared in this mutation.
-func (m *ProxyAllocationMutation) EdgeCleared(name string) bool {
-	return false
-}
-
-// ClearEdge clears the value of the edge with the given name. It returns an error
-// if that edge is not defined in the schema.
-func (m *ProxyAllocationMutation) ClearEdge(name string) error {
-	return fmt.Errorf("unknown ProxyAllocation unique edge %s", name)
-}
-
-// ResetEdge resets all changes to the edge with the given name in this mutation.
-// It returns an error if the edge is not defined in the schema.
-func (m *ProxyAllocationMutation) ResetEdge(name string) error {
-	return fmt.Errorf("unknown ProxyAllocation edge %s", name)
 }
 
 // RedeemCodeMutation represents an operation that mutates the RedeemCode nodes in the graph.

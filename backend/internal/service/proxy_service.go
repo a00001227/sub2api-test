@@ -45,17 +45,23 @@ type CreateProxyRequest struct {
 	Port     int    `json:"port"`
 	Username string `json:"username"`
 	Password string `json:"password"`
+	// Region 出口区域标签（US/JP/SG…），provider-connect 自动分配用。空 = 不参与自动分配。
+	Region *string `json:"region"`
+	// MaxBindings 最大绑定账号数。nil = 取全局默认；1 = 独占；N = 共用；0 = 不限。
+	MaxBindings *int `json:"max_bindings"`
 }
 
 // UpdateProxyRequest 更新代理请求
 type UpdateProxyRequest struct {
-	Name     *string `json:"name"`
-	Protocol *string `json:"protocol"`
-	Host     *string `json:"host"`
-	Port     *int    `json:"port"`
-	Username *string `json:"username"`
-	Password *string `json:"password"`
-	Status   *string `json:"status"`
+	Name        *string `json:"name"`
+	Protocol    *string `json:"protocol"`
+	Host        *string `json:"host"`
+	Port        *int    `json:"port"`
+	Username    *string `json:"username"`
+	Password    *string `json:"password"`
+	Status      *string `json:"status"`
+	Region      *string `json:"region"`
+	MaxBindings *int    `json:"max_bindings"`
 }
 
 // ProxyService 代理管理服务
@@ -72,15 +78,24 @@ func NewProxyService(proxyRepo ProxyRepository) *ProxyService {
 
 // Create 创建代理
 func (s *ProxyService) Create(ctx context.Context, req CreateProxyRequest) (*Proxy, error) {
+	// max_bindings：调用方(handler)负责在未指定时填入全局默认；service 层兜底为 1
+	// （独占），与 schema 默认一致。
+	maxBindings := 1
+	if req.MaxBindings != nil {
+		maxBindings = *req.MaxBindings
+	}
+
 	// 创建代理
 	proxy := &Proxy{
-		Name:     req.Name,
-		Protocol: req.Protocol,
-		Host:     req.Host,
-		Port:     req.Port,
-		Username: req.Username,
-		Password: req.Password,
-		Status:   StatusActive,
+		Name:        req.Name,
+		Protocol:    req.Protocol,
+		Host:        req.Host,
+		Port:        req.Port,
+		Username:    req.Username,
+		Password:    req.Password,
+		Status:      StatusActive,
+		Region:      req.Region,
+		MaxBindings: maxBindings,
 	}
 
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
@@ -151,6 +166,14 @@ func (s *ProxyService) Update(ctx context.Context, id int64, req UpdateProxyRequ
 
 	if req.Status != nil {
 		proxy.Status = *req.Status
+	}
+
+	if req.Region != nil {
+		proxy.Region = req.Region
+	}
+
+	if req.MaxBindings != nil {
+		proxy.MaxBindings = *req.MaxBindings
 	}
 
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
