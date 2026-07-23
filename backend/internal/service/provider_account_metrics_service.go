@@ -64,13 +64,15 @@ type ProviderAccountMetrics struct {
 	RPMLimit         int          `json:"rpm_limit"`        // 每分钟调度上限（DeRouter 的 0/20 右值；0 = 未设）
 	RPMUsed          int          `json:"rpm_used"`         // 当前分钟已用（左值）
 	RPHUsed          int          `json:"rph_used"`         // 过去 1 小时请求数（DeRouter 每小时左值；无上限配置）
-	ModelCount       int          `json:"model_count"`      // 支持的模型数（0 = 通配/全部或未知）
-	SubscriptionTier string       `json:"subscription_tier,omitempty"`
-	FiveHour         *UsageWindow `json:"five_hour,omitempty"`
-	SevenDay         *UsageWindow `json:"seven_day,omitempty"`
-	TodayRequests    int64        `json:"today_requests"`
-	TodayTokens      int64        `json:"today_tokens"`
-	UpdatedAt        string       `json:"updated_at"` // RFC3339
+	ModelCount          int          `json:"model_count"`      // 支持的模型数（0 = 通配/全部或未知）
+	SubscriptionTier    string       `json:"subscription_tier,omitempty"`
+	SubscriptionTierRaw string       `json:"subscription_tier_raw,omitempty"` // 上游原始订阅名（如 "max 20x"），展示用
+	CreatedAt           string       `json:"created_at,omitempty"`            // 账号接入时间 RFC3339（前端算"托管时长"）
+	FiveHour            *UsageWindow `json:"five_hour,omitempty"`
+	SevenDay            *UsageWindow `json:"seven_day,omitempty"`
+	TodayRequests       int64        `json:"today_requests"`
+	TodayTokens         int64        `json:"today_tokens"`
+	UpdatedAt           string       `json:"updated_at"` // RFC3339
 }
 
 // ProviderAccountMetricsService 组装单账号脱敏运行指标。
@@ -132,6 +134,9 @@ func (s *ProviderAccountMetricsService) Metrics(
 		ModelCount:     countMappedModels(acc.GetModelMapping()),
 		UpdatedAt:      s.now().UTC().Format(time.RFC3339),
 	}
+	if !acc.CreatedAt.IsZero() {
+		out.CreatedAt = acc.CreatedAt.UTC().Format(time.RFC3339)
+	}
 
 	// Current concurrency occupancy (DeRouter's 0/2 left value). Best-effort.
 	if s.concurrency != nil {
@@ -156,6 +161,7 @@ func (s *ProviderAccountMetricsService) Metrics(
 	// is momentarily unavailable — the base status/concurrency still return).
 	if usage, uerr := s.usage.GetPassiveUsage(ctx, id); uerr == nil && usage != nil {
 		out.SubscriptionTier = usage.SubscriptionTier
+		out.SubscriptionTierRaw = usage.SubscriptionTierRaw
 		out.FiveHour = toUsageWindow(usage.FiveHour)
 		out.SevenDay = toUsageWindow(usage.SevenDay)
 	}
