@@ -186,6 +186,7 @@ func (s *ProviderConnectImportService) ImportCredential(
 			Region:                    region,
 			EventID:                   providerwebhook.ImportActivatedEventID(accountRef),
 			Email:                     tokenInfo.EmailAddress,
+			Plan:                      tokenInfo.RateLimitTier,
 		})
 	}
 

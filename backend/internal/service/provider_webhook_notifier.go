@@ -43,6 +43,7 @@ func (n *providerWebhookNotifier) SendActivatedAsync(in ActivatedWebhookInput) {
 		Platform:                  in.Platform,
 		Region:                    in.Region,
 		Email:                     in.Email,
+		Plan:                      in.Plan,
 	})
 	n.sender.SendAsync(ev)
 }

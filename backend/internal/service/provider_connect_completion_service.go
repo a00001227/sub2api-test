@@ -88,6 +88,8 @@ type ActivatedWebhookInput struct {
 	// Email (可选，Phase 21E-6E email-name): 上游 AI 账号邮箱，回传给 Portal
 	// 作为账号展示名。非凭证标识；为空时 Portal 回退序号名。
 	Email string
+	// Plan (可选): 上游订阅等级快照（如 default_claude_max_20x），Portal 存快照展示。
+	Plan string
 }
 
 // ProviderConnectAccountRepository 完成流程创建账号的仓储面。
@@ -266,6 +268,7 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 			Platform:                  platform,
 			Region:                    derefString(session.Region),
 			Email:                     tokenInfo.EmailAddress,
+			Plan:                      tokenInfo.RateLimitTier,
 		})
 	}
 

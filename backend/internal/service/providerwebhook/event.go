@@ -19,6 +19,9 @@ type ActivatedInput struct {
 	// Non-credential identifier; used by Portal as the account display name.
 	// Optional — empty when unknown (Portal falls back to a sequential name).
 	Email string
+	// Plan: upstream subscription tier (e.g. "default_claude_max_20x"),
+	// snapshotted by the Portal at activation. Optional — empty when unknown.
+	Plan string
 }
 
 // BuildActivated constructs a provider.account.activated event.
@@ -35,6 +38,9 @@ func BuildActivated(in ActivatedInput) Event {
 	}
 	if in.Email != "" {
 		payload["email"] = in.Email
+	}
+	if in.Plan != "" {
+		payload["plan"] = in.Plan
 	}
 	return Event{
 		EventID: in.EventID,
