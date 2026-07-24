@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -165,12 +166,41 @@ func (s *ProviderAccountMetricsService) Metrics(
 		out.FiveHour = toUsageWindow(usage.FiveHour)
 		out.SevenDay = toUsageWindow(usage.SevenDay)
 	}
+	// Anthropic 订阅等级来自登录时抓取并存入 credentials 的 rate_limit_tier
+	// （如 "default_claude_max_20x"）。usage 侧只对 Antigravity/Grok 填 tier，
+	// 故此处补 Claude：美化成 "Max 20x" 作为对外展示名。
+	if out.SubscriptionTierRaw == "" {
+		if raw := strings.TrimSpace(acc.GetCredential("rate_limit_tier")); raw != "" {
+			out.SubscriptionTierRaw = prettifyClaudeTier(raw)
+		}
+	}
 	if today, terr := s.usage.GetTodayStats(ctx, id); terr == nil && today != nil {
 		out.TodayRequests = today.Requests
 		out.TodayTokens = today.Tokens
 	}
 
 	return out, nil
+}
+
+// prettifyClaudeTier 把 Anthropic 原始 tier 值美化成展示名：
+// "default_claude_max_20x" → "Max 20x"；"claude_pro" → "Pro"。未知格式原样返回。
+func prettifyClaudeTier(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimPrefix(s, "default_claude_")
+	s = strings.TrimPrefix(s, "claude_")
+	s = strings.ReplaceAll(s, "_", " ")
+	if s == "" {
+		return raw
+	}
+	// Title-case each word (max 20x → Max 20x).
+	parts := strings.Fields(s)
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 // countMappedModels 数账号支持的模型数。model_mapping 的 key 是可用模型；若含

@@ -165,3 +165,12 @@ func TestMetrics_UsageFailureDegrades(t *testing.T) {
 	require.Nil(t, m.FiveHour)
 	require.Equal(t, int64(0), m.TodayRequests)
 }
+
+func TestPrettifyClaudeTier(t *testing.T) {
+	require.Equal(t, "Max 20x", prettifyClaudeTier("default_claude_max_20x"))
+	require.Equal(t, "Max 5x", prettifyClaudeTier("default_claude_max_5x"))
+	require.Equal(t, "Pro", prettifyClaudeTier("claude_pro"))
+	require.Equal(t, "Max", prettifyClaudeTier("max"))
+	// Unknown format returns something non-empty (best-effort display).
+	require.NotEmpty(t, prettifyClaudeTier("weird value"))
+}

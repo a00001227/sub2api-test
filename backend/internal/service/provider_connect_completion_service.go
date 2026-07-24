@@ -298,5 +298,8 @@ func tokenInfoToCredentials(t *TokenInfo) map[string]any {
 	if t.Scope != "" {
 		creds["scope"] = t.Scope
 	}
+	if t.RateLimitTier != "" {
+		creds["rate_limit_tier"] = t.RateLimitTier
+	}
 	return creds
 }

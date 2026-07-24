@@ -283,3 +283,61 @@ func createReqClient(proxyURL string) (*req.Client, error) {
 
 	return client, nil
 }
+
+// profileURL 是 Anthropic 的 OAuth profile 接口，返回账号订阅等级等信息。
+// 与 usage 接口（api.anthropic.com/api/oauth/usage）同 host、同鉴权方式。
+const profileURL = "https://api.anthropic.com/api/oauth/profile"
+
+// FetchRateLimitTier best-effort 拉取账号订阅等级（如 "default_claude_max_20x"）。
+// 用 OAuth access token 调 profile 接口。失败仅返回空串+error，调用方不得阻断登录。
+//
+// 响应用宽松结构体解析：DeRouter 抓包显示 tier 值为 default_claude_max_20x，
+// 但确切嵌套层级需真机验证，故这里同时尝试多个可能位置并打印一次性 debug 日志
+// （脱敏，仅打印结构形状而非凭证）以便确认后收敛。
+func (s *claudeOAuthService) FetchRateLimitTier(ctx context.Context, accessToken, proxyURL string) (string, error) {
+	client, err := s.clientFactory(proxyURL)
+	if err != nil {
+		return "", fmt.Errorf("create HTTP client: %w", err)
+	}
+
+	// 宽松结构体：覆盖 tier 可能出现的几个位置（顶层 / account 下 / organization 下）。
+	var body struct {
+		RateLimitTier string `json:"rate_limit_tier"`
+		Account       struct {
+			RateLimitTier string `json:"rate_limit_tier"`
+		} `json:"account"`
+		Organization struct {
+			RateLimitTier string `json:"rate_limit_tier"`
+		} `json:"organization"`
+	}
+
+	resp, err := client.R().
+		SetContext(ctx).
+		SetHeader("Authorization", "Bearer "+accessToken).
+		SetHeader("anthropic-beta", "oauth-2025-04-20").
+		SetHeader("Accept", "application/json, text/plain, */*").
+		SetSuccessResult(&body).
+		Get(profileURL)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		return "", fmt.Errorf("profile status %d", resp.StatusCode)
+	}
+
+	// TEMP debug（脱敏）：打印完整响应体，供真机确认 tier 的确切字段路径后删除。
+	logger.LegacyPrintf("repository.claude_oauth",
+		"[OAuth] profile raw response (temp debug): %s", logredact.RedactJSON(resp.Bytes()))
+
+	tier := firstNonEmpty(body.RateLimitTier, body.Account.RateLimitTier, body.Organization.RateLimitTier)
+	return tier, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}

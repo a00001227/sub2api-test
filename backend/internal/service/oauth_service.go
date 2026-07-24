@@ -23,6 +23,10 @@ type ClaudeOAuthClient interface {
 	GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error)
 	ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error)
 	RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error)
+	// FetchRateLimitTier best-effort 拉取账号订阅等级（如 "default_claude_max_20x"）。
+	// 用 OAuth access token 调 Anthropic profile 接口；失败返回空串+error，调用方
+	// 不得因此阻断登录流程。
+	FetchRateLimitTier(ctx context.Context, accessToken, proxyURL string) (string, error)
 }
 
 // OAuthService handles OAuth authentication flows
@@ -124,6 +128,7 @@ type TokenInfo struct {
 	OrgUUID      string `json:"org_uuid,omitempty"`
 	AccountUUID  string `json:"account_uuid,omitempty"`
 	EmailAddress string `json:"email_address,omitempty"`
+	RateLimitTier string `json:"rate_limit_tier,omitempty"` // Anthropic 订阅等级，如 default_claude_max_20x
 }
 
 // ExchangeCode exchanges authorization code for tokens
@@ -265,10 +270,19 @@ func (s *OAuthService) exchangeCodeForToken(ctx context.Context, code, codeVerif
 		}
 	}
 
+	// Best-effort: 拉取订阅等级（如 default_claude_max_20x）存入 credentials，
+	// 供 Portal 展示。失败绝不阻断登录 —— 最坏结果只是没 tier。
+	if tokenInfo.AccessToken != "" {
+		if tier, terr := s.oauthClient.FetchRateLimitTier(ctx, tokenInfo.AccessToken, proxyURL); terr == nil && tier != "" {
+			tokenInfo.RateLimitTier = tier
+			log.Printf("[OAuth] Got rate_limit_tier")
+		} else if terr != nil {
+			log.Printf("[OAuth] rate_limit_tier fetch skipped: %v", terr)
+		}
+	}
+
 	return tokenInfo, nil
 }
-
-// RefreshToken refreshes an OAuth token
 func (s *OAuthService) RefreshToken(ctx context.Context, refreshToken string, proxyURL string) (*TokenInfo, error) {
 	tokenResp, err := s.oauthClient.RefreshToken(ctx, refreshToken, proxyURL)
 	if err != nil {
@@ -301,6 +315,33 @@ func (s *OAuthService) RefreshAccountToken(ctx context.Context, account *Account
 	}
 
 	return s.RefreshToken(ctx, refreshToken, proxyURL)
+}
+
+// BackfillClaudeTier 用账号已存的 access_token 拉取 Anthropic 订阅等级
+// （如 default_claude_max_20x），供老账号在不重新登录的情况下补上 tier。
+// 返回原始 tier 值；无 access_token 或拉取失败时返回错误。仅用于 anthropic 账号。
+//
+// NOTE(临时)：这是线上验收用的回填入口，验收确认 profile 字段结构后，连同
+// FetchRateLimitTier 里的 temp debug 日志一并清理。
+func (s *OAuthService) BackfillClaudeTier(ctx context.Context, account *Account) (string, error) {
+	accessToken := account.GetCredential("access_token")
+	if accessToken == "" {
+		return "", fmt.Errorf("no access token available")
+	}
+
+	var proxyURL string
+	if account.ProxyID != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
+		if err == nil && proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+
+	tier, err := s.oauthClient.FetchRateLimitTier(ctx, accessToken, proxyURL)
+	if err != nil {
+		return "", err
+	}
+	return tier, nil
 }
 
 // Stop stops the session store cleanup goroutine

@@ -2241,6 +2241,55 @@ func (h *AccountHandler) SetPrivacy(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updated))
 }
 
+// RefreshClaudeTier backfills the Anthropic subscription tier (rate_limit_tier)
+// for an existing Claude account using its stored access_token — no re-login.
+// POST /api/v1/admin/accounts/:id/refresh-claude-tier
+//
+// NOTE(临时)：线上验收 max 20x 用的回填入口。验收后连同 FetchRateLimitTier
+// 的 temp debug 日志一并删除。
+func (h *AccountHandler) RefreshClaudeTier(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	ctx := c.Request.Context()
+	account, err := h.adminService.GetAccount(ctx, accountID)
+	if err != nil {
+		response.NotFound(c, "Account not found")
+		return
+	}
+	if account.Platform != service.PlatformAnthropic {
+		response.BadRequest(c, "Only Claude (anthropic) accounts support this")
+		return
+	}
+
+	tier, err := h.oauthService.BackfillClaudeTier(ctx, account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if tier == "" {
+		response.Success(c, gin.H{"rate_limit_tier": "", "note": "profile returned no tier"})
+		return
+	}
+
+	creds := make(map[string]any, len(account.Credentials)+1)
+	for k, v := range account.Credentials {
+		creds[k] = v
+	}
+	creds["rate_limit_tier"] = tier
+	if _, updateErr := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
+		Credentials: creds,
+	}); updateErr != nil {
+		response.ErrorFrom(c, updateErr)
+		return
+	}
+
+	response.Success(c, gin.H{"rate_limit_tier": tier})
+}
+
 // RefreshTier handles refreshing Google One tier for a single account
 // POST /api/v1/admin/accounts/:id/refresh-tier
 func (h *AccountHandler) RefreshTier(c *gin.Context) {
