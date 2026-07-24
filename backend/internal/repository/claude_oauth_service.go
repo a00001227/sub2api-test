@@ -291,9 +291,7 @@ const profileURL = "https://api.anthropic.com/api/oauth/profile"
 // FetchRateLimitTier best-effort 拉取账号订阅等级（如 "default_claude_max_20x"）。
 // 用 OAuth access token 调 profile 接口。失败仅返回空串+error，调用方不得阻断登录。
 //
-// 响应用宽松结构体解析：DeRouter 抓包显示 tier 值为 default_claude_max_20x，
-// 但确切嵌套层级需真机验证，故这里同时尝试多个可能位置并打印一次性 debug 日志
-// （脱敏，仅打印结构形状而非凭证）以便确认后收敛。
+// 响应用宽松结构体解析，覆盖 tier 可能出现的几个位置（顶层 / account / organization）。
 // profileFetchTimeout 限定 profile 抓取时长，快速失败。这是 best-effort 展示
 // 数据，绝不能因上游慢/不可达而卡住登录或 admin 请求（此前无超时曾导致 504）。
 const profileFetchTimeout = 10 * time.Second
@@ -329,13 +327,6 @@ func (s *claudeOAuthService) FetchRateLimitTier(ctx context.Context, accessToken
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-
-	// TEMP debug（脱敏）：无论成功与否都打印响应体，供真机确认 tier 字段路径 /
-	// 诊断 401 revoked 等错误后删除。
-	logger.LegacyPrintf("repository.claude_oauth",
-		"[OAuth] profile response (temp debug) status=%d body=%s",
-		resp.StatusCode, logredact.RedactJSON(resp.Bytes()))
-
 	if !resp.IsSuccessState() {
 		return "", fmt.Errorf("profile status %d", resp.StatusCode)
 	}
