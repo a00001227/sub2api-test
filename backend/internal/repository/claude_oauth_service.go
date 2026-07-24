@@ -294,7 +294,15 @@ const profileURL = "https://api.anthropic.com/api/oauth/profile"
 // 响应用宽松结构体解析：DeRouter 抓包显示 tier 值为 default_claude_max_20x，
 // 但确切嵌套层级需真机验证，故这里同时尝试多个可能位置并打印一次性 debug 日志
 // （脱敏，仅打印结构形状而非凭证）以便确认后收敛。
+// profileFetchTimeout 限定 profile 抓取时长，快速失败。这是 best-effort 展示
+// 数据，绝不能因上游慢/不可达而卡住登录或 admin 请求（此前无超时曾导致 504）。
+const profileFetchTimeout = 10 * time.Second
+
 func (s *claudeOAuthService) FetchRateLimitTier(ctx context.Context, accessToken, proxyURL string) (string, error) {
+	// 独立短超时，与调用方 context 解耦：无论上游多慢，最多等 profileFetchTimeout。
+	ctx, cancel := context.WithTimeout(ctx, profileFetchTimeout)
+	defer cancel()
+
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
 		return "", fmt.Errorf("create HTTP client: %w", err)
@@ -321,13 +329,16 @@ func (s *claudeOAuthService) FetchRateLimitTier(ctx context.Context, accessToken
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
+
+	// TEMP debug（脱敏）：无论成功与否都打印响应体，供真机确认 tier 字段路径 /
+	// 诊断 401 revoked 等错误后删除。
+	logger.LegacyPrintf("repository.claude_oauth",
+		"[OAuth] profile response (temp debug) status=%d body=%s",
+		resp.StatusCode, logredact.RedactJSON(resp.Bytes()))
+
 	if !resp.IsSuccessState() {
 		return "", fmt.Errorf("profile status %d", resp.StatusCode)
 	}
-
-	// TEMP debug（脱敏）：打印完整响应体，供真机确认 tier 的确切字段路径后删除。
-	logger.LegacyPrintf("repository.claude_oauth",
-		"[OAuth] profile raw response (temp debug): %s", logredact.RedactJSON(resp.Bytes()))
 
 	tier := firstNonEmpty(body.RateLimitTier, body.Account.RateLimitTier, body.Organization.RateLimitTier)
 	return tier, nil
