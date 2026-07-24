@@ -1,0 +1,52 @@
+-- Seed the region dictionary with common airport/city codes for AI egress
+-- regions. Idempotent (ON CONFLICT DO NOTHING) so it never overwrites entries
+-- edited later in the Region Management UI, and is safe if re-applied.
+--
+-- sort_order groups: 100s = North America, 200s = Asia-Pacific,
+-- 300s = Europe, 400s = Middle East / Africa / Latin America.
+
+INSERT INTO regions (code, name_en, name_zh, sort_order, enabled) VALUES
+  ('IAD', 'Ashburn',        '阿什本',     101, true),
+  ('SJC', 'San Jose',       '圣何塞',     102, true),
+  ('LAX', 'Los Angeles',    '洛杉矶',     103, true),
+  ('ORD', 'Chicago',        '芝加哥',     104, true),
+  ('ATL', 'Atlanta',        '亚特兰大',   105, true),
+  ('DFW', 'Dallas',         '达拉斯',     106, true),
+  ('SEA', 'Seattle',        '西雅图',     107, true),
+  ('NYC', 'New York',       '纽约',       108, true),
+  ('MIA', 'Miami',          '迈阿密',     109, true),
+  ('PDX', 'Portland',       '波特兰',     110, true),
+  ('SLC', 'Salt Lake City', '盐湖城',     111, true),
+  ('PHX', 'Phoenix',        '凤凰城',     112, true),
+  ('DEN', 'Denver',         '丹佛',       113, true),
+  ('IAH', 'Houston',        '休斯顿',     114, true),
+  ('BOS', 'Boston',         '波士顿',     115, true),
+  ('YYZ', 'Toronto',        '多伦多',     116, true),
+  ('YVR', 'Vancouver',      '温哥华',     117, true),
+  ('NRT', 'Tokyo',          '东京',       201, true),
+  ('KIX', 'Osaka',          '大阪',       202, true),
+  ('ICN', 'Seoul',          '首尔',       203, true),
+  ('SIN', 'Singapore',      '新加坡',     204, true),
+  ('HKG', 'Hong Kong',      '香港',       205, true),
+  ('TPE', 'Taipei',         '台北',       206, true),
+  ('SYD', 'Sydney',         '悉尼',       207, true),
+  ('BOM', 'Mumbai',         '孟买',       208, true),
+  ('BLR', 'Bangalore',      '班加罗尔',   209, true),
+  ('CGK', 'Jakarta',        '雅加达',     210, true),
+  ('KUL', 'Kuala Lumpur',   '吉隆坡',     211, true),
+  ('BKK', 'Bangkok',        '曼谷',       212, true),
+  ('LHR', 'London',         '伦敦',       301, true),
+  ('FRA', 'Frankfurt',      '法兰克福',   302, true),
+  ('AMS', 'Amsterdam',      '阿姆斯特丹', 303, true),
+  ('CDG', 'Paris',          '巴黎',       304, true),
+  ('DUB', 'Dublin',         '都柏林',     305, true),
+  ('ARN', 'Stockholm',      '斯德哥尔摩', 306, true),
+  ('MAD', 'Madrid',         '马德里',     307, true),
+  ('MXP', 'Milan',          '米兰',       308, true),
+  ('WAW', 'Warsaw',         '华沙',       309, true),
+  ('ZRH', 'Zurich',         '苏黎世',     310, true),
+  ('DXB', 'Dubai',          '迪拜',       401, true),
+  ('TLV', 'Tel Aviv',       '特拉维夫',   402, true),
+  ('JNB', 'Johannesburg',   '约翰内斯堡', 403, true),
+  ('GRU', 'Sao Paulo',      '圣保罗',     404, true)
+ON CONFLICT (code) DO NOTHING;
