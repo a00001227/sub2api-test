@@ -483,7 +483,6 @@ type ProxyQualityCheckItem struct {
 type ProxyExitInfo struct {
 	IP          string
 	City        string
-	CityZh      string
 	Region      string
 	Country     string
 	CountryCode string
@@ -3732,34 +3731,6 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 		City:        exitInfo.City,
 		UpdatedAt:   time.Now(),
 	})
-
-	// X-a: auto-fill the binding region from the geo-probe, but ONLY when the
-	// proxy has no region yet — never overwrite an admin-entered value. This
-	// runs on create (the only caller); TestProxy never reaches here, so a
-	// manual "test connection" can't clobber region. Best-effort: probe/geo
-	// gaps just leave region empty (proxy stays out of provider auto-allocation).
-	s.autoFillProxyRegion(ctx, proxy.ID, exitInfo.City, exitInfo.CityZh)
-}
-
-// autoFillProxyRegion writes region (English city, the match key) + region_zh
-// (localized city, display only) only if the proxy's region is currently empty.
-func (s *adminServiceImpl) autoFillProxyRegion(ctx context.Context, proxyID int64, cityEn, cityZh string) {
-	city := strings.ToUpper(strings.TrimSpace(cityEn))
-	if city == "" {
-		return
-	}
-	cur, err := s.proxyRepo.GetByID(ctx, proxyID)
-	if err != nil || cur == nil {
-		return
-	}
-	if cur.Region != nil && strings.TrimSpace(*cur.Region) != "" {
-		return // admin already set it — respect the manual value (X-a)
-	}
-	cur.Region = &city
-	if zh := strings.TrimSpace(cityZh); zh != "" {
-		cur.RegionZh = &zh
-	}
-	_ = s.proxyRepo.Update(ctx, cur)
 }
 
 // checkMixedChannelRisk 检查分组中是否存在混合渠道（Antigravity + Anthropic）

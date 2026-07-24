@@ -37,7 +37,7 @@ func (f *fakeAllocationRepo) RegionCapacity(_ context.Context, _ string) ([]Regi
 
 func TestProxyAllocator_RegionMatch(t *testing.T) {
 	repo := &fakeAllocationRepo{proxy: &Proxy{ID: 7, Name: "us-1", Status: StatusActive}}
-	a := NewProxyAllocator(repo)
+	a := NewProxyAllocator(repo, nil)
 
 	p, err := a.SelectProxy(context.Background(), "us", "anthropic")
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestProxyAllocator_AvailableRegions(t *testing.T) {
 		{Region: "US", AvailableSlots: 1},  // 存量粗粒度
 		{Region: "zzz", AvailableSlots: 2}, // 未知 code → label 回退
 	}}
-	a := NewProxyAllocator(repo)
+	a := NewProxyAllocator(repo, nil)
 
 	out, err := a.AvailableRegions(context.Background(), "anthropic")
 	require.NoError(t, err)
@@ -64,13 +64,14 @@ func TestProxyAllocator_AvailableRegions(t *testing.T) {
 	for _, r := range out {
 		byID[r.ID] = r
 	}
-	require.Equal(t, "Los Angeles", byID["lax"].Label)
+	// With a nil region resolver, labels fall back to the raw region code.
+	require.Equal(t, "lax", byID["lax"].Label)
 	require.True(t, byID["lax"].Available)
 	require.Equal(t, CapacityLimited, byID["lax"].Capacity, "3 slots → limited")
 
 	require.False(t, byID["sgp"].Available, "0 slots → not available")
 	require.Equal(t, CapacityFull, byID["sgp"].Capacity, "0 slots → full")
-	require.Equal(t, "United States", byID["US"].Label)
+	require.Equal(t, "US", byID["US"].Label)
 	require.Equal(t, "zzz", byID["zzz"].Label, "unknown code falls back to code")
 }
 
@@ -86,7 +87,7 @@ func TestCapacityTierFromSlots(t *testing.T) {
 
 func TestProxyAllocator_NoCapacity(t *testing.T) {
 	repo := &fakeAllocationRepo{proxy: nil} // 无匹配行
-	a := NewProxyAllocator(repo)
+	a := NewProxyAllocator(repo, nil)
 
 	p, err := a.SelectProxy(context.Background(), "JP", "anthropic")
 	require.Nil(t, p)
@@ -94,14 +95,14 @@ func TestProxyAllocator_NoCapacity(t *testing.T) {
 }
 
 func TestProxyAllocator_EmptyRegion(t *testing.T) {
-	a := NewProxyAllocator(&fakeAllocationRepo{})
+	a := NewProxyAllocator(&fakeAllocationRepo{}, nil)
 	_, err := a.SelectProxy(context.Background(), "   ", "anthropic")
 	require.ErrorIs(t, err, ErrRegionRequired)
 }
 
 func TestProxyAllocator_RepoErrorPropagates(t *testing.T) {
 	boom := errors.New("db down")
-	a := NewProxyAllocator(&fakeAllocationRepo{err: boom})
+	a := NewProxyAllocator(&fakeAllocationRepo{err: boom}, nil)
 	_, err := a.SelectProxy(context.Background(), "SG", "anthropic")
 	require.ErrorIs(t, err, boom)
 }
@@ -117,13 +118,13 @@ func TestProxyAllocator_NoCapacityIsNotFound(t *testing.T) {
 // AvailableRegions 缓存：TTL 内多次调用只查库一次（进程内缓存生效）。
 func TestProxyAllocator_AvailableRegions_Cached(t *testing.T) {
 	repo := &fakeAllocationRepo{caps: []RegionCapacity{{Region: "lax", AvailableSlots: 3}}}
-	a := NewProxyAllocator(repo)
+	a := NewProxyAllocator(repo, nil)
 
 	for i := 0; i < 5; i++ {
 		out, err := a.AvailableRegions(context.Background(), "anthropic")
 		require.NoError(t, err)
 		require.Len(t, out, 1)
-		require.Equal(t, "Los Angeles", out[0].Label)
+		require.Equal(t, "lax", out[0].Label)
 	}
 	require.Equal(t, 1, repo.capCalls, "TTL 内多次调用应只查库一次")
 }
@@ -131,7 +132,7 @@ func TestProxyAllocator_AvailableRegions_Cached(t *testing.T) {
 // AvailableRegions 缓存：并发调用经 singleflight 收敛为一次查库（防击穿）。
 func TestProxyAllocator_AvailableRegions_SingleflightCollapsesConcurrent(t *testing.T) {
 	repo := &fakeAllocationRepo{caps: []RegionCapacity{{Region: "lax", AvailableSlots: 1}}}
-	a := NewProxyAllocator(repo)
+	a := NewProxyAllocator(repo, nil)
 
 	const n = 50
 	var wg sync.WaitGroup
@@ -153,7 +154,7 @@ func TestProxyAllocator_AvailableRegions_SingleflightCollapsesConcurrent(t *test
 func TestProxyAllocator_AvailableRegions_ErrorNotCached(t *testing.T) {
 	boom := errors.New("db down")
 	repo := &fakeAllocationRepo{capsErr: boom}
-	a := NewProxyAllocator(repo)
+	a := NewProxyAllocator(repo, nil)
 
 	_, err := a.AvailableRegions(context.Background(), "anthropic")
 	require.ErrorIs(t, err, boom)

@@ -29,7 +29,6 @@ type Proxy struct {
 	BackupProxyID  *int64
 	ExpiryWarnDays int
 	Region         *string
-	RegionZh       *string
 	MaxBindings    int
 }
 

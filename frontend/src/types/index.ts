@@ -747,11 +747,36 @@ export interface Proxy {
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days: number
-  bind_region?: string | null  // 绑定分区标签（入库；区别于 region 地理探测结果）
-  bind_region_zh?: string | null  // 绑定分区中文名（探测回写；展示用）
+  bind_region?: string | null  // 绑定分区 code（入库；区别于 region 地理探测结果）
   max_bindings?: number        // 最大绑定账号数
   created_at: string
   updated_at: string
+}
+
+// Egress-region dictionary entry (single source of truth for region names).
+export interface Region {
+  id: number
+  code: string      // upper-case IATA-style code, e.g. SJC/NRT/ORD
+  name_en: string
+  name_zh: string
+  sort_order: number
+  enabled: boolean
+}
+
+export interface CreateRegionRequest {
+  code: string
+  name_en: string
+  name_zh: string
+  sort_order?: number
+  enabled?: boolean
+}
+
+export interface UpdateRegionRequest {
+  code?: string
+  name_en?: string
+  name_zh?: string
+  sort_order?: number
+  enabled?: boolean
 }
 
 export interface ProxyAccountSummary {

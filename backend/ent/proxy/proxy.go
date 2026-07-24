@@ -45,8 +45,6 @@ const (
 	FieldExpiryWarnDays = "expiry_warn_days"
 	// FieldRegion holds the string denoting the region field in the database.
 	FieldRegion = "region"
-	// FieldRegionZh holds the string denoting the region_zh field in the database.
-	FieldRegionZh = "region_zh"
 	// FieldMaxBindings holds the string denoting the max_bindings field in the database.
 	FieldMaxBindings = "max_bindings"
 	// EdgeAccounts holds the string denoting the accounts edge name in mutations.
@@ -86,7 +84,6 @@ var Columns = []string{
 	FieldBackupProxyID,
 	FieldExpiryWarnDays,
 	FieldRegion,
-	FieldRegionZh,
 	FieldMaxBindings,
 }
 
@@ -136,8 +133,6 @@ var (
 	DefaultExpiryWarnDays int
 	// RegionValidator is a validator for the "region" field. It is called by the builders before save.
 	RegionValidator func(string) error
-	// RegionZhValidator is a validator for the "region_zh" field. It is called by the builders before save.
-	RegionZhValidator func(string) error
 	// DefaultMaxBindings holds the default value on creation for the "max_bindings" field.
 	DefaultMaxBindings int
 )
@@ -223,11 +218,6 @@ func ByExpiryWarnDays(opts ...sql.OrderTermOption) OrderOption {
 // ByRegion orders the results by the region field.
 func ByRegion(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRegion, opts...).ToFunc()
-}
-
-// ByRegionZh orders the results by the region_zh field.
-func ByRegionZh(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldRegionZh, opts...).ToFunc()
 }
 
 // ByMaxBindings orders the results by the max_bindings field.

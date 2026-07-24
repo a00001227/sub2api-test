@@ -358,6 +358,14 @@ func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		announcements.DELETE("/:id", h.Admin.Announcement.Delete)
 		announcements.GET("/:id/read-status", h.Admin.Announcement.ListReadStatus)
 	}
+
+	regions := admin.Group("/regions")
+	{
+		regions.GET("", h.Admin.Region.List)
+		regions.POST("", h.Admin.Region.Create)
+		regions.PUT("/:id", h.Admin.Region.Update)
+		regions.DELETE("/:id", h.Admin.Region.Delete)
+	}
 }
 
 func registerFeedbackRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

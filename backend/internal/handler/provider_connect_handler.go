@@ -23,6 +23,7 @@ type ProviderConnectHandler struct {
 	importSvc  *service.ProviderConnectImportService
 	allocator  *service.ProxyAllocator
 	metrics    *service.ProviderAccountMetricsService
+	regions    *service.RegionService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -32,8 +33,31 @@ func NewProviderConnectHandler(
 	importSvc *service.ProviderConnectImportService,
 	allocator *service.ProxyAllocator,
 	metrics *service.ProviderAccountMetricsService,
+	regions *service.RegionService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions}
+}
+
+// Regions handles
+// GET /internal/provider-accounts/regions
+//
+// 返回启用的 region 字典（code/name_en/name_zh），供 Portal 解析账号卡上的
+// region 徽章（code → 中/英名）。脱敏：只含展示名，不含任何代理/IP 信息。
+func (h *ProviderConnectHandler) Regions(c *gin.Context) {
+	list, err := h.regions.List(c.Request.Context(), true)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	out := make([]gin.H, 0, len(list))
+	for i := range list {
+		out = append(out, gin.H{
+			"code":    list[i].Code,
+			"name_en": list[i].NameEn,
+			"name_zh": list[i].NameZh,
+		})
+	}
+	response.Success(c, gin.H{"regions": out})
 }
 
 // AccountMetrics handles

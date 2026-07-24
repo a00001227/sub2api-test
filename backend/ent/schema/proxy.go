@@ -67,15 +67,9 @@ func (Proxy) Fields() []ent.Field {
 		field.String("region").
 			MaxLen(20).
 			Optional().Nillable().
-			Comment("Egress region label (e.g. US/JP/SG/EU) for provider-connect " +
-				"auto allocation. NULL = unpartitioned node, excluded from " +
-				"auto allocation; existing manual binding is unaffected."),
-		field.String("region_zh").
-			MaxLen(40).
-			Optional().Nillable().
-			Comment("Localized (zh) display name of the region/city, auto-filled " +
-				"from proxy geo-probe at create time. Display only — matching and " +
-				"grouping always use the English `region`."),
+			Comment("Egress region code (Region.code, upper-case IATA-style e.g. SJC/NRT) " +
+				"for provider-connect auto allocation. NULL = unpartitioned node, " +
+				"excluded from auto allocation; display names live in the regions table."),
 		field.Int("max_bindings").
 			Default(1).
 			Comment("Max AI accounts that may bind to this proxy. 1 = exclusive " +

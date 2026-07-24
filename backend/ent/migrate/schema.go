@@ -1236,7 +1236,6 @@ var (
 		{Name: "fallback_mode", Type: field.TypeString, Size: 20, Default: "none"},
 		{Name: "expiry_warn_days", Type: field.TypeInt, Default: 7},
 		{Name: "region", Type: field.TypeString, Nullable: true, Size: 20},
-		{Name: "region_zh", Type: field.TypeString, Nullable: true, Size: 40},
 		{Name: "max_bindings", Type: field.TypeInt, Default: 1},
 		{Name: "backup_proxy_id", Type: field.TypeInt64, Unique: true, Nullable: true},
 	}
@@ -1248,7 +1247,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "proxies_proxies_backup_proxy",
-				Columns:    []*schema.Column{ProxiesColumns[17]},
+				Columns:    []*schema.Column{ProxiesColumns[16]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1272,7 +1271,7 @@ var (
 			{
 				Name:    "proxy_backup_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{ProxiesColumns[17]},
+				Columns: []*schema.Column{ProxiesColumns[16]},
 			},
 		},
 	}
@@ -1330,6 +1329,40 @@ var (
 				Name:    "redeemcode_expires_at",
 				Unique:  false,
 				Columns: []*schema.Column{RedeemCodesColumns[8]},
+			},
+		},
+	}
+	// RegionsColumns holds the columns for the "regions" table.
+	RegionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "code", Type: field.TypeString, Unique: true, Size: 20},
+		{Name: "name_en", Type: field.TypeString, Size: 60},
+		{Name: "name_zh", Type: field.TypeString, Size: 60},
+		{Name: "sort_order", Type: field.TypeInt, Default: 0},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// RegionsTable holds the schema information for the "regions" table.
+	RegionsTable = &schema.Table{
+		Name:       "regions",
+		Columns:    RegionsColumns,
+		PrimaryKey: []*schema.Column{RegionsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "region_code",
+				Unique:  true,
+				Columns: []*schema.Column{RegionsColumns[1]},
+			},
+			{
+				Name:    "region_enabled",
+				Unique:  false,
+				Columns: []*schema.Column{RegionsColumns[5]},
+			},
+			{
+				Name:    "region_sort_order",
+				Unique:  false,
+				Columns: []*schema.Column{RegionsColumns[4]},
 			},
 		},
 	}
@@ -1930,6 +1963,7 @@ var (
 		ProviderConnectSessionsTable,
 		ProxiesTable,
 		RedeemCodesTable,
+		RegionsTable,
 		SecuritySecretsTable,
 		SettingsTable,
 		SubscriptionPlansTable,
@@ -2044,6 +2078,9 @@ func init() {
 	RedeemCodesTable.ForeignKeys[1].RefTable = UsersTable
 	RedeemCodesTable.Annotation = &entsql.Annotation{
 		Table: "redeem_codes",
+	}
+	RegionsTable.Annotation = &entsql.Annotation{
+		Table: "regions",
 	}
 	SecuritySecretsTable.Annotation = &entsql.Annotation{
 		Table: "security_secrets",

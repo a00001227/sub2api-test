@@ -38,10 +38,9 @@ type ProxyAllocationRepository interface {
 	RegionCapacity(ctx context.Context, platform string) ([]RegionCapacity, error)
 }
 
-// RegionCapacity 是仓储层返回的单个 region 容量（未脱敏前只有 region+slots）。
+// RegionCapacity 是仓储层返回的单个 region 容量（region code + 该平台可用名额）。
 type RegionCapacity struct {
 	Region         string
-	RegionZh       string
 	AvailableSlots int
 }
 
@@ -76,30 +75,12 @@ func capacityTierFromSlots(slots int) RegionCapacityTier {
 type AvailableRegion struct {
 	ID        string             `json:"id"`       // region code（IATA-style，如 lax/sgp/nrt 或存量 US）
 	Label     string             `json:"label"`    // 展示名（城市），未知 code 回退为 code 本身
-	LabelZh   string             `json:"label_zh"` // 中文展示名（探测回写的 region_zh），无则回退英文 Label
+	LabelZh   string             `json:"label_zh"` // 中文展示名（来自 region 字典表），无则回退 code
 	Available bool               `json:"available"`// 是否还有名额（capacity != full）
 	Capacity  RegionCapacityTier `json:"capacity"` // 脱敏容量档位：ample / limited / full
 	// AvailableSlots 是内部精确名额，仅供服务内/测试使用；json:"-" 确保它
 	// 绝不出网关（脱敏边界）。
 	AvailableSlots int `json:"-"`
-}
-
-// regionLabels 是 region code → 展示名的静态映射（IATA-style，对齐 DeRouter 的
-// /proxy-regions）。未命中则 label 回退为 code 本身，不阻塞新增 region。
-var regionLabels = map[string]string{
-	"sgp": "Singapore", "atl": "Atlanta", "bom": "Mumbai", "cgk": "Jakarta",
-	"jnb": "Johannesburg", "lax": "Los Angeles", "lon": "London", "mex": "Mexico City",
-	"nrt": "Tokyo", "nyc": "New York", "pdx": "Portland", "syd": "Sydney",
-	"tpe": "Taipei", "yyz": "Toronto",
-	// 兼容存量粗粒度标签
-	"US": "United States", "JP": "Japan", "SG": "Singapore", "EU": "Europe",
-}
-
-func regionLabelFor(code string) string {
-	if l, ok := regionLabels[code]; ok {
-		return l
-	}
-	return code
 }
 
 // availableRegionsCacheTTL 是 AvailableRegions 展示结果的进程内缓存时长。
@@ -181,17 +162,32 @@ func (c *regionCapacityCache) getOrLoad(
 	return res.([]AvailableRegion), nil
 }
 
-// ProxyAllocator 按 region 自动选择出口代理。
-type ProxyAllocator struct {
-	repo  ProxyAllocationRepository
-	cache *regionCapacityCache
+// regionNameResolver resolves region codes → display names from the region
+// dictionary (the single source of truth). Injected into the allocator so
+// available-regions can attach English / Chinese names.
+type regionNameResolver interface {
+	ResolveNames(ctx context.Context) (map[string]Region, error)
 }
 
-// NewProxyAllocator creates the allocator.
-func NewProxyAllocator(repo ProxyAllocationRepository) *ProxyAllocator {
+// ProxyAllocator 按 region 自动选择出口代理。
+type ProxyAllocator struct {
+	repo    ProxyAllocationRepository
+	regions regionNameResolver
+	cache   *regionCapacityCache
+}
+
+// NewProxyAllocator creates the allocator. regions resolves region codes to
+// display names (dictionary); it may be nil in tests, in which case names fall
+// back to the raw code.
+func NewProxyAllocator(repo ProxyAllocationRepository, regions *RegionService) *ProxyAllocator {
+	var r regionNameResolver
+	if regions != nil {
+		r = regions
+	}
 	return &ProxyAllocator{
-		repo:  repo,
-		cache: newRegionCapacityCache(availableRegionsCacheTTL),
+		repo:    repo,
+		regions: r,
+		cache:   newRegionCapacityCache(availableRegionsCacheTTL),
 	}
 }
 
@@ -200,21 +196,31 @@ func NewProxyAllocator(repo ProxyAllocationRepository) *ProxyAllocator {
 // 时按空字符串处理（不会匹配任何账号 → 容量为满代理容量），调用方应传入
 // 已解析的平台（anthropic/openai/gemini）。
 //
-// 结果走进程内 TTL 缓存 + singleflight（见 regionCapacityCache），按 platform
-// 分键缓存：这是纯展示型只读、弱一致数据，缓存不影响正确性（强一致仲裁在
-// 授权落库时），却能在上千并发点击下把 DB 读压降到每实例每 TTL 至多一次。
+// 展示名（label / label_zh）来自 region 字典表（唯一真源）；字典里没有该 code
+// 时回退为 code 本身。结果走进程内 TTL 缓存 + singleflight，按 platform 分键。
 func (a *ProxyAllocator) AvailableRegions(ctx context.Context, platform string) ([]AvailableRegion, error) {
 	return a.cache.getOrLoad(platform, func() ([]AvailableRegion, error) {
 		caps, err := a.repo.RegionCapacity(ctx, platform)
 		if err != nil {
 			return nil, err
 		}
+		// Resolve display names from the dictionary once (best-effort: if the
+		// dict read fails, names fall back to the raw code — never blocks).
+		var names map[string]Region
+		if a.regions != nil {
+			names, _ = a.regions.ResolveNames(ctx)
+		}
 		out := make([]AvailableRegion, 0, len(caps))
 		for _, c := range caps {
-			label := regionLabelFor(c.Region)
-			labelZh := c.RegionZh
-			if labelZh == "" {
-				labelZh = label
+			label := c.Region
+			labelZh := c.Region
+			if r, ok := names[c.Region]; ok {
+				if r.NameEn != "" {
+					label = r.NameEn
+				}
+				if r.NameZh != "" {
+					labelZh = r.NameZh
+				}
 			}
 			out = append(out, AvailableRegion{
 				ID:             c.Region,

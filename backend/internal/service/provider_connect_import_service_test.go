@@ -54,7 +54,7 @@ func okInput() ImportCredentialInput {
 // 2/3/4/5: 成功 import → 建账号(external_ref 写入) + proxy 绑定 + webhook 发一次
 func TestImport_Success(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 7, Name: "us-1", Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 7, Name: "us-1", Status: StatusActive}}, nil)
 	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at-xyz", RefreshToken: "rt-xyz", ExpiresAt: 111, EmailAddress: "user@example.com"}}
 	wh := &fakeWebhookNotifier{enabled: true}
 	svc := newImportSvc(accounts, alloc, cookie, wh)
@@ -87,7 +87,7 @@ func TestImport_Success(t *testing.T) {
 // 8: normalized credentials shape 与 OAuth 流程一致（access/refresh/expires）
 func TestImport_NormalizedCredentialsShape(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at", RefreshToken: "rt", ExpiresAt: 999, TokenType: "Bearer"}}
 	svc := newImportSvc(accounts, alloc, cookie, &fakeWebhookNotifier{enabled: true})
 
@@ -103,7 +103,7 @@ func TestImport_NormalizedCredentialsShape(t *testing.T) {
 // 11: 重复 import 同 external_ref → 返回已有 account，不新建、不重发 webhook
 func TestImport_Idempotent(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}
 	wh := &fakeWebhookNotifier{enabled: true}
 	svc := newImportSvc(accounts, alloc, cookie, wh)
@@ -125,7 +125,7 @@ func TestImport_Idempotent(t *testing.T) {
 func TestImport_UniqueConflictConverges(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
 	// 预置：external_ref 已存在（模拟另一路已建），但预查放行前置为空 → 触发 create 冲突路径
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}
 	wh := &fakeWebhookNotifier{enabled: true}
 	svc := newImportSvc(accounts, alloc, cookie, wh)
@@ -144,7 +144,7 @@ func TestImport_UniqueConflictConverges(t *testing.T) {
 // 13: invalid credential（CookieAuth 失败）→ INVALID_CREDENTIAL，不建账号、不发 webhook
 func TestImport_InvalidCredential(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	// 底层 error 故意包含 sessionKey 片段，验证不外泄
 	cookie := &fakeCookieAuth{err: errors.New("cookie auth failed for sk-ant-session-SECRET-VALUE")}
 	wh := &fakeWebhookNotifier{enabled: true}
@@ -164,7 +164,7 @@ func TestImport_InvalidCredential(t *testing.T) {
 // 14: region 无容量 → REGION_NO_CAPACITY，不换 token、不建账号
 func TestImport_RegionNoCapacity(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: nil}) // 无可用
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: nil}, nil) // 无可用
 	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}
 	wh := &fakeWebhookNotifier{enabled: true}
 	svc := newImportSvc(accounts, alloc, cookie, wh)
@@ -181,7 +181,7 @@ func TestImport_RegionNoCapacity(t *testing.T) {
 func TestImport_AccountCreateFailed_NoWebhook(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
 	accounts.createErr = errors.New("db down")
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}
 	wh := &fakeWebhookNotifier{enabled: true}
 	svc := newImportSvc(accounts, alloc, cookie, wh)
@@ -197,7 +197,7 @@ func TestImport_AccountCreateFailed_NoWebhook(t *testing.T) {
 // provider_type 非 claude → PROVIDER_TYPE_UNSUPPORTED（本阶段不支持 codex）
 func TestImport_ProviderTypeUnsupported(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	svc := newImportSvc(accounts, alloc, &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}, &fakeWebhookNotifier{enabled: true})
 
 	in := okInput()
@@ -212,7 +212,7 @@ func TestImport_ProviderTypeUnsupported(t *testing.T) {
 // 请求参数校验：缺 external_ref / 非 pa_ 前缀 / 空 credential / 空 region
 func TestImport_InvalidRequest(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	svc := newImportSvc(accounts, alloc, &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}, &fakeWebhookNotifier{enabled: true})
 
 	cases := []ImportCredentialInput{
@@ -231,7 +231,7 @@ func TestImport_InvalidRequest(t *testing.T) {
 // 16: webhook payload 无 credential（即使 credential 含特征串）
 func TestImport_WebhookNoCredential(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
-	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}})
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}
 	wh := &fakeWebhookNotifier{enabled: true}
 	svc := newImportSvc(accounts, alloc, cookie, wh)

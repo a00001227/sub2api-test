@@ -31,6 +31,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/providerconnectsession"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
+	"github.com/Wei-Shaw/sub2api/ent/region"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
@@ -1591,12 +1592,8 @@ func init() {
 	proxyDescRegion := proxyFields[11].Descriptor()
 	// proxy.RegionValidator is a validator for the "region" field. It is called by the builders before save.
 	proxy.RegionValidator = proxyDescRegion.Validators[0].(func(string) error)
-	// proxyDescRegionZh is the schema descriptor for region_zh field.
-	proxyDescRegionZh := proxyFields[12].Descriptor()
-	// proxy.RegionZhValidator is a validator for the "region_zh" field. It is called by the builders before save.
-	proxy.RegionZhValidator = proxyDescRegionZh.Validators[0].(func(string) error)
 	// proxyDescMaxBindings is the schema descriptor for max_bindings field.
-	proxyDescMaxBindings := proxyFields[13].Descriptor()
+	proxyDescMaxBindings := proxyFields[12].Descriptor()
 	// proxy.DefaultMaxBindings holds the default value on creation for the max_bindings field.
 	proxy.DefaultMaxBindings = proxyDescMaxBindings.Default.(int)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
@@ -1643,6 +1640,80 @@ func init() {
 	redeemcodeDescValidityDays := redeemcodeFields[10].Descriptor()
 	// redeemcode.DefaultValidityDays holds the default value on creation for the validity_days field.
 	redeemcode.DefaultValidityDays = redeemcodeDescValidityDays.Default.(int)
+	regionFields := schema.Region{}.Fields()
+	_ = regionFields
+	// regionDescCode is the schema descriptor for code field.
+	regionDescCode := regionFields[0].Descriptor()
+	// region.CodeValidator is a validator for the "code" field. It is called by the builders before save.
+	region.CodeValidator = func() func(string) error {
+		validators := regionDescCode.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(code string) error {
+			for _, fn := range fns {
+				if err := fn(code); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// regionDescNameEn is the schema descriptor for name_en field.
+	regionDescNameEn := regionFields[1].Descriptor()
+	// region.NameEnValidator is a validator for the "name_en" field. It is called by the builders before save.
+	region.NameEnValidator = func() func(string) error {
+		validators := regionDescNameEn.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name_en string) error {
+			for _, fn := range fns {
+				if err := fn(name_en); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// regionDescNameZh is the schema descriptor for name_zh field.
+	regionDescNameZh := regionFields[2].Descriptor()
+	// region.NameZhValidator is a validator for the "name_zh" field. It is called by the builders before save.
+	region.NameZhValidator = func() func(string) error {
+		validators := regionDescNameZh.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name_zh string) error {
+			for _, fn := range fns {
+				if err := fn(name_zh); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// regionDescSortOrder is the schema descriptor for sort_order field.
+	regionDescSortOrder := regionFields[3].Descriptor()
+	// region.DefaultSortOrder holds the default value on creation for the sort_order field.
+	region.DefaultSortOrder = regionDescSortOrder.Default.(int)
+	// regionDescEnabled is the schema descriptor for enabled field.
+	regionDescEnabled := regionFields[4].Descriptor()
+	// region.DefaultEnabled holds the default value on creation for the enabled field.
+	region.DefaultEnabled = regionDescEnabled.Default.(bool)
+	// regionDescCreatedAt is the schema descriptor for created_at field.
+	regionDescCreatedAt := regionFields[5].Descriptor()
+	// region.DefaultCreatedAt holds the default value on creation for the created_at field.
+	region.DefaultCreatedAt = regionDescCreatedAt.Default.(func() time.Time)
+	// regionDescUpdatedAt is the schema descriptor for updated_at field.
+	regionDescUpdatedAt := regionFields[6].Descriptor()
+	// region.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	region.DefaultUpdatedAt = regionDescUpdatedAt.Default.(func() time.Time)
+	// region.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	region.UpdateDefaultUpdatedAt = regionDescUpdatedAt.UpdateDefault.(func() time.Time)
 	securitysecretMixin := schema.SecuritySecret{}.Mixin()
 	securitysecretMixinFields0 := securitysecretMixin[0].Fields()
 	_ = securitysecretMixinFields0

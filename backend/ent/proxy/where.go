@@ -130,11 +130,6 @@ func Region(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldRegion, v))
 }
 
-// RegionZh applies equality check predicate on the "region_zh" field. It's identical to RegionZhEQ.
-func RegionZh(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldEQ(FieldRegionZh, v))
-}
-
 // MaxBindings applies equality check predicate on the "max_bindings" field. It's identical to MaxBindingsEQ.
 func MaxBindings(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldMaxBindings, v))
@@ -978,81 +973,6 @@ func RegionEqualFold(v string) predicate.Proxy {
 // RegionContainsFold applies the ContainsFold predicate on the "region" field.
 func RegionContainsFold(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldContainsFold(FieldRegion, v))
-}
-
-// RegionZhEQ applies the EQ predicate on the "region_zh" field.
-func RegionZhEQ(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldEQ(FieldRegionZh, v))
-}
-
-// RegionZhNEQ applies the NEQ predicate on the "region_zh" field.
-func RegionZhNEQ(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldNEQ(FieldRegionZh, v))
-}
-
-// RegionZhIn applies the In predicate on the "region_zh" field.
-func RegionZhIn(vs ...string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldIn(FieldRegionZh, vs...))
-}
-
-// RegionZhNotIn applies the NotIn predicate on the "region_zh" field.
-func RegionZhNotIn(vs ...string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldNotIn(FieldRegionZh, vs...))
-}
-
-// RegionZhGT applies the GT predicate on the "region_zh" field.
-func RegionZhGT(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldGT(FieldRegionZh, v))
-}
-
-// RegionZhGTE applies the GTE predicate on the "region_zh" field.
-func RegionZhGTE(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldGTE(FieldRegionZh, v))
-}
-
-// RegionZhLT applies the LT predicate on the "region_zh" field.
-func RegionZhLT(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldLT(FieldRegionZh, v))
-}
-
-// RegionZhLTE applies the LTE predicate on the "region_zh" field.
-func RegionZhLTE(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldLTE(FieldRegionZh, v))
-}
-
-// RegionZhContains applies the Contains predicate on the "region_zh" field.
-func RegionZhContains(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldContains(FieldRegionZh, v))
-}
-
-// RegionZhHasPrefix applies the HasPrefix predicate on the "region_zh" field.
-func RegionZhHasPrefix(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldHasPrefix(FieldRegionZh, v))
-}
-
-// RegionZhHasSuffix applies the HasSuffix predicate on the "region_zh" field.
-func RegionZhHasSuffix(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldHasSuffix(FieldRegionZh, v))
-}
-
-// RegionZhIsNil applies the IsNil predicate on the "region_zh" field.
-func RegionZhIsNil() predicate.Proxy {
-	return predicate.Proxy(sql.FieldIsNull(FieldRegionZh))
-}
-
-// RegionZhNotNil applies the NotNil predicate on the "region_zh" field.
-func RegionZhNotNil() predicate.Proxy {
-	return predicate.Proxy(sql.FieldNotNull(FieldRegionZh))
-}
-
-// RegionZhEqualFold applies the EqualFold predicate on the "region_zh" field.
-func RegionZhEqualFold(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldEqualFold(FieldRegionZh, v))
-}
-
-// RegionZhContainsFold applies the ContainsFold predicate on the "region_zh" field.
-func RegionZhContainsFold(v string) predicate.Proxy {
-	return predicate.Proxy(sql.FieldContainsFold(FieldRegionZh, v))
 }
 
 // MaxBindingsEQ applies the EQ predicate on the "max_bindings" field.

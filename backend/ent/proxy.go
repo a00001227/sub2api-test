@@ -45,10 +45,8 @@ type Proxy struct {
 	BackupProxyID *int64 `json:"backup_proxy_id,omitempty"`
 	// Days before expiry to flag as expiring-soon (per proxy).
 	ExpiryWarnDays int `json:"expiry_warn_days,omitempty"`
-	// Egress region label (e.g. US/JP/SG/EU) for provider-connect auto allocation. NULL = unpartitioned node, excluded from auto allocation; existing manual binding is unaffected.
+	// Egress region code (Region.code, upper-case IATA-style e.g. SJC/NRT) for provider-connect auto allocation. NULL = unpartitioned node, excluded from auto allocation; display names live in the regions table.
 	Region *string `json:"region,omitempty"`
-	// Localized (zh) display name of the region/city, auto-filled from proxy geo-probe at create time. Display only — matching and grouping always use the English `region`.
-	RegionZh *string `json:"region_zh,omitempty"`
 	// Max AI accounts that may bind to this proxy. 1 = exclusive (one account per IP), N = shared by up to N, 0 = unlimited. Provider-connect enforces this on bind; default is set per-proxy (falls back to the global default at create time).
 	MaxBindings int `json:"max_bindings,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
@@ -95,7 +93,7 @@ func (*Proxy) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays, proxy.FieldMaxBindings:
 			values[i] = new(sql.NullInt64)
-		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode, proxy.FieldRegion, proxy.FieldRegionZh:
+		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode, proxy.FieldRegion:
 			values[i] = new(sql.NullString)
 		case proxy.FieldCreatedAt, proxy.FieldUpdatedAt, proxy.FieldDeletedAt, proxy.FieldExpiresAt:
 			values[i] = new(sql.NullTime)
@@ -216,13 +214,6 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 				_m.Region = new(string)
 				*_m.Region = value.String
 			}
-		case proxy.FieldRegionZh:
-			if value, ok := values[i].(*sql.NullString); !ok {
-				return fmt.Errorf("unexpected type %T for field region_zh", values[i])
-			} else if value.Valid {
-				_m.RegionZh = new(string)
-				*_m.RegionZh = value.String
-			}
 		case proxy.FieldMaxBindings:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field max_bindings", values[i])
@@ -329,11 +320,6 @@ func (_m *Proxy) String() string {
 	builder.WriteString(", ")
 	if v := _m.Region; v != nil {
 		builder.WriteString("region=")
-		builder.WriteString(*v)
-	}
-	builder.WriteString(", ")
-	if v := _m.RegionZh; v != nil {
-		builder.WriteString("region_zh=")
 		builder.WriteString(*v)
 	}
 	builder.WriteString(", ")

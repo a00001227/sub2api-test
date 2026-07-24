@@ -44,9 +44,6 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	if proxyIn.Region != nil {
 		builder.SetRegion(*proxyIn.Region)
 	}
-	if proxyIn.RegionZh != nil {
-		builder.SetRegionZh(*proxyIn.RegionZh)
-	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	}
@@ -111,11 +108,6 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 		builder.SetRegion(*proxyIn.Region)
 	} else {
 		builder.ClearRegion()
-	}
-	if proxyIn.RegionZh != nil {
-		builder.SetRegionZh(*proxyIn.RegionZh)
-	} else {
-		builder.ClearRegionZh()
 	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
@@ -473,7 +465,6 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		BackupProxyID:  m.BackupProxyID,
 		ExpiryWarnDays: m.ExpiryWarnDays,
 		Region:         m.Region,
-		RegionZh:       m.RegionZh,
 		MaxBindings:    m.MaxBindings,
 	}
 	if m.Username != nil {

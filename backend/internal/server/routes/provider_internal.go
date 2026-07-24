@@ -27,6 +27,7 @@ func RegisterProviderInternalRoutes(
 		internal.POST("/import-credentials", h.ImportCredentials)
 		// Phase 21E-6E proxy-exclusive: 脱敏 region 容量查询。
 		internal.GET("/available-regions", h.AvailableRegions)
+		internal.GET("/regions", h.Regions)
 		// Phase 21E-6E account-metrics: 单账号脱敏运行指标（带参路径，
 		// 在静态路径之后注册）。
 		internal.GET("/:external_ref/metrics", h.AccountMetrics)

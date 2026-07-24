@@ -200,7 +200,7 @@
                 class="badge badge-gray"
                 :title="t('admin.proxies.bindRegion')"
               >
-                {{ row.bind_region_zh || row.bind_region }}
+                {{ regionName(row.bind_region) }}
               </span>
             </div>
           </template>
@@ -538,12 +538,12 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="input-label">{{ t('admin.proxies.bindRegion') }}</label>
-            <input
-              v-model="createForm.region"
-              type="text"
-              class="input"
-              :placeholder="t('admin.proxies.bindRegionPlaceholder')"
-            />
+            <select v-model="createForm.region" class="input">
+              <option value="">{{ t('admin.proxies.bindRegionNone') }}</option>
+              <option v-for="r in regionDict" :key="r.code" :value="r.code">
+                {{ r.code }} · {{ r.name_zh }} / {{ r.name_en }}
+              </option>
+            </select>
             <p class="input-hint mt-1">{{ t('admin.proxies.bindRegionHint') }}</p>
           </div>
           <div>
@@ -794,12 +794,12 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="input-label">{{ t('admin.proxies.bindRegion') }}</label>
-            <input
-              v-model="editForm.region"
-              type="text"
-              class="input"
-              :placeholder="t('admin.proxies.bindRegionPlaceholder')"
-            />
+            <select v-model="editForm.region" class="input">
+              <option value="">{{ t('admin.proxies.bindRegionNone') }}</option>
+              <option v-for="r in regionDict" :key="r.code" :value="r.code">
+                {{ r.code }} · {{ r.name_zh }} / {{ r.name_en }}
+              </option>
+            </select>
             <p class="input-hint mt-1">{{ t('admin.proxies.bindRegionHint') }}</p>
           </div>
           <div>
@@ -1021,7 +1021,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult, Region } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1173,6 +1173,21 @@ const batchParseResult = reactive({
     password: string
   }>
 })
+
+// Region dictionary (code + names) for the bind-region dropdown + badge display.
+const regionDict = ref<Region[]>([])
+async function loadRegionDict() {
+  try {
+    regionDict.value = await adminAPI.regions.list()
+  } catch {
+    regionDict.value = []
+  }
+}
+function regionName(code?: string | null): string {
+  if (!code) return ''
+  const r = regionDict.value.find((x) => x.code === code)
+  return r ? `${r.name_zh} / ${r.name_en}` : code
+}
 
 const createForm = reactive({
   name: '',
@@ -2119,6 +2134,7 @@ function closeCopyMenu() {
 onMounted(() => {
   loadProxies()
   loadBackupProxyOptions()
+  loadRegionDict()
   document.addEventListener('click', closeCopyMenu)
 })
 

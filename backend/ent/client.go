@@ -41,6 +41,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/providerconnectsession"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
+	"github.com/Wei-Shaw/sub2api/ent/region"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
@@ -114,6 +115,8 @@ type Client struct {
 	Proxy *ProxyClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
 	RedeemCode *RedeemCodeClient
+	// Region is the client for interacting with the Region builders.
+	Region *RegionClient
 	// SecuritySecret is the client for interacting with the SecuritySecret builders.
 	SecuritySecret *SecuritySecretClient
 	// Setting is the client for interacting with the Setting builders.
@@ -175,6 +178,7 @@ func (c *Client) init() {
 	c.ProviderConnectSession = NewProviderConnectSessionClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
 	c.RedeemCode = NewRedeemCodeClient(c.config)
+	c.Region = NewRegionClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
 	c.Setting = NewSettingClient(c.config)
 	c.SubscriptionPlan = NewSubscriptionPlanClient(c.config)
@@ -305,6 +309,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ProviderConnectSession:        NewProviderConnectSessionClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
+		Region:                        NewRegionClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
@@ -362,6 +367,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ProviderConnectSession:        NewProviderConnectSessionClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
+		Region:                        NewRegionClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
@@ -410,9 +416,9 @@ func (c *Client) Use(hooks ...Hook) {
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession,
 		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.ProviderConnectSession,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.Proxy, c.RedeemCode, c.Region, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
@@ -430,9 +436,9 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession,
 		c.PricingModel, c.PromoCode, c.PromoCodeUsage, c.ProviderConnectSession,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.Proxy, c.RedeemCode, c.Region, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
@@ -494,6 +500,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Proxy.mutate(ctx, m)
 	case *RedeemCodeMutation:
 		return c.RedeemCode.mutate(ctx, m)
+	case *RegionMutation:
+		return c.Region.mutate(ctx, m)
 	case *SecuritySecretMutation:
 		return c.SecuritySecret.mutate(ctx, m)
 	case *SettingMutation:
@@ -4612,6 +4620,139 @@ func (c *RedeemCodeClient) mutate(ctx context.Context, m *RedeemCodeMutation) (V
 	}
 }
 
+// RegionClient is a client for the Region schema.
+type RegionClient struct {
+	config
+}
+
+// NewRegionClient returns a client for the Region from the given config.
+func NewRegionClient(c config) *RegionClient {
+	return &RegionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `region.Hooks(f(g(h())))`.
+func (c *RegionClient) Use(hooks ...Hook) {
+	c.hooks.Region = append(c.hooks.Region, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `region.Intercept(f(g(h())))`.
+func (c *RegionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Region = append(c.inters.Region, interceptors...)
+}
+
+// Create returns a builder for creating a Region entity.
+func (c *RegionClient) Create() *RegionCreate {
+	mutation := newRegionMutation(c.config, OpCreate)
+	return &RegionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Region entities.
+func (c *RegionClient) CreateBulk(builders ...*RegionCreate) *RegionCreateBulk {
+	return &RegionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *RegionClient) MapCreateBulk(slice any, setFunc func(*RegionCreate, int)) *RegionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &RegionCreateBulk{err: fmt.Errorf("calling to RegionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*RegionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &RegionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Region.
+func (c *RegionClient) Update() *RegionUpdate {
+	mutation := newRegionMutation(c.config, OpUpdate)
+	return &RegionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *RegionClient) UpdateOne(_m *Region) *RegionUpdateOne {
+	mutation := newRegionMutation(c.config, OpUpdateOne, withRegion(_m))
+	return &RegionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *RegionClient) UpdateOneID(id int64) *RegionUpdateOne {
+	mutation := newRegionMutation(c.config, OpUpdateOne, withRegionID(id))
+	return &RegionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Region.
+func (c *RegionClient) Delete() *RegionDelete {
+	mutation := newRegionMutation(c.config, OpDelete)
+	return &RegionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *RegionClient) DeleteOne(_m *Region) *RegionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *RegionClient) DeleteOneID(id int64) *RegionDeleteOne {
+	builder := c.Delete().Where(region.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &RegionDeleteOne{builder}
+}
+
+// Query returns a query builder for Region.
+func (c *RegionClient) Query() *RegionQuery {
+	return &RegionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeRegion},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Region entity by its id.
+func (c *RegionClient) Get(ctx context.Context, id int64) (*Region, error) {
+	return c.Query().Where(region.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *RegionClient) GetX(ctx context.Context, id int64) *Region {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *RegionClient) Hooks() []Hook {
+	return c.hooks.Region
+}
+
+// Interceptors returns the client interceptors.
+func (c *RegionClient) Interceptors() []Interceptor {
+	return c.inters.Region
+}
+
+func (c *RegionClient) mutate(ctx context.Context, m *RegionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RegionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RegionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RegionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RegionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Region mutation op: %q", m.Op())
+	}
+}
+
 // SecuritySecretClient is a client for the SecuritySecret schema.
 type SecuritySecretClient struct {
 	config
@@ -6639,7 +6780,7 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Feedback, Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PricingModel,
-		PromoCode, PromoCodeUsage, ProviderConnectSession, Proxy, RedeemCode,
+		PromoCode, PromoCodeUsage, ProviderConnectSession, Proxy, RedeemCode, Region,
 		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
 		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
 		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
@@ -6650,7 +6791,7 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Feedback, Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PricingModel,
-		PromoCode, PromoCodeUsage, ProviderConnectSession, Proxy, RedeemCode,
+		PromoCode, PromoCodeUsage, ProviderConnectSession, Proxy, RedeemCode, Region,
 		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
 		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
 		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor

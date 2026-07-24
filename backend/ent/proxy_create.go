@@ -201,20 +201,6 @@ func (_c *ProxyCreate) SetNillableRegion(v *string) *ProxyCreate {
 	return _c
 }
 
-// SetRegionZh sets the "region_zh" field.
-func (_c *ProxyCreate) SetRegionZh(v string) *ProxyCreate {
-	_c.mutation.SetRegionZh(v)
-	return _c
-}
-
-// SetNillableRegionZh sets the "region_zh" field if the given value is not nil.
-func (_c *ProxyCreate) SetNillableRegionZh(v *string) *ProxyCreate {
-	if v != nil {
-		_c.SetRegionZh(*v)
-	}
-	return _c
-}
-
 // SetMaxBindings sets the "max_bindings" field.
 func (_c *ProxyCreate) SetMaxBindings(v int) *ProxyCreate {
 	_c.mutation.SetMaxBindings(v)
@@ -388,11 +374,6 @@ func (_c *ProxyCreate) check() error {
 			return &ValidationError{Name: "region", err: fmt.Errorf(`ent: validator failed for field "Proxy.region": %w`, err)}
 		}
 	}
-	if v, ok := _c.mutation.RegionZh(); ok {
-		if err := proxy.RegionZhValidator(v); err != nil {
-			return &ValidationError{Name: "region_zh", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_zh": %w`, err)}
-		}
-	}
 	if _, ok := _c.mutation.MaxBindings(); !ok {
 		return &ValidationError{Name: "max_bindings", err: errors.New(`ent: missing required field "Proxy.max_bindings"`)}
 	}
@@ -478,10 +459,6 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Region(); ok {
 		_spec.SetField(proxy.FieldRegion, field.TypeString, value)
 		_node.Region = &value
-	}
-	if value, ok := _c.mutation.RegionZh(); ok {
-		_spec.SetField(proxy.FieldRegionZh, field.TypeString, value)
-		_node.RegionZh = &value
 	}
 	if value, ok := _c.mutation.MaxBindings(); ok {
 		_spec.SetField(proxy.FieldMaxBindings, field.TypeInt, value)
@@ -785,24 +762,6 @@ func (u *ProxyUpsert) UpdateRegion() *ProxyUpsert {
 // ClearRegion clears the value of the "region" field.
 func (u *ProxyUpsert) ClearRegion() *ProxyUpsert {
 	u.SetNull(proxy.FieldRegion)
-	return u
-}
-
-// SetRegionZh sets the "region_zh" field.
-func (u *ProxyUpsert) SetRegionZh(v string) *ProxyUpsert {
-	u.Set(proxy.FieldRegionZh, v)
-	return u
-}
-
-// UpdateRegionZh sets the "region_zh" field to the value that was provided on create.
-func (u *ProxyUpsert) UpdateRegionZh() *ProxyUpsert {
-	u.SetExcluded(proxy.FieldRegionZh)
-	return u
-}
-
-// ClearRegionZh clears the value of the "region_zh" field.
-func (u *ProxyUpsert) ClearRegionZh() *ProxyUpsert {
-	u.SetNull(proxy.FieldRegionZh)
 	return u
 }
 
@@ -1118,27 +1077,6 @@ func (u *ProxyUpsertOne) UpdateRegion() *ProxyUpsertOne {
 func (u *ProxyUpsertOne) ClearRegion() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearRegion()
-	})
-}
-
-// SetRegionZh sets the "region_zh" field.
-func (u *ProxyUpsertOne) SetRegionZh(v string) *ProxyUpsertOne {
-	return u.Update(func(s *ProxyUpsert) {
-		s.SetRegionZh(v)
-	})
-}
-
-// UpdateRegionZh sets the "region_zh" field to the value that was provided on create.
-func (u *ProxyUpsertOne) UpdateRegionZh() *ProxyUpsertOne {
-	return u.Update(func(s *ProxyUpsert) {
-		s.UpdateRegionZh()
-	})
-}
-
-// ClearRegionZh clears the value of the "region_zh" field.
-func (u *ProxyUpsertOne) ClearRegionZh() *ProxyUpsertOne {
-	return u.Update(func(s *ProxyUpsert) {
-		s.ClearRegionZh()
 	})
 }
 
@@ -1623,27 +1561,6 @@ func (u *ProxyUpsertBulk) UpdateRegion() *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) ClearRegion() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearRegion()
-	})
-}
-
-// SetRegionZh sets the "region_zh" field.
-func (u *ProxyUpsertBulk) SetRegionZh(v string) *ProxyUpsertBulk {
-	return u.Update(func(s *ProxyUpsert) {
-		s.SetRegionZh(v)
-	})
-}
-
-// UpdateRegionZh sets the "region_zh" field to the value that was provided on create.
-func (u *ProxyUpsertBulk) UpdateRegionZh() *ProxyUpsertBulk {
-	return u.Update(func(s *ProxyUpsert) {
-		s.UpdateRegionZh()
-	})
-}
-
-// ClearRegionZh clears the value of the "region_zh" field.
-func (u *ProxyUpsertBulk) ClearRegionZh() *ProxyUpsertBulk {
-	return u.Update(func(s *ProxyUpsert) {
-		s.ClearRegionZh()
 	})
 }
 

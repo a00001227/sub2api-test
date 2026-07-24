@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -104,7 +103,6 @@ func (r *proxyAllocationRepository) SelectLeastLoadedActiveProxyForUpdate(
 // 的按平台计数口径一致。
 const regionCapacitySQL = `
 	SELECT p.region,
-	       MAX(p.region_zh) AS region_zh,
 	       COALESCE(SUM(
 	           CASE WHEN p.max_bindings = 0 THEN 999 ELSE p.max_bindings END
 	       ), 0) AS total_capacity,
@@ -137,23 +135,18 @@ func (r *proxyAllocationRepository) RegionCapacity(
 	var out []service.RegionCapacity
 	for rows.Next() {
 		var region string
-		var regionZh sql.NullString
 		var total, used int
-		if err := rows.Scan(&region, &regionZh, &total, &used); err != nil {
+		if err := rows.Scan(&region, &total, &used); err != nil {
 			return nil, err
 		}
 		avail := total - used
 		if avail < 0 {
 			avail = 0
 		}
-		rc := service.RegionCapacity{
+		out = append(out, service.RegionCapacity{
 			Region:         region,
 			AvailableSlots: avail,
-		}
-		if regionZh.Valid {
-			rc.RegionZh = strings.TrimSpace(regionZh.String)
-		}
-		out = append(out, rc)
+		})
 	}
 	return out, rows.Err()
 }

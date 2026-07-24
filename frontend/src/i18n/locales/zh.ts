@@ -393,6 +393,7 @@ export default {
     subscriptions: '订阅管理',
     accounts: '账号管理',
     proxies: 'IP管理',
+    regions: '区域管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
     promoCodes: '优惠码',
@@ -4293,6 +4294,27 @@ export default {
       autoRecoverHelp: '测试成功后自动恢复异常状态的账号'
     },
 
+    // Region dictionary
+    regions: {
+      title: '区域管理',
+      description: '维护出口区域字典（代码 + 中英文名），供代理绑定与渠道商选区',
+      create: '新增区域',
+      edit: '编辑区域',
+      delete: '删除区域',
+      deleteConfirm: '确定删除该区域吗？已绑定此区域的代理将失去分区（需重新指定）。',
+      code: '区域代码',
+      codePlaceholder: '如 SJC / NRT / ORD',
+      codeHint: '大写字母/数字，2–20 位（IATA 风格机场码）。代理绑定与匹配都用它。',
+      nameEn: '英文名',
+      nameZh: '中文名',
+      sortOrder: '排序',
+      status: '状态',
+      enabled: '启用',
+      disabled: '停用',
+      enabledLabel: '启用（供渠道商选区）',
+      saveError: '保存失败'
+    },
+
     // Proxies Management
     proxies: {
       title: 'IP管理',
@@ -4488,8 +4510,8 @@ export default {
       fallbackDirect: '回退直连',
       backupProxy: '备用代理',
       bindRegion: '绑定分区',
-      bindRegionPlaceholder: '如 Ashburn / Tokyo（英文）',
-      bindRegionHint: '请填英文城市名（作匹配键）。留空则创建后自动探测填充；填了则不被探测覆盖。',
+      bindRegionNone: '不分区',
+      bindRegionHint: '从区域字典中选择出口分区（供渠道商按区接入）。留空则该代理不参与自动分配。区域在「区域管理」维护。',
       maxBindings: '最大绑定数',
       maxBindingsHint: '可绑定的账号数：1=独占，N=共用，0=不限',
     },

@@ -60,7 +60,7 @@ func newTestConnectService(
 	allocErr error,
 	oauth connectOAuthURLGenerator,
 ) *ProviderConnectService {
-	allocator := NewProxyAllocator(&fakeAllocationRepo{proxy: allocProxy, err: allocErr})
+	allocator := NewProxyAllocator(&fakeAllocationRepo{proxy: allocProxy, err: allocErr}, nil)
 	return &ProviderConnectService{
 		sessions:  sessionRepo,
 		allocator: allocator,

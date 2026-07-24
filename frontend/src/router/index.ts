@@ -526,6 +526,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/regions',
+    name: 'AdminRegions',
+    component: () => import('@/views/admin/RegionsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Region Management',
+      titleKey: 'admin.regions.title',
+      descriptionKey: 'admin.regions.description'
+    }
+  },
+  {
     path: '/admin/redeem',
     name: 'AdminRedeem',
     component: () => import('@/views/admin/RedeemView.vue'),

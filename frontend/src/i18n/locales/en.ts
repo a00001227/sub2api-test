@@ -393,6 +393,7 @@ export default {
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     proxies: 'Proxies',
+    regions: 'Regions',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
     promoCodes: 'Promo Codes',
@@ -4201,6 +4202,27 @@ export default {
       autoRecoverHelp: 'Automatically recover account from error/rate-limited state on successful test'
     },
 
+    // Region dictionary
+    regions: {
+      title: 'Region Management',
+      description: 'Maintain the egress-region dictionary (code + EN/ZH names) used for proxy binding and provider region selection',
+      create: 'Add region',
+      edit: 'Edit region',
+      delete: 'Delete region',
+      deleteConfirm: 'Delete this region? Proxies bound to it will lose their region (must be re-assigned).',
+      code: 'Code',
+      codePlaceholder: 'e.g. SJC / NRT / ORD',
+      codeHint: 'Upper-case letters/digits, 2–20 chars (IATA-style). Used for proxy binding & matching.',
+      nameEn: 'English name',
+      nameZh: 'Chinese name',
+      sortOrder: 'Sort',
+      status: 'Status',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+      enabledLabel: 'Enabled (shown to providers)',
+      saveError: 'Save failed'
+    },
+
     // Proxies
     proxies: {
       title: 'Proxy Management',
@@ -4367,8 +4389,8 @@ export default {
       fallbackDirect: 'Direct connection',
       backupProxy: 'Backup proxy',
       bindRegion: 'Bind region',
-      bindRegionPlaceholder: 'e.g. Ashburn / Tokyo (English)',
-      bindRegionHint: 'Enter the English city name (used as the match key). Leave empty to auto-detect on create; a value you enter is never overwritten by probing.',
+      bindRegionNone: 'No region',
+      bindRegionHint: 'Pick an egress region from the dictionary (lets providers connect by region). Leave empty to exclude this proxy from auto-allocation. Manage regions under "Region Management".',
       maxBindings: 'Max bindings',
       maxBindingsHint: 'Accounts allowed to bind: 1 = exclusive, N = shared, 0 = unlimited',
     },

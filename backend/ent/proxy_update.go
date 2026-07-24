@@ -267,26 +267,6 @@ func (_u *ProxyUpdate) ClearRegion() *ProxyUpdate {
 	return _u
 }
 
-// SetRegionZh sets the "region_zh" field.
-func (_u *ProxyUpdate) SetRegionZh(v string) *ProxyUpdate {
-	_u.mutation.SetRegionZh(v)
-	return _u
-}
-
-// SetNillableRegionZh sets the "region_zh" field if the given value is not nil.
-func (_u *ProxyUpdate) SetNillableRegionZh(v *string) *ProxyUpdate {
-	if v != nil {
-		_u.SetRegionZh(*v)
-	}
-	return _u
-}
-
-// ClearRegionZh clears the value of the "region_zh" field.
-func (_u *ProxyUpdate) ClearRegionZh() *ProxyUpdate {
-	_u.mutation.ClearRegionZh()
-	return _u
-}
-
 // SetMaxBindings sets the "max_bindings" field.
 func (_u *ProxyUpdate) SetMaxBindings(v int) *ProxyUpdate {
 	_u.mutation.ResetMaxBindings()
@@ -444,11 +424,6 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "region", err: fmt.Errorf(`ent: validator failed for field "Proxy.region": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.RegionZh(); ok {
-		if err := proxy.RegionZhValidator(v); err != nil {
-			return &ValidationError{Name: "region_zh", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_zh": %w`, err)}
-		}
-	}
 	return nil
 }
 
@@ -523,12 +498,6 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.RegionCleared() {
 		_spec.ClearField(proxy.FieldRegion, field.TypeString)
-	}
-	if value, ok := _u.mutation.RegionZh(); ok {
-		_spec.SetField(proxy.FieldRegionZh, field.TypeString, value)
-	}
-	if _u.mutation.RegionZhCleared() {
-		_spec.ClearField(proxy.FieldRegionZh, field.TypeString)
 	}
 	if value, ok := _u.mutation.MaxBindings(); ok {
 		_spec.SetField(proxy.FieldMaxBindings, field.TypeInt, value)
@@ -868,26 +837,6 @@ func (_u *ProxyUpdateOne) ClearRegion() *ProxyUpdateOne {
 	return _u
 }
 
-// SetRegionZh sets the "region_zh" field.
-func (_u *ProxyUpdateOne) SetRegionZh(v string) *ProxyUpdateOne {
-	_u.mutation.SetRegionZh(v)
-	return _u
-}
-
-// SetNillableRegionZh sets the "region_zh" field if the given value is not nil.
-func (_u *ProxyUpdateOne) SetNillableRegionZh(v *string) *ProxyUpdateOne {
-	if v != nil {
-		_u.SetRegionZh(*v)
-	}
-	return _u
-}
-
-// ClearRegionZh clears the value of the "region_zh" field.
-func (_u *ProxyUpdateOne) ClearRegionZh() *ProxyUpdateOne {
-	_u.mutation.ClearRegionZh()
-	return _u
-}
-
 // SetMaxBindings sets the "max_bindings" field.
 func (_u *ProxyUpdateOne) SetMaxBindings(v int) *ProxyUpdateOne {
 	_u.mutation.ResetMaxBindings()
@@ -1058,11 +1007,6 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "region", err: fmt.Errorf(`ent: validator failed for field "Proxy.region": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.RegionZh(); ok {
-		if err := proxy.RegionZhValidator(v); err != nil {
-			return &ValidationError{Name: "region_zh", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_zh": %w`, err)}
-		}
-	}
 	return nil
 }
 
@@ -1154,12 +1098,6 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if _u.mutation.RegionCleared() {
 		_spec.ClearField(proxy.FieldRegion, field.TypeString)
-	}
-	if value, ok := _u.mutation.RegionZh(); ok {
-		_spec.SetField(proxy.FieldRegionZh, field.TypeString, value)
-	}
-	if _u.mutation.RegionZhCleared() {
-		_spec.ClearField(proxy.FieldRegionZh, field.TypeString)
 	}
 	if value, ok := _u.mutation.MaxBindings(); ok {
 		_spec.SetField(proxy.FieldMaxBindings, field.TypeInt, value)

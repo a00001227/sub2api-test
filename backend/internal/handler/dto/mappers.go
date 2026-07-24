@@ -429,7 +429,6 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		BackupProxyID:  p.BackupProxyID,
 		ExpiryWarnDays: p.ExpiryWarnDays,
 		BindRegion:     p.Region,
-		BindRegionZh:   p.RegionZh,
 		MaxBindings:    p.MaxBindings,
 	}
 }
