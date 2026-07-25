@@ -124,10 +124,16 @@ type CompleteAuthorizationInput struct {
 	Code      string
 }
 
-// CompleteAuthorizationResult 完成结果。
+// CompleteAuthorizationResult 完成结果。Portal 用这些字段在 /complete 请求内
+// 同步建账号（无需等 webhook）。幂等分支（会话已完成）只填 external_ref/region，
+// email/plan 可能为空（未重新换 token），此时 Portal 账号通常已存在。
 type CompleteAuthorizationResult struct {
-	Status    string `json:"status"`
-	AccountID int64  `json:"account_id"`
+	Status                    string `json:"status"`
+	AccountID                 int64  `json:"account_id"`
+	ExternalProviderAccountID string `json:"external_provider_account_id,omitempty"`
+	Email                     string `json:"email,omitempty"`
+	Region                    string `json:"region,omitempty"`
+	Plan                      string `json:"plan,omitempty"`
 }
 
 // ProviderConnectCompletionService 完成 Provider Connect 授权。
@@ -178,7 +184,12 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 	case "completed":
 		// 幂等：已完成，返回既有账号（不重新换 token / 不建第二个账号）
 		if session.Sub2apiAccountID != nil {
-			return &CompleteAuthorizationResult{Status: "completed", AccountID: *session.Sub2apiAccountID}, nil
+			return &CompleteAuthorizationResult{
+				Status:                    "completed",
+				AccountID:                 *session.Sub2apiAccountID,
+				ExternalProviderAccountID: session.ExternalProviderAccountID,
+				Region:                    derefString(session.Region),
+			}, nil
 		}
 		// 数据异常：completed 却无账号 id —— 用归属引用兜底反查
 		id, found, ferr := s.accounts.FindAccountIDByExternalRef(ctx, session.ExternalProviderAccountID)
@@ -186,7 +197,12 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 			return nil, ferr
 		}
 		if found {
-			return &CompleteAuthorizationResult{Status: "completed", AccountID: id}, nil
+			return &CompleteAuthorizationResult{
+				Status:                    "completed",
+				AccountID:                 id,
+				ExternalProviderAccountID: session.ExternalProviderAccountID,
+				Region:                    derefString(session.Region),
+			}, nil
 		}
 		return nil, ErrConnectSessionNotAuthorizable
 	case "failed":
@@ -237,7 +253,12 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 		if id, found, ferr := s.accounts.FindAccountIDByExternalRef(ctx, session.ExternalProviderAccountID); ferr == nil && found {
 			// 已有账号：把会话收敛到 completed 并返回既有账号
 			_, _ = s.sessions.MarkCompleted(ctx, session.ID, id, s.now())
-			return &CompleteAuthorizationResult{Status: "completed", AccountID: id}, nil
+			return &CompleteAuthorizationResult{
+				Status:                    "completed",
+				AccountID:                 id,
+				ExternalProviderAccountID: session.ExternalProviderAccountID,
+				Region:                    derefString(session.Region),
+			}, nil
 		}
 		// 真实失败：会话置 failed，不留半成品（账号创建是原子的，失败即无行）
 		_ = s.sessions.MarkFailed(ctx, session.ID)
@@ -253,7 +274,12 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 		// 并发：另一路已把会话完成 —— 以既有会话结果为准，不重复计数、
 		// 不重复发事件（另一路已发）。
 		if cur, gerr := s.sessions.GetByID(ctx, session.ID); gerr == nil && cur != nil && cur.Sub2apiAccountID != nil {
-			return &CompleteAuthorizationResult{Status: "completed", AccountID: *cur.Sub2apiAccountID}, nil
+			return &CompleteAuthorizationResult{
+				Status:                    "completed",
+				AccountID:                 *cur.Sub2apiAccountID,
+				ExternalProviderAccountID: session.ExternalProviderAccountID,
+				Region:                    derefString(session.Region),
+			}, nil
 		}
 	}
 
@@ -272,7 +298,14 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 		})
 	}
 
-	return &CompleteAuthorizationResult{Status: "completed", AccountID: accountID}, nil
+	return &CompleteAuthorizationResult{
+		Status:                    "completed",
+		AccountID:                 accountID,
+		ExternalProviderAccountID: session.ExternalProviderAccountID,
+		Email:                     tokenInfo.EmailAddress,
+		Region:                    derefString(session.Region),
+		Plan:                      tokenInfo.RateLimitTier,
+	}, nil
 }
 
 func derefString(p *string) string {
