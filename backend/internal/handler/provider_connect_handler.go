@@ -24,6 +24,7 @@ type ProviderConnectHandler struct {
 	allocator  *service.ProxyAllocator
 	metrics    *service.ProviderAccountMetricsService
 	regions    *service.RegionService
+	deactivate *service.ProviderAccountDeactivationService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -34,8 +35,9 @@ func NewProviderConnectHandler(
 	allocator *service.ProxyAllocator,
 	metrics *service.ProviderAccountMetricsService,
 	regions *service.RegionService,
+	deactivate *service.ProviderAccountDeactivationService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate}
 }
 
 // Regions handles
@@ -77,6 +79,33 @@ func (h *ProviderConnectHandler) AccountMetrics(c *gin.Context) {
 		return
 	}
 	response.Success(c, m)
+}
+
+// deactivateRequest is the (optional) body for Deactivate.
+type deactivateRequest struct {
+	Reason string `json:"reason"`
+}
+
+// Deactivate handles
+// POST /internal/provider-accounts/:external_ref/deactivate
+//
+// 停用并解绑一个 Provider 账号：停止调度（schedulable=false）+ 置为 disabled，
+// 立即移出调度池；历史用量/账单不动。容量按"活跃账号计数"实时回收，无需显式
+// 释放。幂等：未知 ref / 已停用均为成功。由 external_provider_account_id 定位。
+func (h *ProviderConnectHandler) Deactivate(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req deactivateRequest
+	_ = c.ShouldBindJSON(&req) // body optional; ignore parse errors
+	result, err := h.deactivate.Deactivate(c.Request.Context(), externalRef, req.Reason)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 // AvailableRegions handles

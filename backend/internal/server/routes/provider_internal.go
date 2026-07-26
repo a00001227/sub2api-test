@@ -31,6 +31,8 @@ func RegisterProviderInternalRoutes(
 		// Phase 21E-6E account-metrics: 单账号脱敏运行指标（带参路径，
 		// 在静态路径之后注册）。
 		internal.GET("/:external_ref/metrics", h.AccountMetrics)
+		// Phase 21F provider-account-deactivate: 停用/解绑账号（幂等）。
+		internal.POST("/:external_ref/deactivate", h.Deactivate)
 	}
 
 	// 完成流程挂在 /internal/provider/connect（同一鉴权）。
