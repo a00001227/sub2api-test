@@ -33,6 +33,8 @@ func RegisterProviderInternalRoutes(
 		internal.GET("/:external_ref/metrics", h.AccountMetrics)
 		// Phase 21F provider-account-deactivate: 停用/解绑账号（幂等）。
 		internal.POST("/:external_ref/deactivate", h.Deactivate)
+		// Phase 21G provider-reauth: 为凭证失效的既有账号创建重授权会话。
+		internal.POST("/:external_ref/reauth-sessions", h.CreateReauthSession)
 	}
 
 	// 完成流程挂在 /internal/provider/connect（同一鉴权）。

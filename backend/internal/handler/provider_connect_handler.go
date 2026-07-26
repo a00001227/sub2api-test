@@ -25,6 +25,7 @@ type ProviderConnectHandler struct {
 	metrics    *service.ProviderAccountMetricsService
 	regions    *service.RegionService
 	deactivate *service.ProviderAccountDeactivationService
+	reauth     *service.ProviderConnectReauthService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -36,8 +37,9 @@ func NewProviderConnectHandler(
 	metrics *service.ProviderAccountMetricsService,
 	regions *service.RegionService,
 	deactivate *service.ProviderAccountDeactivationService,
+	reauth *service.ProviderConnectReauthService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth}
 }
 
 // Regions handles
@@ -101,6 +103,42 @@ func (h *ProviderConnectHandler) Deactivate(c *gin.Context) {
 	var req deactivateRequest
 	_ = c.ShouldBindJSON(&req) // body optional; ignore parse errors
 	result, err := h.deactivate.Deactivate(c.Request.Context(), externalRef, req.Reason)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// reauthSessionRequest 重授权会话请求（Phase 21G）。
+type reauthSessionRequest struct {
+	ProviderType string `json:"provider_type" binding:"required"`
+	CallbackURL  string `json:"callback_url" binding:"required"`
+}
+
+// CreateReauthSession handles
+// POST /internal/provider-accounts/:external_ref/reauth-sessions
+//
+// 为一个已存在（凭证失效）的账号创建重授权会话：复用其绑定 proxy 生成
+// OAuth URL，落 pending 会话并预填 sub2api_account_id。完成仍走统一的
+// /internal/provider/connect/complete —— 完成流程见到预填账号 id 即更新
+// 凭证而非新建账号。响应契约与 onboarding-sessions 相同。
+func (h *ProviderConnectHandler) CreateReauthSession(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req reauthSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	result, err := h.reauth.CreateReauthSession(c.Request.Context(), service.CreateReauthSessionInput{
+		ExternalProviderAccountID: externalRef,
+		ProviderType:              req.ProviderType,
+		CallbackURL:               req.CallbackURL,
+	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

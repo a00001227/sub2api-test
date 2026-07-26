@@ -64,6 +64,13 @@ type connectTokenExchanger interface {
 	ExchangeCode(ctx context.Context, input *ExchangeCodeInput) (*TokenInfo, error)
 }
 
+// connectReauthAccountUpdater 重授权完成时更新既有账号的最小依赖面
+// （Phase 21G；具体账号 repo 天然满足 GetByID + Update）。
+type connectReauthAccountUpdater interface {
+	GetByID(ctx context.Context, id int64) (*Account, error)
+	Update(ctx context.Context, account *Account) error
+}
+
 // ProviderWebhookNotifier 是完成流程对 webhook 发送器的最小依赖面
 // （*providerwebhook.Sender 天然满足；接口化仅为可测性与可选性）。
 // SendAsync 必须非阻塞——Portal 故障绝不能影响账号创建。
@@ -140,24 +147,29 @@ type CompleteAuthorizationResult struct {
 type ProviderConnectCompletionService struct {
 	sessions ProviderConnectSessionRepository
 	accounts ProviderConnectAccountRepository
-	oauth    connectTokenExchanger
-	webhook  ProviderWebhookNotifier // 可为 nil（未配置时不通知）
-	now      func() time.Time
+	// reauthAccounts (Phase 21G): 重授权会话（Sub2apiAccountID 预填）完成时
+	// 更新既有账号凭证并恢复 active/schedulable，而非新建账号。
+	reauthAccounts connectReauthAccountUpdater
+	oauth          connectTokenExchanger
+	webhook        ProviderWebhookNotifier // 可为 nil（未配置时不通知）
+	now            func() time.Time
 }
 
 // NewProviderConnectCompletionService creates the service.
 func NewProviderConnectCompletionService(
 	sessions ProviderConnectSessionRepository,
 	accounts ProviderConnectAccountRepository,
+	reauthAccounts connectReauthAccountUpdater,
 	oauth *OAuthService,
 	webhook ProviderWebhookNotifier,
 ) *ProviderConnectCompletionService {
 	return &ProviderConnectCompletionService{
-		sessions: sessions,
-		accounts: accounts,
-		oauth:    oauth,
-		webhook:  webhook,
-		now:      time.Now,
+		sessions:       sessions,
+		accounts:       accounts,
+		reauthAccounts: reauthAccounts,
+		oauth:          oauth,
+		webhook:        webhook,
+		now:            time.Now,
 	}
 }
 
@@ -239,6 +251,13 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 		return nil, err
 	}
 
+	// Reauth 分支（Phase 21G）：pending 会话预填了 sub2api_account_id → 这是
+	// 对既有账号的重授权。更新其凭证并恢复 active/schedulable，不新建账号、
+	// 不做容量检查（账号本来就占着自己的 proxy 名额）。
+	if session.Sub2apiAccountID != nil {
+		return s.completeReauthorization(ctx, session, tokenInfo)
+	}
+
 	// Step 4: 复用账号创建仓储建 type=oauth 账号（带归属引用 + proxy 绑定）
 	accountID, err := s.accounts.CreateConnectedAccount(ctx, CreateConnectedAccountInput{
 		Name:                      session.ExternalProviderAccountID,
@@ -296,6 +315,50 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 			Email:                     tokenInfo.EmailAddress,
 			Plan:                      tokenInfo.RateLimitTier,
 		})
+	}
+
+	return &CompleteAuthorizationResult{
+		Status:                    "completed",
+		AccountID:                 accountID,
+		ExternalProviderAccountID: session.ExternalProviderAccountID,
+		Email:                     tokenInfo.EmailAddress,
+		Region:                    derefString(session.Region),
+		Plan:                      tokenInfo.RateLimitTier,
+	}, nil
+}
+
+// completeReauthorization 把新换到的 token 写回既有账号并恢复其可用性
+// （Phase 21G）。凭证整体替换为新 token；状态 error/disabled → active、
+// error_message 清空、schedulable 恢复。会话置 completed（幂等：并发第二路
+// MarkCompleted 影响行数为 0，直接返回同一账号结果，无重复写害处——凭证
+// 内容相同）。失败路径与 onboarding 一致：置 failed、不留半新半旧凭证
+// （Update 是单行原子写）。
+func (s *ProviderConnectCompletionService) completeReauthorization(
+	ctx context.Context, session *ProviderConnectSession, tokenInfo *TokenInfo,
+) (*CompleteAuthorizationResult, error) {
+	accountID := *session.Sub2apiAccountID
+	acc, err := s.reauthAccounts.GetByID(ctx, accountID)
+	if err != nil {
+		_ = s.sessions.MarkFailed(ctx, session.ID)
+		return nil, err
+	}
+	if acc == nil {
+		_ = s.sessions.MarkFailed(ctx, session.ID)
+		return nil, ErrReauthAccountNotFound
+	}
+
+	acc.Credentials = tokenInfoToCredentials(tokenInfo)
+	acc.Status = StatusActive
+	acc.ErrorMessage = ""
+	acc.Schedulable = true
+	if err := s.reauthAccounts.Update(ctx, acc); err != nil {
+		_ = s.sessions.MarkFailed(ctx, session.ID)
+		return nil, err
+	}
+
+	_, err = s.sessions.MarkCompleted(ctx, session.ID, accountID, s.now())
+	if err != nil {
+		return nil, err
 	}
 
 	return &CompleteAuthorizationResult{

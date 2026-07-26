@@ -56,6 +56,10 @@ func (r *providerConnectSessionRepository) Create(
 	if s.OAuthSessionID != nil && *s.OAuthSessionID != "" {
 		builder = builder.SetOauthSessionID(*s.OAuthSessionID)
 	}
+	// 重授权会话（Phase 21G）在创建时预填目标账号 id；onboarding 会话为 nil。
+	if s.Sub2apiAccountID != nil {
+		builder = builder.SetSub2apiAccountID(*s.Sub2apiAccountID)
+	}
 
 	row, err := builder.Save(ctx)
 	if err != nil {
