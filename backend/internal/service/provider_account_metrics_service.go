@@ -73,7 +73,33 @@ type ProviderAccountMetrics struct {
 	SevenDay            *UsageWindow `json:"seven_day,omitempty"`
 	TodayRequests       int64        `json:"today_requests"`
 	TodayTokens         int64        `json:"today_tokens"`
-	UpdatedAt           string       `json:"updated_at"` // RFC3339
+	// Phase 21H quota-budget pacing（空/nil = 账号未启用 pacing）。
+	PacingMode string        `json:"pacing_mode,omitempty"`
+	Score      *PacingScore  `json:"score,omitempty"`
+	Budget     *PacingBudget `json:"budget,omitempty"`
+	UpdatedAt  string        `json:"updated_at"` // RFC3339
+}
+
+// PacingScore 账号综合评分（0-100）及其构成，纯展示层，不参与调度。
+type PacingScore struct {
+	Total float64 `json:"total"`
+	// 构成透明（各分项已按权重折算，加总 = Total）：
+	FiveHourPart float64 `json:"five_hour_part"` // 5h 余量 ×40
+	SevenDayPart float64 `json:"seven_day_part"` // 7d 余量 ×30
+	SuccessPart  float64 `json:"success_part"`   // 成功率 ×20（无数据按满）
+	RatePart     float64 `json:"rate_part"`      // RPM 余量 ×10
+}
+
+// PacingBudget 预算调度当前状态（展示用）。
+type PacingBudget struct {
+	// TargetFraction 当前允许花掉的窗口预算比例（0-1）。
+	TargetFraction float64 `json:"target_fraction"`
+	// SpentFraction 当前已花比例（0-1+，来自 5h 窗口 utilization）。
+	SpentFraction float64 `json:"spent_fraction"`
+	// FeedbackFactor 反馈系数（0.5-1.0；<1 表示近期被上游限流、系统自动降速中）。
+	FeedbackFactor float64 `json:"feedback_factor"`
+	// Throttled 预算刹车当前是否生效（已花 > 目标 → 新流量让路）。
+	Throttled bool `json:"throttled"`
 }
 
 // ProviderAccountMetricsService 组装单账号脱敏运行指标。
@@ -179,7 +205,64 @@ func (s *ProviderAccountMetricsService) Metrics(
 		out.TodayTokens = today.Tokens
 	}
 
+	// Phase 21H: pacing 档位 + 评分 + 预算状态（仅启用 pacing 的账号返回）。
+	if mode := acc.GetPacingMode(); mode != "" {
+		now := s.now()
+		out.PacingMode = mode
+		out.Score = computePacingScore(out)
+		spent := 0.0
+		if out.FiveHour != nil {
+			spent = out.FiveHour.Utilization / 100.0
+		}
+		target := acc.WindowBudgetTargetFraction(now)
+		out.Budget = &PacingBudget{
+			TargetFraction: target,
+			SpentFraction:  spent,
+			FeedbackFactor: acc.PacingFeedbackFactor(now),
+			Throttled:      target < 1 && spent >= target,
+		}
+	}
+
 	return out, nil
+}
+
+// computePacingScore 合成 0-100 评分（纯展示，不参与调度）：
+// 5h 余量 ×40 + 7d 余量 ×30 + 成功率 ×20 + RPM 余量 ×10。
+// 无数据的分项按满分处理（缺数据不该把账号显示成低分）。
+func computePacingScore(m *ProviderAccountMetrics) *PacingScore {
+	part := func(remaining float64, weight float64) float64 {
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 1 {
+			remaining = 1
+		}
+		return remaining * weight
+	}
+
+	fiveHour := 1.0
+	if m.FiveHour != nil {
+		fiveHour = 1 - m.FiveHour.Utilization/100.0
+	}
+	sevenDay := 1.0
+	if m.SevenDay != nil {
+		sevenDay = 1 - m.SevenDay.Utilization/100.0
+	}
+	// 成功率：现有指标面没有失败计数，无数据按满分；后续接入错误率后细化。
+	success := 1.0
+	rate := 1.0
+	if m.RPMLimit > 0 {
+		rate = 1 - float64(m.RPMUsed)/float64(m.RPMLimit)
+	}
+
+	s := &PacingScore{
+		FiveHourPart: part(fiveHour, 40),
+		SevenDayPart: part(sevenDay, 30),
+		SuccessPart:  part(success, 20),
+		RatePart:     part(rate, 10),
+	}
+	s.Total = s.FiveHourPart + s.SevenDayPart + s.SuccessPart + s.RatePart
+	return s
 }
 
 // prettifyClaudeTier 把 Anthropic 原始 tier 值美化成展示名：

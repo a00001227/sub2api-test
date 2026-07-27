@@ -75,7 +75,14 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 		SetType(service.AccountTypeOAuth).
 		SetCredentials(normalizeJSONMap(in.Credentials)).
 		SetStatus(service.StatusActive).
-		SetExternalProviderAccountID(in.ExternalProviderAccountID)
+		SetExternalProviderAccountID(in.ExternalProviderAccountID).
+		// Phase 21H: provider 账号默认启用智能配额预算调度（pacing_mode=smart）
+		// 与 DeRouter 对齐的默认分钟限速。admin 建的账号不受影响（无 pacing_mode
+		// = 传统行为）。
+		SetExtra(map[string]any{
+			"pacing_mode": service.PacingModeSmart,
+			"base_rpm":    20,
+		})
 	if in.ProxyID != nil {
 		builder = builder.SetProxyID(*in.ProxyID)
 	}

@@ -26,6 +26,7 @@ type ProviderConnectHandler struct {
 	regions    *service.RegionService
 	deactivate *service.ProviderAccountDeactivationService
 	reauth     *service.ProviderConnectReauthService
+	pacing     *service.ProviderAccountPacingService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -38,8 +39,9 @@ func NewProviderConnectHandler(
 	regions *service.RegionService,
 	deactivate *service.ProviderAccountDeactivationService,
 	reauth *service.ProviderConnectReauthService,
+	pacing *service.ProviderAccountPacingService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing}
 }
 
 // Regions handles
@@ -139,6 +141,35 @@ func (h *ProviderConnectHandler) CreateReauthSession(c *gin.Context) {
 		ProviderType:              req.ProviderType,
 		CallbackURL:               req.CallbackURL,
 	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// pacingModeRequest 设置调度档位请求（Phase 21H）。
+type pacingModeRequest struct {
+	Mode string `json:"mode" binding:"required"`
+}
+
+// SetPacingMode handles
+// POST /internal/provider-accounts/:external_ref/pacing-mode
+//
+// 设置账号的调度档位（steady/smart/burst），写 extra["pacing_mode"]，
+// 调度侧即时生效。幂等。
+func (h *ProviderConnectHandler) SetPacingMode(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req pacingModeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	result, err := h.pacing.SetPacingMode(c.Request.Context(), externalRef, req.Mode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

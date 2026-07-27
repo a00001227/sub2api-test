@@ -2335,13 +2335,17 @@ func (a *Account) GetRPMStickyBuffer() int {
 
 // CheckRPMSchedulability 根据当前 RPM 计数检查调度状态
 // 复用 WindowCostSchedulability 三态：Schedulable / StickyOnly / NotSchedulable
+//
+// Phase 21H：启用 pacing 档位时，阈值用档位+反馈修正后的 EffectiveBaseRPM
+// （稳健收缩 / 冲量放大 / 刚被限流自动减半再线性恢复）。未启用则原样 base_rpm。
 func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulability {
 	baseRPM := a.GetBaseRPM()
 	if baseRPM <= 0 {
 		return WindowCostSchedulable
 	}
+	effectiveRPM := a.EffectiveBaseRPM(time.Now())
 
-	if currentRPM < baseRPM {
+	if currentRPM < effectiveRPM {
 		return WindowCostSchedulable
 	}
 
@@ -2350,9 +2354,10 @@ func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulabilit
 		return WindowCostStickyOnly // 粘性豁免无红区
 	}
 
-	// tiered: 黄区 + 红区
+	// tiered: 黄区 + 红区（黄区缓冲仍按原始 base 计算，保证粘性会话在
+	// 反馈降速期间也不被硬切断）
 	buffer := a.GetRPMStickyBuffer()
-	if currentRPM < baseRPM+buffer {
+	if currentRPM < effectiveRPM+buffer {
 		return WindowCostStickyOnly
 	}
 	return WindowCostNotSchedulable
@@ -2362,6 +2367,10 @@ func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulabilit
 // - 费用 < 阈值: WindowCostSchedulable（可正常调度）
 // - 费用 >= 阈值 且 < 阈值+预留: WindowCostStickyOnly（仅粘性会话）
 // - 费用 >= 阈值+预留: WindowCostNotSchedulable（不可调度）
+//
+// Phase 21H：启用 pacing 档位的账号在硬阈值之前多一道预算软刹车——当前
+// 花费超过"按窗口时间比例应花的预算目标"时降为 StickyOnly（粘性会话不断，
+// 新流量让给预算富余的账号），避免窗口前期烧光、后期躺平。
 func (a *Account) CheckWindowCostSchedulability(currentWindowCost float64) WindowCostSchedulability {
 	limit := a.GetWindowCostLimit()
 	if limit <= 0 {
@@ -2369,6 +2378,11 @@ func (a *Account) CheckWindowCostSchedulability(currentWindowCost float64) Windo
 	}
 
 	if currentWindowCost < limit {
+		if budget := a.WindowBudgetTargetFraction(time.Now()); budget < 1 {
+			if currentWindowCost >= limit*budget {
+				return WindowCostStickyOnly
+			}
+		}
 		return WindowCostSchedulable
 	}
 
