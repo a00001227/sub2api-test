@@ -49,6 +49,12 @@ type providerMetricsRPMReader interface {
 	GetRPM(ctx context.Context, accountID int64) (int, error)
 }
 
+// providerMetricsSessionReader 读取账号当前活跃会话数（SessionLimitCache
+// 天然满足；可为 nil —— 缓存未装配时会话占用显示 0）。
+type providerMetricsSessionReader interface {
+	GetActiveSessionCount(ctx context.Context, accountID int64) (int, error)
+}
+
 // UsageWindow 是对外暴露的单个用量窗口（脱敏）。
 type UsageWindow struct {
 	Utilization      float64 `json:"utilization"`       // 使用率 0-100+
@@ -77,7 +83,10 @@ type ProviderAccountMetrics struct {
 	PacingMode string        `json:"pacing_mode,omitempty"`
 	Score      *PacingScore  `json:"score,omitempty"`
 	Budget     *PacingBudget `json:"budget,omitempty"`
-	UpdatedAt  string        `json:"updated_at"` // RFC3339
+	// 会话量（Phase 21H tier-capacity）：0/0 = 未启用会话限制。
+	SessionsMax  int    `json:"sessions_max"`
+	SessionsUsed int    `json:"sessions_used"`
+	UpdatedAt    string `json:"updated_at"` // RFC3339
 }
 
 // PacingScore 账号综合评分（0-100）及其构成，纯展示层，不参与调度。
@@ -109,6 +118,7 @@ type ProviderAccountMetricsService struct {
 	usage       providerMetricsUsageReader
 	concurrency providerMetricsConcurrencyReader
 	rpm         providerMetricsRPMReader
+	sessions    providerMetricsSessionReader
 	now         func() time.Time
 }
 
@@ -119,6 +129,7 @@ func NewProviderAccountMetricsService(
 	usage providerMetricsUsageReader,
 	concurrency providerMetricsConcurrencyReader,
 	rpm providerMetricsRPMReader,
+	sessions providerMetricsSessionReader,
 ) *ProviderAccountMetricsService {
 	return &ProviderAccountMetricsService{
 		locator:     locator,
@@ -126,6 +137,7 @@ func NewProviderAccountMetricsService(
 		usage:       usage,
 		concurrency: concurrency,
 		rpm:         rpm,
+		sessions:    sessions,
 		now:         time.Now,
 	}
 }
@@ -175,6 +187,14 @@ func (s *ProviderAccountMetricsService) Metrics(
 	if s.rpm != nil {
 		if used, rerr := s.rpm.GetRPM(ctx, id); rerr == nil {
 			out.RPMUsed = used
+		}
+	}
+	// Session occupancy (Phase 21H tier-capacity): max from extra, used from
+	// the session-limit cache. Best-effort; 0/0 = limit not enabled.
+	out.SessionsMax = acc.GetMaxSessions()
+	if out.SessionsMax > 0 && s.sessions != nil {
+		if used, serr := s.sessions.GetActiveSessionCount(ctx, id); serr == nil {
+			out.SessionsUsed = used
 		}
 	}
 	// Past-hour request count (DeRouter's per-hour left value). Computed from the

@@ -146,3 +146,37 @@ func TestPacing_InvalidModeIgnored(t *testing.T) {
 	require.True(t, IsValidPacingMode("smart"))
 	require.True(t, IsValidPacingMode("STEADY"))
 }
+
+func TestPacing_TierProfiles_GradedByPlan(t *testing.T) {
+	max20 := PacingProfileForTier("default_claude_max_20x")
+	max5 := PacingProfileForTier("default_claude_max_5x")
+	pro := PacingProfileForTier("claude_pro")
+
+	// 分级递减：max_20x > max_5x > pro（预算、速率、容量全部）。
+	require.Greater(t, max20.WindowCostLimit, max5.WindowCostLimit)
+	require.Greater(t, max5.WindowCostLimit, pro.WindowCostLimit)
+	require.Greater(t, max20.BaseRPM, max5.BaseRPM)
+	require.Greater(t, max20.Concurrency, pro.Concurrency)
+	require.Greater(t, max20.MaxSessions, pro.MaxSessions)
+
+	require.Equal(t, 35.0, max20.WindowCostLimit)
+	require.Equal(t, 3, max20.Concurrency)
+	require.Equal(t, 5, max20.MaxSessions)
+}
+
+func TestPacing_TierProfiles_UnknownFallsBackConservative(t *testing.T) {
+	unknown := PacingProfileForTier("some_future_tier")
+	empty := PacingProfileForTier("")
+	require.Equal(t, unknown, empty)
+	// 保守默认低于 max_20x、不为零。
+	require.Less(t, unknown.WindowCostLimit, PacingProfileForTier("max_20x").WindowCostLimit)
+	require.Greater(t, unknown.WindowCostLimit, 0.0)
+	require.Greater(t, unknown.Concurrency, 0)
+}
+
+func TestPacing_TierProfiles_TolerantMatching(t *testing.T) {
+	// 前缀变体、大小写、子串都能命中。
+	require.Equal(t, PacingProfileForTier("max_20x"), PacingProfileForTier("DEFAULT_CLAUDE_MAX_20X"))
+	require.Equal(t, PacingProfileForTier("pro"), PacingProfileForTier("claude_pro"))
+	require.Equal(t, PacingProfileForTier("max_5x"), PacingProfileForTier("team_max_5x_extra"))
+}

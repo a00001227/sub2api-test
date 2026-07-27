@@ -199,7 +199,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	antigravityQuotaFetcher := service.NewAntigravityQuotaFetcher(proxyRepository)
 	usageCache := service.NewUsageCache()
 	accountUsageService := service.NewAccountUsageService(accountRepository, usageLogRepository, claudeUsageFetcher, geminiQuotaService, antigravityQuotaFetcher, usageCache, identityCache, tlsFingerprintProfileService)
-	providerAccountMetricsService := service.NewProviderAccountMetricsService(providerConnectAccountRepository, accountRepository, accountUsageService, concurrencyService, rpmCache)
+	providerAccountMetricsService := service.NewProviderAccountMetricsService(providerConnectAccountRepository, accountRepository, accountUsageService, concurrencyService, rpmCache, sessionLimitCache)
 	providerAccountDeactivationService := service.NewProviderAccountDeactivationService(providerConnectAccountRepository, accountRepository)
 	providerConnectReauthService := service.NewProviderConnectReauthService(providerConnectSessionRepository, providerConnectAccountRepository, accountRepository, oAuthService)
 	providerAccountPacingService := service.NewProviderAccountPacingService(providerConnectAccountRepository, accountRepository)

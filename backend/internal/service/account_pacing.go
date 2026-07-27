@@ -160,3 +160,48 @@ func (a *Account) EffectiveBaseRPM(now time.Time) int {
 	}
 	return effective
 }
+
+// PacingTierProfile 按订阅等级分级的账号容量/预算默认值（建号时写入）。
+// window_cost_limit 是预算刹车的基准（5h 窗口，美元）；concurrency /
+// max_sessions 是容量护栏。动态调整不改这些基准——档位系数与反馈系数
+// 在调度时实时作用于它们之上。
+type PacingTierProfile struct {
+	WindowCostLimit float64
+	BaseRPM         int
+	Concurrency     int
+	MaxSessions     int
+}
+
+// pacingTierProfiles 各订阅等级的分级默认值。金额按 Claude 各订阅 5h 窗口
+// 的大致标准用量能力估算（可通过后续调参修正，值只在建号时写入 Extra，
+// 之后 admin/脚本可改）。
+var pacingTierProfiles = map[string]PacingTierProfile{
+	"max_20x": {WindowCostLimit: 35, BaseRPM: 20, Concurrency: 3, MaxSessions: 5},
+	"max_5x":  {WindowCostLimit: 12, BaseRPM: 12, Concurrency: 2, MaxSessions: 3},
+	"pro":     {WindowCostLimit: 5, BaseRPM: 8, Concurrency: 1, MaxSessions: 2},
+}
+
+// pacingDefaultProfile 未知/缺失等级时的保守默认（介于 pro 与 max_5x 之间）。
+var pacingDefaultProfile = PacingTierProfile{WindowCostLimit: 10, BaseRPM: 10, Concurrency: 2, MaxSessions: 3}
+
+// PacingProfileForTier 把上游原始 tier（如 "default_claude_max_20x"、
+// "claude_pro"）解析为分级默认值。大小写不敏感、容忍前缀变体；未识别
+// 返回保守默认。
+func PacingProfileForTier(rawTier string) PacingTierProfile {
+	s := strings.ToLower(strings.TrimSpace(rawTier))
+	s = strings.TrimPrefix(s, "default_")
+	s = strings.TrimPrefix(s, "claude_")
+	if p, ok := pacingTierProfiles[s]; ok {
+		return p
+	}
+	// 次级匹配：raw 里带关键子串（防上游改前缀格式）。
+	switch {
+	case strings.Contains(s, "max_20x") || strings.Contains(s, "max 20x"):
+		return pacingTierProfiles["max_20x"]
+	case strings.Contains(s, "max_5x") || strings.Contains(s, "max 5x"):
+		return pacingTierProfiles["max_5x"]
+	case strings.Contains(s, "pro"):
+		return pacingTierProfiles["pro"]
+	}
+	return pacingDefaultProfile
+}

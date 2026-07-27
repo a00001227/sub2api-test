@@ -69,6 +69,13 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 		}
 	}
 
+	// Phase 21H: provider 账号默认启用智能配额预算调度（pacing_mode=smart），
+	// 容量/预算基准（window_cost_limit / base_rpm / concurrency / max_sessions）
+	// 按订阅等级分级——tier 来自 OAuth 换 token 时抓取的 rate_limit_tier（已在
+	// credentials 里）。admin 建的账号不受影响（无 pacing_mode = 传统行为）。
+	tier, _ := in.Credentials["rate_limit_tier"].(string)
+	profile := service.PacingProfileForTier(tier)
+
 	builder := tx.Account.Create().
 		SetName(in.Name).
 		SetPlatform(in.Platform).
@@ -76,12 +83,12 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 		SetCredentials(normalizeJSONMap(in.Credentials)).
 		SetStatus(service.StatusActive).
 		SetExternalProviderAccountID(in.ExternalProviderAccountID).
-		// Phase 21H: provider 账号默认启用智能配额预算调度（pacing_mode=smart）
-		// 与 DeRouter 对齐的默认分钟限速。admin 建的账号不受影响（无 pacing_mode
-		// = 传统行为）。
+		SetConcurrency(profile.Concurrency).
 		SetExtra(map[string]any{
-			"pacing_mode": service.PacingModeSmart,
-			"base_rpm":    20,
+			"pacing_mode":       service.PacingModeSmart,
+			"base_rpm":          profile.BaseRPM,
+			"window_cost_limit": profile.WindowCostLimit,
+			"max_sessions":      profile.MaxSessions,
 		})
 	if in.ProxyID != nil {
 		builder = builder.SetProxyID(*in.ProxyID)
