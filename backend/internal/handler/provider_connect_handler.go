@@ -27,6 +27,7 @@ type ProviderConnectHandler struct {
 	deactivate *service.ProviderAccountDeactivationService
 	reauth     *service.ProviderConnectReauthService
 	pacing     *service.ProviderAccountPacingService
+	scheduling *service.ProviderAccountSchedulingService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -40,8 +41,9 @@ func NewProviderConnectHandler(
 	deactivate *service.ProviderAccountDeactivationService,
 	reauth *service.ProviderConnectReauthService,
 	pacing *service.ProviderAccountPacingService,
+	scheduling *service.ProviderAccountSchedulingService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling}
 }
 
 // Regions handles
@@ -170,6 +172,35 @@ func (h *ProviderConnectHandler) SetPacingMode(c *gin.Context) {
 		return
 	}
 	result, err := h.pacing.SetPacingMode(c.Request.Context(), externalRef, req.Mode)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// schedulingRequest 暂停/恢复调度请求（Phase 21I）。
+type schedulingRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
+// SetScheduling handles
+// POST /internal/provider-accounts/:external_ref/scheduling
+//
+// 可逆地暂停/恢复账号调度：enabled=false 暂停（schedulable=false），
+// enabled=true 恢复。只切 schedulable 布尔，绝不动 status。幂等。
+func (h *ProviderConnectHandler) SetScheduling(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req schedulingRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	result, err := h.scheduling.SetScheduling(c.Request.Context(), externalRef, *req.Enabled)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

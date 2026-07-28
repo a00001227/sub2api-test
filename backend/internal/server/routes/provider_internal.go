@@ -37,6 +37,8 @@ func RegisterProviderInternalRoutes(
 		internal.POST("/:external_ref/reauth-sessions", h.CreateReauthSession)
 		// Phase 21I provider-pacing: 设置 DeRouter 五档调度档位。
 		internal.POST("/:external_ref/pacing-mode", h.SetPacingMode)
+		// Phase 21I provider-scheduling: 可逆暂停/恢复账号调度（只切 schedulable）。
+		internal.POST("/:external_ref/scheduling", h.SetScheduling)
 	}
 
 	// 完成流程挂在 /internal/provider/connect（同一鉴权）。
