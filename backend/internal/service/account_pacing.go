@@ -5,62 +5,77 @@ import (
 	"time"
 )
 
-// Phase 21H quota-budget pacing: 配额预算调度。
+// Phase 21I DeRouter 五档调度：完全照搬 DeRouter 的档位模型。
 //
-// 与"静态阈值 + 撞墙"不同，预算调度把 5h 窗口费用额度当作预算按时间匀速花：
+// 五档 = 拟人 / 标准 / 2x / 3x / 5x。每档是一张固定容量表
+// （并发 / 每分钟 RPM / 每小时 RPH），直接照搬 DeRouter 数值：
 //
-//	预算目标(now) = limit × min(1, floor + 窗口已过比例 × 节奏系数 × 反馈系数)
+//	档位      并发  RPM  RPH   拟人化
+//	humanized  2   20   190   是（活跃-冷却 + 每日休息）
+//	standard   2   20   190   否
+//	speed_2x   4   40   380   否
+//	speed_3x   6   60   570   否
+//	speed_5x  10  100   950   否
 //
-// 当前花费超过预算目标 → StickyOnly（既有粘性会话继续、新会话去别的账号），
-// 从源头避免"窗口前 1 小时烧光 99%、随后 4 小时躺平"。硬上限（limit /
-// limit+stickyReserve）语义不变，预算只是提前的软刹车。
+// 防封完全依赖上游真实利用率（Phase 1 主动休眠）+ 拟人化（Phase 4，仅
+// humanized 档），不再用内部预算估算、也不再用 AIMD 反馈——两者已删除。
 //
-// 反馈系数（无状态 AIMD）：从账号已有的 rate_limited_at / overload_until
-// 信号直接推导——刚被上游限流 → 0.5（乘性降），随时间线性恢复到 1.0
-// （加性升的时间等价形式）。无 worker、无新存储、无 gateway 主流程改动。
-//
-// 生效范围：仅当 extra["pacing_mode"] 显式设置（provider 账号创建时写入
-// "smart"）。未设置的存量账号完全保持旧行为。
+// 生效范围：仅当 extra["pacing_mode"] 显式设置。未设置的存量账号（admin
+// 账号）完全保持旧的静态阈值行为。旧档位名（steady/smart/burst）作为别名
+// 映射到新五档，保证存量 provider 账号无需数据迁移。
 
-// Pacing modes.
+// Pacing modes（DeRouter 五档）。
 const (
-	// PacingModeSteady 稳健：更保守的预算节奏与 RPM，封号风险最低。
-	PacingModeSteady = "steady"
-	// PacingModeSmart 智能（provider 账号默认）：满速花预算 + 反馈自适应。
-	PacingModeSmart = "smart"
-	// PacingModeBurst 冲量：允许前期透支预算、RPM 放大，风险自担。
-	PacingModeBurst = "burst"
+	// PacingModeHumanized 拟人（provider 账号默认）：模拟真人节奏，封号风险最低。
+	PacingModeHumanized = "humanized"
+	// PacingModeStandard 标准：与拟人同容量，但不遵守活跃-冷却/每日休息。
+	PacingModeStandard = "standard"
+	// PacingModeSpeed2x 2x 速度档。
+	PacingModeSpeed2x = "speed_2x"
+	// PacingModeSpeed3x 3x 速度档。
+	PacingModeSpeed3x = "speed_3x"
+	// PacingModeSpeed5x 5x 速度档，吞吐最高、封号风险最高。
+	PacingModeSpeed5x = "speed_5x"
 )
 
-// pacingParams 每档位的调度参数。
-type pacingParams struct {
-	// BudgetCoeff 花预算的节奏系数（>1 = 允许比匀速快）。
-	BudgetCoeff float64
-	// RPMFactor base_rpm 的放大/收缩倍数。
-	RPMFactor float64
+// pacingModeProfile 每档位的固定容量表（照搬 DeRouter）。
+type pacingModeProfile struct {
+	Concurrency int
+	RPM         int
+	RPH         int
+	Humanized   bool // 是否遵守拟人节奏 + 每日休息
 }
 
-var pacingParamsByMode = map[string]pacingParams{
-	PacingModeSteady: {BudgetCoeff: 0.75, RPMFactor: 0.7},
-	PacingModeSmart:  {BudgetCoeff: 1.0, RPMFactor: 1.0},
-	PacingModeBurst:  {BudgetCoeff: 1.5, RPMFactor: 1.5},
+var pacingModeProfiles = map[string]pacingModeProfile{
+	PacingModeHumanized: {Concurrency: 2, RPM: 20, RPH: 190, Humanized: true},
+	PacingModeStandard:  {Concurrency: 2, RPM: 20, RPH: 190, Humanized: false},
+	PacingModeSpeed2x:   {Concurrency: 4, RPM: 40, RPH: 380, Humanized: false},
+	PacingModeSpeed3x:   {Concurrency: 6, RPM: 60, RPH: 570, Humanized: false},
+	PacingModeSpeed5x:   {Concurrency: 10, RPM: 100, RPH: 950, Humanized: false},
 }
 
-// pacingBudgetFloor 窗口刚开始时即可花的预算比例（避免 frac≈0 时全员刹车）。
-const pacingBudgetFloor = 0.10
+// pacingModeAliases 旧档位名 → 新五档，保证存量账号（extra 里存的是旧名）
+// 无需迁移即可继续生效。
+var pacingModeAliases = map[string]string{
+	"steady": PacingModeStandard,  // 旧「稳健」→ 标准
+	"smart":  PacingModeHumanized, // 旧「智能」（默认）→ 拟人
+	"burst":  PacingModeSpeed2x,   // 旧「冲量」→ 2x（保守映射）
+}
 
-// pacingFeedbackHalt / pacingFeedbackRecovery 反馈系数的降幅与恢复期。
-const (
-	pacingFeedbackFloor    = 0.5
-	pacingFeedbackHold     = 30 * time.Minute // 限流后系数保持地板的时长
-	pacingFeedbackRecovery = 90 * time.Minute // 之后线性恢复到 1.0 的时长
-)
+// normalizePacingMode 归一化档位名（小写、去空白、别名解析）；非法返回 ""。
+func normalizePacingMode(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if alias, ok := pacingModeAliases[s]; ok {
+		s = alias
+	}
+	if _, valid := pacingModeProfiles[s]; valid {
+		return s
+	}
+	return ""
+}
 
-// claudeSessionWindowDuration Claude 订阅的 5h 会话窗口长度。
-const claudeSessionWindowDuration = 5 * time.Hour
-
-// GetPacingMode 返回账号的调度档位；未设置或非法值返回 ""（= 不启用预算
-// 调度，保持传统静态阈值行为）。
+// GetPacingMode 返回账号归一化后的调度档位；未设置或非法值返回 ""
+// （= 不启用 pacing，保持传统静态阈值行为）。
 func (a *Account) GetPacingMode() string {
 	if a.Extra == nil {
 		return ""
@@ -70,95 +85,38 @@ func (a *Account) GetPacingMode() string {
 		return ""
 	}
 	s, _ := v.(string)
-	s = strings.ToLower(strings.TrimSpace(s))
-	if _, valid := pacingParamsByMode[s]; valid {
-		return s
-	}
-	return ""
+	return normalizePacingMode(s)
 }
 
-// IsValidPacingMode 校验档位值（对外接口用）。
+// pacingProfileFor 返回归一化档位对应的容量表；档位为空/非法返回零值+false。
+func pacingProfileFor(mode string) (pacingModeProfile, bool) {
+	if mode == "" {
+		return pacingModeProfile{}, false
+	}
+	p, ok := pacingModeProfiles[mode]
+	return p, ok
+}
+
+// IsValidPacingMode 校验档位值（对外接口用）；接受新五档与旧别名。
 func IsValidPacingMode(mode string) bool {
-	_, ok := pacingParamsByMode[strings.ToLower(strings.TrimSpace(mode))]
-	return ok
+	return normalizePacingMode(mode) != ""
 }
 
-// PacingFeedbackFactor 无状态反馈系数 ∈ [0.5, 1.0]。
-// 刚被上游限流/过载 → 0.5；30 分钟后开始线性恢复，90 分钟恢复满速。
-// 没有任何限流历史 → 1.0。
-func (a *Account) PacingFeedbackFactor(now time.Time) float64 {
-	// 过载期内直接地板。
-	if a.OverloadUntil != nil && now.Before(*a.OverloadUntil) {
-		return pacingFeedbackFloor
+// PacingModeConcurrency 返回档位规定的并发数；档位为空返回 0（表示不覆盖）。
+func (a *Account) PacingModeConcurrency() int {
+	if p, ok := pacingProfileFor(a.GetPacingMode()); ok {
+		return p.Concurrency
 	}
-	last := a.RateLimitedAt
-	if last == nil || !now.After(*last) {
-		if last != nil {
-			return pacingFeedbackFloor // rate_limited_at 在未来/等于 now：保守
-		}
-		return 1.0
-	}
-	since := now.Sub(*last)
-	if since <= pacingFeedbackHold {
-		return pacingFeedbackFloor
-	}
-	if since >= pacingFeedbackHold+pacingFeedbackRecovery {
-		return 1.0
-	}
-	progress := float64(since-pacingFeedbackHold) / float64(pacingFeedbackRecovery)
-	return pacingFeedbackFloor + (1.0-pacingFeedbackFloor)*progress
+	return 0
 }
 
-// WindowBudgetTargetFraction 当前时刻允许花掉的窗口预算比例 ∈ [floor, 1]。
-// 返回值 × limit 即预算目标金额。mode 为空时返回 1（无预算刹车）。
-func (a *Account) WindowBudgetTargetFraction(now time.Time) float64 {
-	mode := a.GetPacingMode()
-	if mode == "" {
-		return 1.0
+// PacingModeConcurrencyFor 按档位名返回并发数（供建号/改档时写 concurrency 列）。
+// 非法档位返回 0。
+func PacingModeConcurrencyFor(mode string) int {
+	if p, ok := pacingProfileFor(normalizePacingMode(mode)); ok {
+		return p.Concurrency
 	}
-	params := pacingParamsByMode[mode]
-
-	start := a.GetCurrentWindowStartTime()
-	end := start.Add(claudeSessionWindowDuration)
-	if a.SessionWindowEnd != nil && now.Before(*a.SessionWindowEnd) {
-		end = *a.SessionWindowEnd
-	}
-	total := end.Sub(start)
-	if total <= 0 {
-		return 1.0
-	}
-	elapsed := now.Sub(start)
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	frac := float64(elapsed) / float64(total)
-	if frac > 1 {
-		frac = 1
-	}
-
-	target := pacingBudgetFloor + frac*params.BudgetCoeff*a.PacingFeedbackFactor(now)
-	if target > 1 {
-		target = 1
-	}
-	return target
-}
-
-// EffectiveBaseRPM 档位与反馈修正后的 RPM 上限。mode 为空时原样返回 base。
-func (a *Account) EffectiveBaseRPM(now time.Time) int {
-	base := a.GetBaseRPM()
-	if base <= 0 {
-		return base
-	}
-	mode := a.GetPacingMode()
-	if mode == "" {
-		return base
-	}
-	params := pacingParamsByMode[mode]
-	effective := int(float64(base) * params.RPMFactor * a.PacingFeedbackFactor(now))
-	if effective < 1 {
-		effective = 1
-	}
-	return effective
+	return 0
 }
 
 // PacingTierProfile 按订阅等级分级的账号容量/预算默认值（建号时写入）。
@@ -168,6 +126,7 @@ func (a *Account) EffectiveBaseRPM(now time.Time) int {
 type PacingTierProfile struct {
 	WindowCostLimit float64
 	BaseRPM         int
+	BaseRPH         int // Phase 21I: 每小时请求上限（DeRouter 每小时闸）
 	Concurrency     int
 	MaxSessions     int
 }
@@ -175,14 +134,15 @@ type PacingTierProfile struct {
 // pacingTierProfiles 各订阅等级的分级默认值。金额按 Claude 各订阅 5h 窗口
 // 的大致标准用量能力估算（可通过后续调参修正，值只在建号时写入 Extra，
 // 之后 admin/脚本可改）。
+// BaseRPH 按 DeRouter 每小时闸的量级估算（约 base_rpm × 9~10，含真人节奏留白）。
 var pacingTierProfiles = map[string]PacingTierProfile{
-	"max_20x": {WindowCostLimit: 35, BaseRPM: 20, Concurrency: 3, MaxSessions: 5},
-	"max_5x":  {WindowCostLimit: 12, BaseRPM: 12, Concurrency: 2, MaxSessions: 3},
-	"pro":     {WindowCostLimit: 5, BaseRPM: 8, Concurrency: 1, MaxSessions: 2},
+	"max_20x": {WindowCostLimit: 35, BaseRPM: 20, BaseRPH: 190, Concurrency: 3, MaxSessions: 5},
+	"max_5x":  {WindowCostLimit: 12, BaseRPM: 12, BaseRPH: 114, Concurrency: 2, MaxSessions: 3},
+	"pro":     {WindowCostLimit: 5, BaseRPM: 8, BaseRPH: 76, Concurrency: 1, MaxSessions: 2},
 }
 
 // pacingDefaultProfile 未知/缺失等级时的保守默认（介于 pro 与 max_5x 之间）。
-var pacingDefaultProfile = PacingTierProfile{WindowCostLimit: 10, BaseRPM: 10, Concurrency: 2, MaxSessions: 3}
+var pacingDefaultProfile = PacingTierProfile{WindowCostLimit: 10, BaseRPM: 10, BaseRPH: 95, Concurrency: 2, MaxSessions: 3}
 
 // PacingProfileForTier 把上游原始 tier（如 "default_claude_max_20x"、
 // "claude_pro"）解析为分级默认值。大小写不敏感、容忍前缀变体；未识别
@@ -204,4 +164,205 @@ func PacingProfileForTier(rawTier string) PacingTierProfile {
 		return pacingTierProfiles["pro"]
 	}
 	return pacingDefaultProfile
+}
+
+// ── Phase 21I: 上游真实利用率驱动的主动休眠 ────────────────────────────
+//
+// DeRouter 的核心防封手段：读上游返回的 5h / 7d 真实利用率，接近 100% 时
+// 主动让账号退出调度（休眠），而不是等 429 撞墙。利用率数据由
+// UpdateSessionWindow 在每次成功响应时采集，存入 Extra：
+//
+//	session_window_utilization    5h 利用率 (0-1 小数)
+//	passive_usage_7d_utilization  7d 利用率 (0-1 小数)
+//	passive_usage_7d_reset        7d 窗口重置时间 (unix 秒)
+//
+// 本阶段把这些已采集、原本仅用于展示的数值接入调度决策。
+
+// pacingUtilizationDormantThreshold 利用率达到此值即主动休眠（排除出调度）。
+// 对齐 DeRouter「剩余 < 10% → 排除」，即利用率 >= 0.90。
+const pacingUtilizationDormantThreshold = 0.90
+
+// GetSessionWindowUtilization 返回上游 5h 窗口真实利用率 (0-1)；无数据返回 0。
+func (a *Account) GetSessionWindowUtilization() float64 {
+	if a.Extra == nil {
+		return 0
+	}
+	if v, ok := a.Extra["session_window_utilization"]; ok {
+		return parseExtraFloat64(v)
+	}
+	return 0
+}
+
+// Get7dUtilization 返回上游 7d 窗口真实利用率 (0-1)；窗口已过期或无数据返回 0。
+func (a *Account) Get7dUtilization() float64 {
+	if a.Extra == nil {
+		return 0
+	}
+	// 7d 窗口已过重置时间 → 数据陈旧，视为 0（不误判休眠）。
+	if v, ok := a.Extra["passive_usage_7d_reset"]; ok {
+		if reset := parseExtraFloat64(v); reset > 0 {
+			if time.Now().After(time.Unix(int64(reset), 0)) {
+				return 0
+			}
+		}
+	}
+	if v, ok := a.Extra["passive_usage_7d_utilization"]; ok {
+		return parseExtraFloat64(v)
+	}
+	return 0
+}
+
+// pacingDownweightThreshold 利用率进入降权带的下界。
+// 对齐 DeRouter：剩余 > 50%（util < 0.5）正常；剩余 10-50%（util 0.5-0.9）
+// 降权 ×0.5；剩余 < 10%（util >= 0.9）排除（已由 IsUtilizationDormant 处理）。
+const pacingDownweightThreshold = 0.50
+
+// pacingDownweightFactor 降权带内的选择权重系数。
+const pacingDownweightFactor = 0.5
+
+// PacingSelectionWeight 返回账号在同优先级组内被优先选中的相对权重 (0,1]。
+// util < 0.5 或未启用 pacing → 1.0（正常）；util ∈ [0.5, 0.9) → 0.5（降权）。
+// util >= 0.9 的排除不在此处理（走 IsUtilizationDormant 直接退出调度）。
+func (a *Account) PacingSelectionWeight() float64 {
+	if a.GetPacingMode() == "" || !a.IsAnthropicOAuthOrSetupToken() {
+		return 1.0
+	}
+	util := a.GetSessionWindowUtilization()
+	if u7 := a.Get7dUtilization(); u7 > util {
+		util = u7
+	}
+	if util >= pacingDownweightThreshold && util < pacingUtilizationDormantThreshold {
+		return pacingDownweightFactor
+	}
+	return 1.0
+}
+
+// IsUtilizationDormant 判断账号是否因上游真实利用率接近满而应主动休眠。
+// 5h 或 7d 任一窗口达到阈值即休眠。仅对 Anthropic OAuth/SetupToken 生效
+// （只有这类账号才有 unified-ratelimit 利用率响应头）。
+func (a *Account) IsUtilizationDormant() bool {
+	if !a.IsAnthropicOAuthOrSetupToken() {
+		return false
+	}
+	if a.GetSessionWindowUtilization() >= pacingUtilizationDormantThreshold {
+		return true
+	}
+	if a.Get7dUtilization() >= pacingUtilizationDormantThreshold {
+		return true
+	}
+	return false
+}
+
+// ── Phase 21I: 拟人化防封（每日休息窗口 + 活跃-冷却节奏）────────────────
+//
+// DeRouter 最核心的事前防封：让账号像真人一样「集中干一段、歇一段」，
+// 并遵守每日作息。速度档（burst）跳过全部拟人化。
+//
+// 全部无状态实现——不新建表、不加 worker，用账号 ID 作为稳定种子 + 墙钟时间
+// 当场算出。ID 决定每个账号的休息时段与节奏相位，天然把全池打散（避免所有
+// 账号同一时刻集体休息导致容量断崖，这是多账号池相对 DeRouter 单账号视角
+// 必须做的适配）。
+
+// pacingIsSpeedMode 判断档位是否跳过拟人化（standard/2x/3x/5x 均不拟人，
+// 仅 humanized 档遵守活跃-冷却 + 每日休息）。
+func pacingIsSpeedMode(mode string) bool {
+	p, ok := pacingProfileFor(mode)
+	if !ok {
+		return false
+	}
+	return !p.Humanized
+}
+
+const (
+	// pacingDailyRestDurationMin 每日休息窗口时长（分钟），对齐 DeRouter 的 4h。
+	pacingDailyRestDurationMin = 4 * 60
+	// pacingDayMinutes 一天的分钟数。
+	pacingDayMinutes = 24 * 60
+	// pacingRestSpreadPrime 用于按 ID 打散休息起点的质数步长（与 1440 互质，
+	// 保证不同 ID 的起点在 [0,1440) 上均匀铺开）。
+	pacingRestSpreadPrime = 373
+)
+
+// dailyRestStartMinute 账号每日休息窗口的起始分钟（UTC，[0,1440)）。
+// 由 ID 确定性打散：(ID*prime) mod 1440，全池均匀分布。
+func (a *Account) dailyRestStartMinute() int {
+	return int((a.ID*pacingRestSpreadPrime)%pacingDayMinutes+pacingDayMinutes) % pacingDayMinutes
+}
+
+// DailyRestWindowUTC 返回账号每日休息窗口 [startMin, endMin)（UTC 分钟）。
+// endMin 可能 >1440（表示跨日），判定时对 1440 取模。
+func (a *Account) DailyRestWindowUTC() (startMin, endMin int) {
+	start := a.dailyRestStartMinute()
+	return start, start + pacingDailyRestDurationMin
+}
+
+// IsInDailyRestWindow 判断 now(UTC) 是否落在账号的每日休息窗口内。
+// 仅对启用 pacing 且非速度档的账号生效。
+func (a *Account) IsInDailyRestWindow(now time.Time) bool {
+	mode := a.GetPacingMode()
+	if mode == "" || pacingIsSpeedMode(mode) {
+		return false
+	}
+	u := now.UTC()
+	cur := u.Hour()*60 + u.Minute()
+	start, end := a.DailyRestWindowUTC()
+	// 处理跨日：把当前分钟同时按「原值」和「+1440」检查。
+	if cur >= start && cur < end {
+		return true
+	}
+	if end > pacingDayMinutes && cur+pacingDayMinutes < end && cur+pacingDayMinutes >= start {
+		return true
+	}
+	return false
+}
+
+const (
+	// pacingActiveMin / pacingCoolMin 活跃段 / 冷却段时长（分钟）。
+	// 真人节奏：集中干 ~50 分钟，歇 ~10 分钟（可后续调参）。
+	pacingActiveMin = 50
+	pacingCoolMin   = 10
+	pacingCycleMin  = pacingActiveMin + pacingCoolMin
+)
+
+// IsInCooldownPhase 判断账号当前是否处于活跃-冷却节奏的「冷却段」。
+// 用墙钟分钟数 + 账号 ID 相位偏移当场计算，无状态；不同账号相位错开，
+// 避免全池同时进入冷却。速度档与未启用 pacing 的账号恒返回 false。
+func (a *Account) IsInCooldownPhase(now time.Time) bool {
+	mode := a.GetPacingMode()
+	if mode == "" || pacingIsSpeedMode(mode) {
+		return false
+	}
+	// 相位偏移：每个账号在 [0,cycle) 内错开一个固定起点。
+	offset := int(a.ID % int64(pacingCycleMin))
+	minuteOfEpoch := now.UTC().Unix() / 60
+	pos := int((minuteOfEpoch+int64(offset))%int64(pacingCycleMin)+int64(pacingCycleMin)) % pacingCycleMin
+	return pos >= pacingActiveMin
+}
+
+// IsHumanizedDormant 拟人化维度下账号当前是否应退出调度
+// （处于每日休息窗口，或活跃-冷却的冷却段）。
+func (a *Account) IsHumanizedDormant(now time.Time) bool {
+	return a.IsInDailyRestWindow(now) || a.IsInCooldownPhase(now)
+}
+
+// DailyRestWindowLabels 返回每日休息窗口的 "HH:MM"–"HH:MM"（UTC）文案，
+// 用于展示（对齐 DeRouter 的"下次: 20:00–00:00 UTC"）。非拟人档返回空串。
+func (a *Account) DailyRestWindowLabels() (start, end string) {
+	mode := a.GetPacingMode()
+	if mode == "" || pacingIsSpeedMode(mode) {
+		return "", ""
+	}
+	s, e := a.DailyRestWindowUTC()
+	fmtMin := func(m int) string {
+		m %= pacingDayMinutes
+		return sprintfHHMM(m/60, m%60)
+	}
+	return fmtMin(s), fmtMin(e)
+}
+
+// sprintfHHMM 零填充格式化 "HH:MM"。
+func sprintfHHMM(h, m int) string {
+	hh := []byte{byte('0' + h/10), byte('0' + h%10)}
+	mm := []byte{byte('0' + m/10), byte('0' + m%10)}
+	return string(hh) + ":" + string(mm)
 }

@@ -33,6 +33,16 @@ const (
 
 	// RPM 计数器 TTL（120 秒，覆盖当前分钟窗口 + 冗余）
 	rpmKeyTTL = 120 * time.Second
+
+	// Phase 21I: RPH（每小时请求数）计数器
+	// 格式: rph:{accountID}:{hourTimestamp}
+	rphKeyPrefix = "rph:"
+	// RPH 计数器 TTL（2 小时，覆盖当前小时窗口 + 冗余）
+	rphKeyTTL = 2 * time.Hour
+
+	// Phase 21I: 账号存活期累计成功率计数器（无 TTL，永久累计）
+	// 格式: acct_outcome:{accountID} → Redis HASH { success, total }
+	outcomeKeyPrefix = "acct_outcome:"
 )
 
 // RPMCacheImpl RPM 计数器缓存 Redis 实现
@@ -138,4 +148,130 @@ func (c *RPMCacheImpl) GetRPMBatch(ctx context.Context, accountIDs []int64) (map
 		}
 	}
 	return result, nil
+}
+
+// ── Phase 21I: RPH（每小时请求数）计数 ──────────────────────────────────
+// 与 RPM 完全相同的 Redis 计数模式，只是按小时分桶（serverTime.Unix()/3600）。
+
+// currentHourKey 获取当前小时的完整 Redis key
+func (c *RPMCacheImpl) currentHourKey(ctx context.Context, accountID int64) (string, error) {
+	serverTime, err := c.rdb.Time(ctx).Result()
+	if err != nil {
+		return "", fmt.Errorf("redis TIME: %w", err)
+	}
+	hourTS := serverTime.Unix() / 3600
+	return fmt.Sprintf("%s%d:%d", rphKeyPrefix, accountID, hourTS), nil
+}
+
+// currentHourSuffix 获取当前小时时间戳后缀（供批量操作使用）
+func (c *RPMCacheImpl) currentHourSuffix(ctx context.Context) (string, error) {
+	serverTime, err := c.rdb.Time(ctx).Result()
+	if err != nil {
+		return "", fmt.Errorf("redis TIME: %w", err)
+	}
+	hourTS := serverTime.Unix() / 3600
+	return strconv.FormatInt(hourTS, 10), nil
+}
+
+// IncrementRPH 原子递增并返回当前小时的计数
+func (c *RPMCacheImpl) IncrementRPH(ctx context.Context, accountID int64) (int, error) {
+	key, err := c.currentHourKey(ctx, accountID)
+	if err != nil {
+		return 0, fmt.Errorf("rph increment: %w", err)
+	}
+
+	pipe := c.rdb.TxPipeline()
+	incrCmd := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, rphKeyTTL)
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("rph increment: %w", err)
+	}
+
+	return int(incrCmd.Val()), nil
+}
+
+// GetRPH 获取当前小时的 RPH 计数
+func (c *RPMCacheImpl) GetRPH(ctx context.Context, accountID int64) (int, error) {
+	key, err := c.currentHourKey(ctx, accountID)
+	if err != nil {
+		return 0, fmt.Errorf("rph get: %w", err)
+	}
+
+	val, err := c.rdb.Get(ctx, key).Int()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("rph get: %w", err)
+	}
+	return val, nil
+}
+
+// GetRPHBatch 批量获取多个账号的 RPH 计数
+func (c *RPMCacheImpl) GetRPHBatch(ctx context.Context, accountIDs []int64) (map[int64]int, error) {
+	if len(accountIDs) == 0 {
+		return map[int64]int{}, nil
+	}
+
+	hourSuffix, err := c.currentHourSuffix(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rph batch get: %w", err)
+	}
+
+	pipe := c.rdb.Pipeline()
+	cmds := make(map[int64]*redis.StringCmd, len(accountIDs))
+	for _, id := range accountIDs {
+		key := fmt.Sprintf("%s%d:%s", rphKeyPrefix, id, hourSuffix)
+		cmds[id] = pipe.Get(ctx, key)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("rph batch get: %w", err)
+	}
+
+	result := make(map[int64]int, len(accountIDs))
+	for id, cmd := range cmds {
+		if val, err := cmd.Int(); err == nil {
+			result[id] = val
+		} else {
+			result[id] = 0
+		}
+	}
+	return result, nil
+}
+
+// ── Phase 21I: 账号存活期累计成功率 ────────────────────────────────────
+// acct_outcome:{id} 是一个 Redis HASH，field success / total 永久累计（无 TTL）。
+
+// IncrementRequestOutcome 累计一次请求结果：total +1，success 时 success +1。
+func (c *RPMCacheImpl) IncrementRequestOutcome(ctx context.Context, accountID int64, success bool) error {
+	key := fmt.Sprintf("%s%d", outcomeKeyPrefix, accountID)
+	pipe := c.rdb.TxPipeline()
+	pipe.HIncrBy(ctx, key, "total", 1)
+	if success {
+		pipe.HIncrBy(ctx, key, "success", 1)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("outcome increment: %w", err)
+	}
+	return nil
+}
+
+// GetRequestOutcome 返回账号存活期累计的 (成功数, 总数)。
+func (c *RPMCacheImpl) GetRequestOutcome(ctx context.Context, accountID int64) (int64, int64, error) {
+	key := fmt.Sprintf("%s%d", outcomeKeyPrefix, accountID)
+	vals, err := c.rdb.HMGet(ctx, key, "success", "total").Result()
+	if err != nil {
+		return 0, 0, fmt.Errorf("outcome get: %w", err)
+	}
+	parse := func(v any) int64 {
+		s, ok := v.(string)
+		if !ok {
+			return 0
+		}
+		n, _ := strconv.ParseInt(s, 10, 64)
+		return n
+	}
+	return parse(vals[0]), parse(vals[1]), nil
 }

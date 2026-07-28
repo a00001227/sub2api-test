@@ -431,6 +431,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			// Phase 21I: 记录该账号本次请求结果（存活期成功率）。err==nil 视为成功，
+			// 与 RPM 递增的"Forward 成功"判定一致；failover 场景下失败账号计一次失败。
+			if account.IsAnthropicOAuthOrSetupToken() {
+				h.gatewayService.RecordAccountOutcome(c.Request.Context(), account.ID, err == nil)
+			}
 			if err != nil {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
@@ -788,6 +793,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
+			}
+			// Phase 21I: 记录该账号本次请求结果（存活期成功率）。err==nil 视为成功，
+			// 与 RPM 递增的"Forward 成功"判定一致；failover 场景下失败账号计一次失败。
+			if account.IsAnthropicOAuthOrSetupToken() {
+				h.gatewayService.RecordAccountOutcome(c.Request.Context(), account.ID, err == nil)
 			}
 			if err != nil {
 				// Beta policy block: return 400 immediately, no failover

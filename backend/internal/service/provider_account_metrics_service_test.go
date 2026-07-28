@@ -65,9 +65,15 @@ func (f *fakeMetricsConcurrency) GetAccountConcurrencyBatch(_ context.Context, i
 	return m, nil
 }
 
-type fakeMetricsRPM struct{ used int }
+type fakeMetricsRPM struct {
+	used           int
+	success, total int64
+}
 
 func (f *fakeMetricsRPM) GetRPM(_ context.Context, _ int64) (int, error) { return f.used, nil }
+func (f *fakeMetricsRPM) GetRequestOutcome(_ context.Context, _ int64) (int64, int64, error) {
+	return f.success, f.total, nil
+}
 
 // 成功：组装状态/并发/用量窗口/配额/订阅等级/今日请求（全脱敏）。
 func TestMetrics_Success(t *testing.T) {

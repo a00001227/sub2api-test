@@ -539,6 +539,12 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"window_cost_sticky_reserve",
 		"max_sessions",
 		"session_idle_timeout_minutes",
+		// Phase 21H quota-budget pacing：调度检查（预算刹车 / EffectiveBaseRPM）
+		// 读这些键；不进白名单则 snapshot 路径下 pacing 静默失效。
+		"pacing_mode",
+		"base_rpm",
+		"rpm_strategy",
+		"rpm_sticky_buffer",
 		"openai_oauth_responses_websockets_v2_enabled",
 		"openai_oauth_responses_websockets_v2_mode",
 		"openai_apikey_responses_websockets_v2_enabled",

@@ -44,9 +44,10 @@ type providerMetricsConcurrencyReader interface {
 	GetAccountConcurrencyBatch(ctx context.Context, accountIDs []int64) (map[int64]int, error)
 }
 
-// providerMetricsRPMReader 读取账号当前分钟 RPM 计数。
+// providerMetricsRPMReader 读取账号当前分钟 RPM 计数及存活期成功率累计。
 type providerMetricsRPMReader interface {
 	GetRPM(ctx context.Context, accountID int64) (int, error)
+	GetRequestOutcome(ctx context.Context, accountID int64) (success int64, total int64, err error)
 }
 
 // providerMetricsSessionReader 读取账号当前活跃会话数（SessionLimitCache
@@ -64,14 +65,16 @@ type UsageWindow struct {
 
 // ProviderAccountMetrics 是返回给 Portal 的脱敏运行指标。
 type ProviderAccountMetrics struct {
-	Status           string       `json:"status"`
-	Concurrency      int          `json:"concurrency"`      // 并发上限（兼容旧字段）
-	ConcurrencyMax   int          `json:"concurrency_max"`  // 并发上限
-	ConcurrencyUsed  int          `json:"concurrency_used"` // 当前并发占用（DeRouter 的 0/2 左值）
-	RPMLimit         int          `json:"rpm_limit"`        // 每分钟调度上限（DeRouter 的 0/20 右值；0 = 未设）
-	RPMUsed          int          `json:"rpm_used"`         // 当前分钟已用（左值）
-	RPHUsed          int          `json:"rph_used"`         // 过去 1 小时请求数（DeRouter 每小时左值；无上限配置）
-	ModelCount          int          `json:"model_count"`      // 支持的模型数（0 = 通配/全部或未知）
+	Status              string       `json:"status"`
+	Concurrency         int          `json:"concurrency"`            // 并发上限（兼容旧字段）
+	ConcurrencyMax      int          `json:"concurrency_max"`        // 并发上限
+	ConcurrencyUsed     int          `json:"concurrency_used"`       // 当前并发占用（DeRouter 的 0/2 左值）
+	RPMLimit            int          `json:"rpm_limit"`              // 每分钟调度上限（DeRouter 的 0/20 右值；0 = 未设）
+	RPMUsed             int          `json:"rpm_used"`               // 当前分钟已用（左值）
+	RPHLimit            int          `json:"rph_limit"`              // 每小时调度上限（DeRouter 的 0/298 右值；0 = 未设）
+	RPHUsed             int          `json:"rph_used"`               // 过去 1 小时请求数（DeRouter 每小时左值）
+	ModelCount          int          `json:"model_count"`            // 支持的模型数（0 = 通配/全部或未知）
+	SuccessRate         *float64     `json:"success_rate,omitempty"` // 存活期累计成功率 0-1（nil = 暂无样本）
 	SubscriptionTier    string       `json:"subscription_tier,omitempty"`
 	SubscriptionTierRaw string       `json:"subscription_tier_raw,omitempty"` // 上游原始订阅名（如 "max 20x"），展示用
 	CreatedAt           string       `json:"created_at,omitempty"`            // 账号接入时间 RFC3339（前端算"托管时长"）
@@ -79,10 +82,10 @@ type ProviderAccountMetrics struct {
 	SevenDay            *UsageWindow `json:"seven_day,omitempty"`
 	TodayRequests       int64        `json:"today_requests"`
 	TodayTokens         int64        `json:"today_tokens"`
-	// Phase 21H quota-budget pacing（空/nil = 账号未启用 pacing）。
+	// Phase 21I DeRouter 五档 pacing（空/nil = 账号未启用 pacing）。
 	PacingMode string        `json:"pacing_mode,omitempty"`
 	Score      *PacingScore  `json:"score,omitempty"`
-	Budget     *PacingBudget `json:"budget,omitempty"`
+	Pacing     *PacingStatus `json:"pacing,omitempty"`
 	// 会话量（Phase 21H tier-capacity）：0/0 = 未启用会话限制。
 	SessionsMax  int    `json:"sessions_max"`
 	SessionsUsed int    `json:"sessions_used"`
@@ -99,16 +102,25 @@ type PacingScore struct {
 	RatePart     float64 `json:"rate_part"`      // RPM 余量 ×10
 }
 
-// PacingBudget 预算调度当前状态（展示用）。
-type PacingBudget struct {
-	// TargetFraction 当前允许花掉的窗口预算比例（0-1）。
-	TargetFraction float64 `json:"target_fraction"`
-	// SpentFraction 当前已花比例（0-1+，来自 5h 窗口 utilization）。
-	SpentFraction float64 `json:"spent_fraction"`
-	// FeedbackFactor 反馈系数（0.5-1.0；<1 表示近期被上游限流、系统自动降速中）。
-	FeedbackFactor float64 `json:"feedback_factor"`
-	// Throttled 预算刹车当前是否生效（已花 > 目标 → 新流量让路）。
-	Throttled bool `json:"throttled"`
+// PacingStatus DeRouter 五档调度的当前状态（展示用，替代旧的 PacingBudget）。
+type PacingStatus struct {
+	// Concurrency / RPM / RPH 当前档位的容量表（DeRouter 固定数值）。
+	Concurrency int `json:"concurrency"`
+	RPM         int `json:"rpm"`
+	RPH         int `json:"rph"`
+	// FiveHourUtil / SevenDayUtil 上游真实利用率（0-1）。
+	FiveHourUtil float64 `json:"five_hour_util"`
+	SevenDayUtil float64 `json:"seven_day_util"`
+	// Dormant 是否因利用率接近满而主动休眠（新流量让路）。
+	Dormant bool `json:"dormant"`
+	// Humanized 该档位是否启用拟人化（活跃-冷却 + 每日休息）。
+	Humanized bool `json:"humanized"`
+	// Resting 当前是否处于拟人休息（每日休息窗口或冷却段）。
+	Resting bool `json:"resting"`
+	// NextRestStartUTC / NextRestEndUTC 下次每日休息窗口（"HH:MM" UTC）；
+	// 仅拟人档有值，对齐 DeRouter 的"下次: 20:00–00:00 UTC"。
+	NextRestStartUTC string `json:"next_rest_start_utc,omitempty"`
+	NextRestEndUTC   string `json:"next_rest_end_utc,omitempty"`
 }
 
 // ProviderAccountMetricsService 组装单账号脱敏运行指标。
@@ -167,9 +179,10 @@ func (s *ProviderAccountMetricsService) Metrics(
 
 	out := &ProviderAccountMetrics{
 		Status:         acc.Status,
-		Concurrency:    acc.Concurrency,
-		ConcurrencyMax: acc.Concurrency,
+		Concurrency:    acc.EffectiveLoadFactor(),
+		ConcurrencyMax: acc.EffectiveLoadFactor(),
 		RPMLimit:       acc.GetBaseRPM(),
+		RPHLimit:       acc.GetBaseRPH(),
 		ModelCount:     countMappedModels(acc.GetModelMapping()),
 		UpdatedAt:      s.now().UTC().Format(time.RFC3339),
 	}
@@ -187,6 +200,11 @@ func (s *ProviderAccountMetricsService) Metrics(
 	if s.rpm != nil {
 		if used, rerr := s.rpm.GetRPM(ctx, id); rerr == nil {
 			out.RPMUsed = used
+		}
+		// 存活期累计成功率（Phase 21I）。仅当有样本时返回，避免新账号显示 0%。
+		if succ, total, oerr := s.rpm.GetRequestOutcome(ctx, id); oerr == nil && total > 0 {
+			rate := float64(succ) / float64(total)
+			out.SuccessRate = &rate
 		}
 	}
 	// Session occupancy (Phase 21H tier-capacity): max from extra, used from
@@ -225,22 +243,30 @@ func (s *ProviderAccountMetricsService) Metrics(
 		out.TodayTokens = today.Tokens
 	}
 
-	// Phase 21H: pacing 档位 + 评分 + 预算状态（仅启用 pacing 的账号返回）。
+	// Phase 21I: pacing 档位 + 评分 + 状态（仅启用 pacing 的账号返回）。
 	if mode := acc.GetPacingMode(); mode != "" {
 		now := s.now()
 		out.PacingMode = mode
 		out.Score = computePacingScore(out)
-		spent := 0.0
-		if out.FiveHour != nil {
-			spent = out.FiveHour.Utilization / 100.0
+
+		fiveUtil := acc.GetSessionWindowUtilization()
+		sevenUtil := acc.Get7dUtilization()
+		status := &PacingStatus{
+			FiveHourUtil: fiveUtil,
+			SevenDayUtil: sevenUtil,
+			Dormant:      acc.IsUtilizationDormant(),
+			Humanized:    !pacingIsSpeedMode(mode),
+			Resting:      acc.IsHumanizedDormant(now),
 		}
-		target := acc.WindowBudgetTargetFraction(now)
-		out.Budget = &PacingBudget{
-			TargetFraction: target,
-			SpentFraction:  spent,
-			FeedbackFactor: acc.PacingFeedbackFactor(now),
-			Throttled:      target < 1 && spent >= target,
+		if p, ok := pacingProfileFor(mode); ok {
+			status.Concurrency = p.Concurrency
+			status.RPM = p.RPM
+			status.RPH = p.RPH
 		}
+		if status.Humanized {
+			status.NextRestStartUTC, status.NextRestEndUTC = acc.DailyRestWindowLabels()
+		}
+		out.Pacing = status
 	}
 
 	return out, nil

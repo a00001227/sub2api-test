@@ -107,7 +107,12 @@ func (a *Account) EffectiveLoadFactor() int {
 		return 1
 	}
 	if a.LoadFactor != nil && *a.LoadFactor > 0 {
-		return *a.LoadFactor
+		return *a.LoadFactor // 显式管理员覆盖优先
+	}
+	// Phase 21I: 启用 pacing 时并发由五档容量表权威决定（DeRouter 固定数值），
+	// 使改档立即生效、无需回写 concurrency 列。未启用则读 Concurrency 列（旧行为）。
+	if c := a.PacingModeConcurrency(); c > 0 {
+		return c
 	}
 	if a.Concurrency > 0 {
 		return a.Concurrency
@@ -133,6 +138,12 @@ func (a *Account) IsSchedulable() bool {
 		return false
 	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
+		return false
+	}
+	// Phase 21I: 启用 pacing 的账号，上游真实利用率接近满时主动休眠
+	// （DeRouter 式事前防封）。未启用 pacing 的账号（如 admin 账号）
+	// 不受影响，保持旧行为。
+	if a.GetPacingMode() != "" && a.IsUtilizationDormant() {
 		return false
 	}
 	return true
@@ -2259,13 +2270,35 @@ func (a *Account) GetSessionIdleTimeoutMinutes() int {
 	return 5
 }
 
-// GetBaseRPM 获取基础 RPM 限制
-// 返回 0 表示未启用（负数视为无效配置，按 0 处理）
+// GetBaseRPM 获取基础 RPM 限制，返回 0 表示未启用。
+// Phase 21I: 启用 pacing 档位时，RPM 由五档容量表权威决定（DeRouter 固定数值），
+// 忽略 Extra 里的 base_rpm；未启用 pacing 的账号仍读 Extra["base_rpm"]（旧行为）。
 func (a *Account) GetBaseRPM() int {
+	if p, ok := pacingProfileFor(a.GetPacingMode()); ok {
+		return p.RPM
+	}
 	if a.Extra == nil {
 		return 0
 	}
 	if v, ok := a.Extra["base_rpm"]; ok {
+		val := parseExtraInt(v)
+		if val > 0 {
+			return val
+		}
+	}
+	return 0
+}
+
+// GetBaseRPH 获取基础每小时请求上限（Phase 21I，DeRouter 每小时闸）。
+// 启用 pacing 时由五档容量表权威决定；未启用则读 Extra["base_rph"]。
+func (a *Account) GetBaseRPH() int {
+	if p, ok := pacingProfileFor(a.GetPacingMode()); ok {
+		return p.RPH
+	}
+	if a.Extra == nil {
+		return 0
+	}
+	if v, ok := a.Extra["base_rph"]; ok {
 		val := parseExtraInt(v)
 		if val > 0 {
 			return val
@@ -2336,16 +2369,16 @@ func (a *Account) GetRPMStickyBuffer() int {
 // CheckRPMSchedulability 根据当前 RPM 计数检查调度状态
 // 复用 WindowCostSchedulability 三态：Schedulable / StickyOnly / NotSchedulable
 //
-// Phase 21H：启用 pacing 档位时，阈值用档位+反馈修正后的 EffectiveBaseRPM
-// （稳健收缩 / 冲量放大 / 刚被限流自动减半再线性恢复）。未启用则原样 base_rpm。
+// Phase 21I：启用 pacing 档位时，RPM 阈值由五档容量表权威给出（GetBaseRPM）；
+// 未启用则原样读 Extra["base_rpm"]。AIMD 反馈已删除——防封改由上游真实
+// 利用率主动休眠 + 拟人化承担。
 func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulability {
 	baseRPM := a.GetBaseRPM()
 	if baseRPM <= 0 {
 		return WindowCostSchedulable
 	}
-	effectiveRPM := a.EffectiveBaseRPM(time.Now())
 
-	if currentRPM < effectiveRPM {
+	if currentRPM < baseRPM {
 		return WindowCostSchedulable
 	}
 
@@ -2354,10 +2387,36 @@ func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulabilit
 		return WindowCostStickyOnly // 粘性豁免无红区
 	}
 
-	// tiered: 黄区 + 红区（黄区缓冲仍按原始 base 计算，保证粘性会话在
-	// 反馈降速期间也不被硬切断）
+	// tiered: 黄区 + 红区（黄区缓冲保证粘性会话在减速期间不被硬切断）
 	buffer := a.GetRPMStickyBuffer()
-	if currentRPM < effectiveRPM+buffer {
+	if currentRPM < baseRPM+buffer {
+		return WindowCostStickyOnly
+	}
+	return WindowCostNotSchedulable
+}
+
+// CheckRPHSchedulability 根据当前 RPH（每小时请求数）计数检查调度状态
+// （Phase 21I，DeRouter 每小时闸）。复用三态语义：
+//   - < base_rph: Schedulable
+//   - base_rph <= count < base_rph+buffer: StickyOnly（粘性会话不硬断）
+//   - >= base_rph+buffer: NotSchedulable
+//
+// base_rph <= 0 表示未启用（未启用 pacing 的账号），直接可调度，保持旧行为。
+// 小时闸是一道额外的平滑护栏，与 RPM/预算/利用率各自独立、取交集生效。
+func (a *Account) CheckRPHSchedulability(currentRPH int) WindowCostSchedulability {
+	baseRPH := a.GetBaseRPH()
+	if baseRPH <= 0 {
+		return WindowCostSchedulable
+	}
+	if currentRPH < baseRPH {
+		return WindowCostSchedulable
+	}
+	// 黄区缓冲取 base_rph 的 10%（至少 1），保证减速期粘性会话不被硬切。
+	buffer := baseRPH / 10
+	if buffer < 1 {
+		buffer = 1
+	}
+	if currentRPH < baseRPH+buffer {
 		return WindowCostStickyOnly
 	}
 	return WindowCostNotSchedulable
@@ -2368,9 +2427,9 @@ func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulabilit
 // - 费用 >= 阈值 且 < 阈值+预留: WindowCostStickyOnly（仅粘性会话）
 // - 费用 >= 阈值+预留: WindowCostNotSchedulable（不可调度）
 //
-// Phase 21H：启用 pacing 档位的账号在硬阈值之前多一道预算软刹车——当前
-// 花费超过"按窗口时间比例应花的预算目标"时降为 StickyOnly（粘性会话不断，
-// 新流量让给预算富余的账号），避免窗口前期烧光、后期躺平。
+// Phase 21I：内部预算软刹车（WindowBudgetTargetFraction）已删除——DeRouter
+// 模型不看内部估算成本，只看上游真实利用率（Phase 1 主动休眠）。此处仅保留
+// window_cost_limit 硬阈值语义（管理员账号仍可配置）。
 func (a *Account) CheckWindowCostSchedulability(currentWindowCost float64) WindowCostSchedulability {
 	limit := a.GetWindowCostLimit()
 	if limit <= 0 {
@@ -2378,11 +2437,6 @@ func (a *Account) CheckWindowCostSchedulability(currentWindowCost float64) Windo
 	}
 
 	if currentWindowCost < limit {
-		if budget := a.WindowBudgetTargetFraction(time.Now()); budget < 1 {
-			if currentWindowCost >= limit*budget {
-				return WindowCostStickyOnly
-			}
-		}
 		return WindowCostSchedulable
 	}
 

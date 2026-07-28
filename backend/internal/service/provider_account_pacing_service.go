@@ -13,7 +13,7 @@ import (
 
 // ErrInvalidPacingMode 非法档位。
 var ErrInvalidPacingMode = infraerrors.BadRequest(
-	"INVALID_PACING_MODE", "pacing_mode must be one of steady/smart/burst")
+	"INVALID_PACING_MODE", "pacing_mode must be one of humanized/standard/speed_2x/speed_3x/speed_5x")
 
 // providerPacingAccountRepo 写 Extra 的最小依赖面（账号 repo 天然满足）。
 type providerPacingAccountRepo interface {

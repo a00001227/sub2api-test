@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	mathrand "math/rand"
 	"net"
 	"net/http"
@@ -2815,27 +2816,49 @@ func rpmFromPrefetchContext(ctx context.Context, accountID int64) (int, bool) {
 	return 0, false
 }
 
-// withRPMPrefetch 批量预取所有候选账号的 RPM 计数
+// Phase 21I: RPH 预取上下文（与 RPM 预取并列）。
+type rphPrefetchContextKeyType struct{}
+
+var rphPrefetchContextKey = rphPrefetchContextKeyType{}
+
+func rphFromPrefetchContext(ctx context.Context, accountID int64) (int, bool) {
+	if v, ok := ctx.Value(rphPrefetchContextKey).(map[int64]int); ok {
+		count, found := v[accountID]
+		return count, found
+	}
+	return 0, false
+}
+
+// withRPMPrefetch 批量预取所有候选账号的 RPM（及 Phase 21I 的 RPH）计数
 func (s *GatewayService) withRPMPrefetch(ctx context.Context, accounts []Account) context.Context {
 	if s.rpmCache == nil {
 		return ctx
 	}
 
-	var ids []int64
+	var rpmIDs, rphIDs []int64
 	for i := range accounts {
-		if accounts[i].IsAnthropicOAuthOrSetupToken() && accounts[i].GetBaseRPM() > 0 {
-			ids = append(ids, accounts[i].ID)
+		if !accounts[i].IsAnthropicOAuthOrSetupToken() {
+			continue
+		}
+		if accounts[i].GetBaseRPM() > 0 {
+			rpmIDs = append(rpmIDs, accounts[i].ID)
+		}
+		if accounts[i].GetBaseRPH() > 0 {
+			rphIDs = append(rphIDs, accounts[i].ID)
 		}
 	}
-	if len(ids) == 0 {
-		return ctx
-	}
 
-	counts, err := s.rpmCache.GetRPMBatch(ctx, ids)
-	if err != nil {
-		return ctx // 失败开放
+	if len(rpmIDs) > 0 {
+		if counts, err := s.rpmCache.GetRPMBatch(ctx, rpmIDs); err == nil {
+			ctx = context.WithValue(ctx, rpmPrefetchContextKey, counts)
+		}
 	}
-	return context.WithValue(ctx, rpmPrefetchContextKey, counts)
+	if len(rphIDs) > 0 {
+		if counts, err := s.rpmCache.GetRPHBatch(ctx, rphIDs); err == nil {
+			ctx = context.WithValue(ctx, rphPrefetchContextKey, counts)
+		}
+	}
+	return ctx
 }
 
 // isAccountSchedulableForRPM 检查账号是否可根据 RPM 进行调度
@@ -2844,8 +2867,16 @@ func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account
 	if !account.IsAnthropicOAuthOrSetupToken() {
 		return true
 	}
+
+	// Phase 21I: 拟人化维度（每日休息窗口 / 活跃-冷却段）。语义为 StickyOnly——
+	// 拟人化是人为节奏而非真实上游硬限，故只停新流量、不硬断在途粘性会话。
+	if account.IsHumanizedDormant(time.Now()) && !isSticky {
+		return false
+	}
+
 	baseRPM := account.GetBaseRPM()
 	if baseRPM <= 0 {
+		// 即便未启用 RPM 阈值，上面的拟人化 StickyOnly 判定仍需生效。
 		return true
 	}
 
@@ -2860,8 +2891,20 @@ func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account
 		// 失败开放：GetRPM 错误时允许调度
 	}
 
-	schedulability := account.CheckRPMSchedulability(currentRPM)
-	switch schedulability {
+	if !resolveSchedulability(account.CheckRPMSchedulability(currentRPM), isSticky) {
+		return false
+	}
+
+	// Phase 21I: 每小时闸（RPH）。与 RPM 取交集——任一 gate 拒绝即拒绝。
+	if !s.isAccountSchedulableForRPH(ctx, account, isSticky) {
+		return false
+	}
+	return true
+}
+
+// resolveSchedulability 把三态调度结果按是否粘性会话折算为布尔可调度。
+func resolveSchedulability(state WindowCostSchedulability, isSticky bool) bool {
+	switch state {
 	case WindowCostSchedulable:
 		return true
 	case WindowCostStickyOnly:
@@ -2870,6 +2913,26 @@ func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account
 		return false
 	}
 	return true
+}
+
+// isAccountSchedulableForRPH 检查账号是否可根据 RPH（每小时请求数）调度。
+// 仅适用于启用了 base_rph 的 Anthropic OAuth/SetupToken 账号；未启用直接放行。
+func (s *GatewayService) isAccountSchedulableForRPH(ctx context.Context, account *Account, isSticky bool) bool {
+	if account.GetBaseRPH() <= 0 {
+		return true
+	}
+
+	var currentRPH int
+	if count, ok := rphFromPrefetchContext(ctx, account.ID); ok {
+		currentRPH = count
+	} else if s.rpmCache != nil {
+		if count, err := s.rpmCache.GetRPH(ctx, account.ID); err == nil {
+			currentRPH = count
+		}
+		// 失败开放：GetRPH 错误时允许调度
+	}
+
+	return resolveSchedulability(account.CheckRPHSchedulability(currentRPH), isSticky)
 }
 
 // IncrementAccountRPM increments the RPM counter for the given account.
@@ -2881,7 +2944,24 @@ func (s *GatewayService) IncrementAccountRPM(ctx context.Context, accountID int6
 		return nil
 	}
 	_, err := s.rpmCache.IncrementRPM(ctx, accountID)
+	// Phase 21I: 同步递增 RPH（每小时闸）。RPH 错误不覆盖 RPM 的返回，
+	// 两者均为 soft-limit，失败开放。
+	if _, rphErr := s.rpmCache.IncrementRPH(ctx, accountID); rphErr != nil && err == nil {
+		slog.Warn("rph_increment_failed", "account_id", accountID, "error", rphErr)
+	}
 	return err
+}
+
+// RecordAccountOutcome 累计账号存活期成功/总请求数（Phase 21I 成功率展示）。
+// 成功/失败均记一次 total，成功额外记 success。O(1) Redis 写，失败开放、
+// 绝不影响请求主流程。仅对 provider pacing 账号有意义，但对所有账号无害。
+func (s *GatewayService) RecordAccountOutcome(ctx context.Context, accountID int64, success bool) {
+	if s.rpmCache == nil {
+		return
+	}
+	if err := s.rpmCache.IncrementRequestOutcome(ctx, accountID, success); err != nil {
+		slog.Warn("account_outcome_record_failed", "account_id", accountID, "error", err)
+	}
 }
 
 // checkAndRegisterSession 检查并注册会话，用于会话数量限制
@@ -3116,11 +3196,54 @@ func shuffleWithinSortGroups(accounts []accountWithLoad) {
 			j++
 		}
 		if j-i > 1 {
-			mathrand.Shuffle(j-i, func(a, b int) {
-				accounts[i+a], accounts[i+b] = accounts[i+b], accounts[i+a]
-			})
+			weightedShuffleByPacing(accounts[i:j])
 		}
 		i = j
+	}
+}
+
+// weightedShuffleByPacing 在同一排序组内做加权随机排列（Phase 21I 配额降权）。
+// 每个账号按 PacingSelectionWeight() 取权重（正常 1.0，降权带 0.5），用
+// Efraimidis–Spirakis 加权抽样（key = rand^(1/w)，降序）决定组内顺序——
+// 权重高的账号更可能排在前面、被优先选中，但不会把降权账号完全排除。
+// 全部权重相等时退化为等概率洗牌，与旧行为一致。
+func weightedShuffleByPacing(group []accountWithLoad) {
+	if len(group) <= 1 {
+		return
+	}
+	type keyed struct {
+		item accountWithLoad
+		key  float64
+	}
+	keyed0Weight := group[0].account.PacingSelectionWeight()
+	allEqual := true
+	pairs := make([]keyed, len(group))
+	for idx := range group {
+		w := group[idx].account.PacingSelectionWeight()
+		if w != keyed0Weight {
+			allEqual = false
+		}
+		if w <= 0 {
+			w = 1e-9
+		}
+		// key = u^(1/w)，u∈(0,1]；w 越大 key 越接近 1（越靠前）。
+		u := mathrand.Float64()
+		if u <= 0 {
+			u = 1e-12
+		}
+		pairs[idx] = keyed{item: group[idx], key: math.Pow(u, 1.0/w)}
+	}
+	if allEqual {
+		mathrand.Shuffle(len(group), func(a, b int) {
+			group[a], group[b] = group[b], group[a]
+		})
+		return
+	}
+	sort.SliceStable(pairs, func(a, b int) bool {
+		return pairs[a].key > pairs[b].key
+	})
+	for idx := range pairs {
+		group[idx] = pairs[idx].item
 	}
 }
 
