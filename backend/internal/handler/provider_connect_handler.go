@@ -156,8 +156,8 @@ type pacingModeRequest struct {
 // SetPacingMode handles
 // POST /internal/provider-accounts/:external_ref/pacing-mode
 //
-// 设置账号的调度档位（steady/smart/burst），写 extra["pacing_mode"]，
-// 调度侧即时生效。幂等。
+// 设置账号的调度档位（DeRouter 五档 humanized/standard/speed_2x/3x/5x，
+// 兼容旧名 steady/smart/burst），写 extra["pacing_mode"]，调度侧即时生效。幂等。
 func (h *ProviderConnectHandler) SetPacingMode(c *gin.Context) {
 	externalRef := strings.TrimSpace(c.Param("external_ref"))
 	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {

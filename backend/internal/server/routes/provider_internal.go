@@ -35,7 +35,7 @@ func RegisterProviderInternalRoutes(
 		internal.POST("/:external_ref/deactivate", h.Deactivate)
 		// Phase 21G provider-reauth: 为凭证失效的既有账号创建重授权会话。
 		internal.POST("/:external_ref/reauth-sessions", h.CreateReauthSession)
-		// Phase 21H provider-pacing: 设置调度档位（steady/smart/burst）。
+		// Phase 21I provider-pacing: 设置 DeRouter 五档调度档位。
 		internal.POST("/:external_ref/pacing-mode", h.SetPacingMode)
 	}
 

@@ -7,7 +7,8 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-// Phase 21H provider-pacing: Portal 设置账号调度档位（steady/smart/burst）。
+// Phase 21I provider-pacing: Portal 设置账号 DeRouter 五档调度档位
+// （humanized/standard/speed_2x/3x/5x，兼容旧名 steady/smart/burst）。
 // 档位存 accounts.extra["pacing_mode"]（JSONB key 级合并，不碰其它 Extra 键），
 // 调度侧 account_pacing.go 读取生效。幂等：重复设同档位是无害写。
 
