@@ -78,28 +78,28 @@ func billingTypeForOutbox(billingMode string) string {
 	return "TOKEN"
 }
 
-// buildUsageOutboxPayload assembles the persisted event body. Field names match
-// providerwebhook.BuildUsageBillable / Portal's validatePayload exactly. Stored
-// so the worker delivers a byte-stable payload without re-reading usage data.
+// buildUsageOutboxPayload assembles the persisted event body. It delegates to
+// providerwebhook.BuildUsageBillable so the stored body is the FULL envelope
+// (schema_version / event_id / event_type / created_at + payload{...}) — byte-
+// identical to what the canonical builder produces and what Portal's HMAC guard
+// verifies. Storing only the inner payload (the previous shadow implementation)
+// dropped the envelope, so the delivered body had no top-level event_id and
+// Portal rejected every usage webhook with 401.
 func buildUsageOutboxPayload(cmd *service.UsageBillingCommand, eventID, externalRef string) map[string]any {
-	billingType := billingTypeForOutbox(cmd.BillingMode)
 	occurred := cmd.UsageOccurredAt.UTC().Format("2006-01-02T15:04:05Z07:00")
-
-	payload := map[string]any{
-		"request_id":                   cmd.RequestID,
-		"external_provider_account_id": externalRef,
-		"sub2api_account_id":           strconv.FormatInt(cmd.AccountID, 10),
-		"idempotency_key":              eventID,
-		"model":                        cmd.Model,
-		"billing_type":                 billingType,
-		"occurred_at":                  occurred,
-	}
-	if billingType == "IMAGE" {
-		payload["size_tier"] = cmd.ImageSizeTier
-		payload["quantity"] = cmd.ImageCount
-	} else {
-		payload["input_tokens"] = cmd.InputTokens
-		payload["output_tokens"] = cmd.OutputTokens
-	}
-	return payload
+	ev := providerwebhook.BuildUsageBillable(providerwebhook.UsageBillableInput{
+		EventID:                   eventID,
+		CreatedAt:                 occurred,
+		RequestID:                 cmd.RequestID,
+		ExternalProviderAccountID: externalRef,
+		Sub2apiAccountID:          strconv.FormatInt(cmd.AccountID, 10),
+		Model:                     cmd.Model,
+		BillingType:               billingTypeForOutbox(cmd.BillingMode),
+		OccurredAt:                occurred,
+		InputTokens:               cmd.InputTokens,
+		OutputTokens:              cmd.OutputTokens,
+		SizeTier:                  cmd.ImageSizeTier,
+		Quantity:                  cmd.ImageCount,
+	})
+	return ev.Body
 }

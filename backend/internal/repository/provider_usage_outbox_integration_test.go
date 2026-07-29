@@ -92,8 +92,13 @@ func TestUsageOutbox_ProviderAccount_EnqueuesRow(t *testing.T) {
 	require.Equal(t, "evt_usage_"+reqID, eventID)
 	require.Equal(t, "pending", status)
 
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(payloadRaw, &payload))
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(payloadRaw, &body))
+	// Stored body MUST carry the full envelope (its absence was the 401 bug).
+	require.Equal(t, "usage.billable.completed", body["event_type"])
+	require.Equal(t, "evt_usage_"+reqID, body["event_id"])
+	payload, ok := body["payload"].(map[string]any)
+	require.True(t, ok, "payload must be a nested object")
 	require.Equal(t, "TOKEN", payload["billing_type"])
 	require.Equal(t, ref, payload["external_provider_account_id"])
 	// no price/gross ever

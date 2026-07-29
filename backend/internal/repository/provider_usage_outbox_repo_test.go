@@ -35,7 +35,25 @@ func TestBuildUsageOutboxPayload_Token(t *testing.T) {
 		OutputTokens:    500,
 		UsageOccurredAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	}
-	p := buildUsageOutboxPayload(cmd, "evt_usage_client:r1", "pa_1")
+	body := buildUsageOutboxPayload(cmd, "evt_usage_client:r1", "pa_1")
+	// Envelope MUST be present (its absence was the 401 bug): Portal's HMAC
+	// guard requires top-level event_id, and the router keys off event_type.
+	if body["schema_version"] != 1 {
+		t.Fatalf("schema_version: %v", body["schema_version"])
+	}
+	if body["event_id"] != "evt_usage_client:r1" {
+		t.Fatalf("event_id: %v", body["event_id"])
+	}
+	if body["event_type"] != "usage.billable.completed" {
+		t.Fatalf("event_type: %v", body["event_type"])
+	}
+	if body["created_at"] != "2026-07-14T12:00:00Z" {
+		t.Fatalf("created_at: %v", body["created_at"])
+	}
+	p, ok := body["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload not a nested object: %+v", body["payload"])
+	}
 	if p["billing_type"] != "TOKEN" {
 		t.Fatalf("billing_type: %v", p["billing_type"])
 	}
@@ -69,7 +87,14 @@ func TestBuildUsageOutboxPayload_Image(t *testing.T) {
 		ImageCount:      5,
 		UsageOccurredAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	}
-	p := buildUsageOutboxPayload(cmd, "evt_usage_client:r2", "pa_2")
+	body := buildUsageOutboxPayload(cmd, "evt_usage_client:r2", "pa_2")
+	if body["event_type"] != "usage.billable.completed" {
+		t.Fatalf("event_type: %v", body["event_type"])
+	}
+	p, ok := body["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload not a nested object: %+v", body["payload"])
+	}
 	if p["billing_type"] != "IMAGE" || p["size_tier"] != "2K" || p["quantity"].(int) != 5 {
 		t.Fatalf("image payload wrong: %+v", p)
 	}
