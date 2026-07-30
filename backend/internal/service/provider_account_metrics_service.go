@@ -240,7 +240,9 @@ func (s *ProviderAccountMetricsService) Metrics(
 	}
 	if today, terr := s.usage.GetTodayStats(ctx, id); terr == nil && today != nil {
 		out.TodayRequests = today.Requests
-		out.TodayTokens = today.Tokens
+		// Provider 面板的今日Tokens 只统计真实输入/输出，不含缓存读写
+		// （cache_creation/cache_read）——与 sub2api 后台的 Tokens 口径不同。
+		out.TodayTokens = today.InputTokens + today.OutputTokens
 	}
 
 	// Phase 21I: pacing 档位 + 评分 + 状态（仅启用 pacing 的账号返回）。

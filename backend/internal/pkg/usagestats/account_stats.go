@@ -8,6 +8,8 @@ package usagestats
 type AccountStats struct {
 	Requests     int64   `json:"requests"`
 	Tokens       int64   `json:"tokens"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
 	Cost         float64 `json:"cost"`
 	StandardCost float64 `json:"standard_cost"`
 	UserCost     float64 `json:"user_cost"`

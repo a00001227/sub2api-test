@@ -2074,6 +2074,8 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 		SELECT
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
+			COALESCE(SUM(input_tokens), 0) as input_tokens,
+			COALESCE(SUM(output_tokens), 0) as output_tokens,
 			COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as cost,
 			COALESCE(SUM(total_cost), 0) as standard_cost,
 			COALESCE(SUM(actual_cost), 0) as user_cost
@@ -2089,6 +2091,8 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 		[]any{accountID, today},
 		&stats.Requests,
 		&stats.Tokens,
+		&stats.InputTokens,
+		&stats.OutputTokens,
 		&stats.Cost,
 		&stats.StandardCost,
 		&stats.UserCost,

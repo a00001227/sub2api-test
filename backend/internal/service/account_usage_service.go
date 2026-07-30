@@ -136,6 +136,8 @@ func NewUsageCache() *UsageCache {
 type WindowStats struct {
 	Requests     int64   `json:"requests"`
 	Tokens       int64   `json:"tokens"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
 	Cost         float64 `json:"cost"`
 	StandardCost float64 `json:"standard_cost"`
 	UserCost     float64 `json:"user_cost"`
@@ -986,6 +988,8 @@ func (s *AccountUsageService) GetTodayStats(ctx context.Context, accountID int64
 	return &WindowStats{
 		Requests:     stats.Requests,
 		Tokens:       stats.Tokens,
+		InputTokens:  stats.InputTokens,
+		OutputTokens: stats.OutputTokens,
 		Cost:         stats.Cost,
 		StandardCost: stats.StandardCost,
 		UserCost:     stats.UserCost,
