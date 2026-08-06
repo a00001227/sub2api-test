@@ -163,6 +163,9 @@ func runMainServer() {
 
 	log.Printf("Server started on %s", app.Server.Addr)
 
+	// 边缘 cell:自注册 + 心跳到 Portal(仅 EDGE 且配齐 CELL_* 时生效)。
+	startCellHeartbeat(context.Background(), cfg)
+
 	// 等待中断信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

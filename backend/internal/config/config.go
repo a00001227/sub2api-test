@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -100,10 +101,12 @@ type Config struct {
 	// EdgeForward：中央网关“执行→转发”到边缘 cell（P1 walking skeleton）。默认关;
 	// 开启且请求命中配置的组时,把该 /v1 请求反向代理到 cell,不走本地选号。
 	EdgeForward EdgeForwardConfig `mapstructure:"edge_forward" yaml:"edge_forward"`
-	Timezone    string            `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
-	Gemini      GeminiConfig      `mapstructure:"gemini"`
-	Update      UpdateConfig      `mapstructure:"update"`
-	Idempotency IdempotencyConfig `mapstructure:"idempotency"`
+	// CellRegistry：边缘 cell 向 Portal 自注册 + 心跳(P3)。仅 EDGE 且配齐时生效。
+	CellRegistry CellRegistryConfig `mapstructure:"cell_registry" yaml:"cell_registry"`
+	Timezone     string             `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	Gemini       GeminiConfig       `mapstructure:"gemini"`
+	Update       UpdateConfig       `mapstructure:"update"`
+	Idempotency  IdempotencyConfig  `mapstructure:"idempotency"`
 }
 
 // EdgeForwardConfig：中央把命中组的 /v1 请求转发给边缘 cell。
@@ -112,6 +115,15 @@ type EdgeForwardConfig struct {
 	CellURL string   `mapstructure:"cell_url" yaml:"cell_url"` // cell 可达基址,如 http://10.8.0.5:8091
 	Key     string   `mapstructure:"key" yaml:"key"`           // cell 接受的消费者 key(Authorization: Bearer)
 	Groups  []string `mapstructure:"groups" yaml:"groups"`     // 要转发的组 slug 列表;空=不转发
+}
+
+// CellRegistryConfig：边缘 cell 自注册/心跳到 Portal。
+type CellRegistryConfig struct {
+	URL             string `mapstructure:"url" yaml:"url"`                         // Portal 注册端点,如 https://portal-api/internal/cells/register
+	AdvertiseAddr   string `mapstructure:"advertise_addr" yaml:"advertise_addr"`   // 本 cell 对外可达地址(Portal 据此访问),如 http://10.8.0.5:8091
+	Region          string `mapstructure:"region" yaml:"region"`                   // 本 cell 的地区码,如 sgp
+	Node            string `mapstructure:"node" yaml:"node"`                       // 所属主机标注(可选)
+	IntervalSeconds int    `mapstructure:"interval_seconds" yaml:"interval_seconds"` // 心跳间隔,默认 30s
 }
 
 type LogConfig struct {
@@ -1486,6 +1498,27 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("PROVIDER_CONNECT_WEBHOOK_SECRET")); v != "" {
 		cfg.ProviderConnect.WebhookSecret = v
+	}
+	// CELL_* 环境变量兜底(边缘 cell 自注册/心跳)。同样是启动即读,与 EDGE_MODE 一致。
+	if v := strings.TrimSpace(os.Getenv("CELL_REGISTRY_URL")); v != "" {
+		cfg.CellRegistry.URL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CELL_ADVERTISE_ADDR")); v != "" {
+		cfg.CellRegistry.AdvertiseAddr = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CELL_REGION")); v != "" {
+		cfg.CellRegistry.Region = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CELL_NODE")); v != "" {
+		cfg.CellRegistry.Node = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CELL_HEARTBEAT_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CellRegistry.IntervalSeconds = n
+		}
+	}
+	if cfg.CellRegistry.IntervalSeconds <= 0 {
+		cfg.CellRegistry.IntervalSeconds = 30
 	}
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
