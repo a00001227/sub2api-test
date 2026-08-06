@@ -130,6 +130,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	regionRepository := repository.NewRegionRepository(client)
 	regionService := service.NewRegionService(regionRepository)
 	proxyAllocator := service.NewProxyAllocator(proxyAllocationRepository, regionService)
+	proxyAllocator.SetEdgeMode(configConfig.EdgeMode)
 	providerConnectService := service.NewProviderConnectService(providerConnectSessionRepository, proxyAllocator, oAuthService)
 	providerWebhookNotifier := service.ProvideProviderWebhookNotifier(configConfig)
 	providerConnectCompletionService := service.NewProviderConnectCompletionService(providerConnectSessionRepository, providerConnectAccountRepository, accountRepository, oAuthService, providerWebhookNotifier)

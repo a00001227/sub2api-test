@@ -174,7 +174,15 @@ type ProxyAllocator struct {
 	repo    ProxyAllocationRepository
 	regions regionNameResolver
 	cache   *regionCapacityCache
+	// edgeMode: 边缘 cell 模式下,cell 自身(它所在机器 / 它配的固定出口)就是出口,
+	// 不再强制从 region 代理池分配。无可用代理时返回 nil(直连本机出口)而非
+	// ErrRegionNoCapacity。中央保持 false → "不降级直连" 铁律不变。
+	edgeMode bool
 }
+
+// SetEdgeMode 在启动时由 wire 依据 cfg.EdgeMode 设置。只影响 SelectProxy 在
+// "无可用代理" 时的行为(EDGE:直连 / 中央:报 REGION_NO_CAPACITY)。
+func (a *ProxyAllocator) SetEdgeMode(v bool) { a.edgeMode = v }
 
 // NewProxyAllocator creates the allocator. regions resolves region codes to
 // display names (dictionary); it may be nil in tests, in which case names fall
@@ -248,6 +256,10 @@ func (a *ProxyAllocator) SelectProxy(ctx context.Context, region, platform strin
 		return nil, err
 	}
 	if proxy == nil {
+		// 边缘 cell:没配代理就直连(cell 本机出口即该地区出口);中央:铁律不降级。
+		if a.edgeMode {
+			return nil, nil
+		}
 		return nil, ErrRegionNoCapacity
 	}
 	return proxy, nil

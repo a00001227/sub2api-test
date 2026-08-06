@@ -135,18 +135,24 @@ func (s *ProviderConnectService) CreateOnboardingSession(
 		return nil, err
 	}
 
-	// 2) 分配代理（region 校验在 allocator 内；无容量即失败，不降级直连）
+	// 2) 分配代理。中央:无容量即失败(不降级直连)。边缘 cell:允许无代理 →
+	//    proxy 为 nil,直连 cell 本机出口(cell 自身就是该地区出口)。
 	proxy, err := s.allocator.SelectProxy(ctx, input.Region, platform)
 	if err != nil {
 		return nil, err
+	}
+	var proxyID *int64
+	if proxy != nil {
+		pid := proxy.ID
+		proxyID = &pid
 	}
 
 	// 3) 复用现有 OAuthService 生成授权 URL（零改动调用）。
 	//    先于会话落库：GenerateAuthURL 在 OAuth 内存 SessionStore 里创建
 	//    了带 state/codeVerifier/proxyURL 的会话，其 SessionID 是后续
 	//    ExchangeCode 的必需入参（21E-6C-2B-1 的遗漏修复：必须保存它）。
-	//    OAuth 失败则整体失败、不留孤儿会话。
-	authRes, err := s.oauth.GenerateAuthURL(ctx, &proxy.ID)
+	//    OAuth 失败则整体失败、不留孤儿会话。proxyID 为 nil = 直连。
+	authRes, err := s.oauth.GenerateAuthURL(ctx, proxyID)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +166,7 @@ func (s *ProviderConnectService) CreateOnboardingSession(
 		ExternalProviderAccountID: accountRef,
 		ProviderType:              providerType,
 		Region:                    &region,
-		ProxyID:                   &proxy.ID,
+		ProxyID:                   proxyID,
 		Status:                    "pending",
 		OAuthSessionID:            &oauthSessionID,
 		CallbackURL:               strings.TrimSpace(input.CallbackURL),
