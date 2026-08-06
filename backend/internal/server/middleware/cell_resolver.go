@@ -97,6 +97,29 @@ func weightedOrder(pool []cellCandidate, rng func() float64) []*url.URL {
 	return out
 }
 
+// moveToFront 若 target 在 order 中则把它移到队首(会话亲和:优先落原 cell),否则
+// 原样返回(陈旧绑定:该 cell 已不在存活池中 → 忽略,走加权随机)。按 URL 字符串比较。
+func moveToFront(order []*url.URL, target *url.URL) []*url.URL {
+	if target == nil {
+		return order
+	}
+	idx := -1
+	for i, u := range order {
+		if u.String() == target.String() {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		return order // 不在列表(-1)或已在队首(0)
+	}
+	out := make([]*url.URL, 0, len(order))
+	out = append(out, order[idx])
+	out = append(out, order[:idx]...)
+	out = append(out, order[idx+1:]...)
+	return out
+}
+
 // routableResponse 对应 Portal GET /internal/cells/routable(取 baseUrl + reputation)。
 type routableResponse struct {
 	Cells []struct {

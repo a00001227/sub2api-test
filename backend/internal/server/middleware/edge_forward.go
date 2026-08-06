@@ -77,6 +77,8 @@ func EdgeForward(cfg config.EdgeForwardConfig) gin.HandlerFunc {
 func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string, rng func() float64) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	client := &http.Client{Transport: http.DefaultTransport}
+	// 会话→cell 亲和(P3-3c),处理函数生命周期内共享。
+	affinity := newSessionAffinity(stickyAffinityTTL)
 
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
@@ -130,6 +132,16 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			body = b
 		}
 
+		// 会话亲和(P3-3c):进行中会话固定回同一 cell —— sub2api 的号级粘性只有在
+		// 请求先落到同一 cell 时才生效,所以这层的 cell 亲和是整个 Sticky 的前提。
+		// 仅当绑定的 cell 仍在本轮候选池中(存活可路由)才生效,否则忽略陈旧绑定。
+		stickyKey := stickySessionKey(body)
+		if stickyKey != "" {
+			if bound, okBound := affinity.get(stickyKey); okBound {
+				order = moveToFront(order, bound)
+			}
+		}
+
 		var lastErr error
 		for i, target := range order {
 			outURL := *target
@@ -156,6 +168,10 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				slog.Warn("edge_forward: 转发到 cell 失败,尝试下一候选",
 					"cell", target.Host, "idx", i, "err", err)
 				continue
+			}
+			// 成功落到某 cell → 绑定会话亲和(下一轮同会话回到这台 cell)。
+			if stickyKey != "" {
+				affinity.put(stickyKey, target)
 			}
 			streamCellResponse(c, resp)
 			c.Abort()
