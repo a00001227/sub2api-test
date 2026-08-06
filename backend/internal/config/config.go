@@ -1473,6 +1473,20 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		}
 		cfg.EdgeForward.Groups = groups
 	}
+	// PROVIDER_CONNECT_* 环境变量兜底。这些是嵌套键(provider_connect.*)，viper
+	// AutomaticEnv 对未在 config 文件出现的嵌套键不会绑定；EDGE_MODE cell 走
+	// AUTO_SETUP 生成的配置里没有 provider_connect 段，导致 InternalToken 为空 →
+	// 接入面 fail-closed 一律 401。这里显式从 env 覆盖(非空才覆盖，中央用配置文件
+	// 的方式不受影响)。
+	if v := strings.TrimSpace(os.Getenv("PROVIDER_CONNECT_INTERNAL_TOKEN")); v != "" {
+		cfg.ProviderConnect.InternalToken = v
+	}
+	if v := strings.TrimSpace(os.Getenv("PROVIDER_CONNECT_WEBHOOK_URL")); v != "" {
+		cfg.ProviderConnect.WebhookURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("PROVIDER_CONNECT_WEBHOOK_SECRET")); v != "" {
+		cfg.ProviderConnect.WebhookSecret = v
+	}
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "debug"
