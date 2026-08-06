@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -141,5 +143,112 @@ func TestEdgeForward_WebSocketForwards(t *testing.T) {
 	}
 	if string(data) != "echo:hi" {
 		t.Fatalf("WS 应经 cell echo 回传; got %q", string(data))
+	}
+}
+
+// SSE 必须逐块流式回传(每块 flush),而不是缓冲到 cell 结束才吐。
+// 用一个 handshake 证明:cell 写完 event1 就阻塞,直到客户端确认已收到 event1
+// 才写 event2 —— 客户端能在 event2 之前拿到 event1,即证明中途 flush 生效。
+func TestEdgeForward_SSEStreamsChunked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	released := make(chan struct{})
+	cell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("data: event1\n\n"))
+		if fl != nil {
+			fl.Flush()
+		}
+		<-released // 客户端确认拿到 event1 后才继续
+		_, _ = w.Write([]byte("data: event2\n\n"))
+		if fl != nil {
+			fl.Flush()
+		}
+	}))
+	defer cell.Close()
+
+	cfg := config.EdgeForwardConfig{Enabled: true, CellURL: cell.URL, Key: "k", Groups: []string{"claude"}}
+	e := gin.New()
+	e.POST("/v1/messages",
+		func(c *gin.Context) {
+			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
+			c.Next()
+		},
+		EdgeForward(cfg),
+		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
+	)
+	central := httptest.NewServer(e)
+	defer central.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, central.URL+"/v1/messages", strings.NewReader("{}"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("请求中央失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("应透传 SSE Content-Type; got %q", ct)
+	}
+	br := bufio.NewReader(resp.Body)
+	line1, err := br.ReadString('\n') // 应在 cell 尚未写 event2 前就到达
+	if err != nil || !strings.Contains(line1, "event1") {
+		t.Fatalf("应先流式收到 event1; got %q err=%v", line1, err)
+	}
+	close(released) // 放行 cell 写 event2
+	rest, _ := io.ReadAll(br)
+	if !strings.Contains(string(rest), "event2") {
+		t.Fatalf("应继续收到 event2; got %q", string(rest))
+	}
+}
+
+// 转发到 cell 时不得泄漏消费者凭据:中央把 Authorization 换成 cell key,
+// 并删掉消费者的 x-api-key —— cell 只能看到 cell 自己的 key。
+func TestEdgeForward_DoesNotLeakConsumerKey(t *testing.T) {
+	var gotAuth, gotXAPIKey string
+	cell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotXAPIKey = r.Header.Get("X-Api-Key")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer cell.Close()
+
+	cfg := config.EdgeForwardConfig{Enabled: true, CellURL: cell.URL, Key: "cellkey", Groups: []string{"claude"}}
+	e := newEdgeForwardEngine(cfg, "claude")
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer consumer-secret")
+	req.Header.Set("X-Api-Key", "consumer-secret")
+	e.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotAuth != "Bearer cellkey" {
+		t.Fatalf("cell 应只收到 cell key; got Authorization=%q", gotAuth)
+	}
+	if gotXAPIKey != "" {
+		t.Fatalf("消费者 x-api-key 不应泄漏到 cell; got %q", gotXAPIKey)
+	}
+}
+
+// 命中组但 cell 不可达:客户端应拿到干净的 502 upstream_error,
+// 且绝不回落到中央本地执行(避免"转发失败悄悄用了中央的号")。
+func TestEdgeForward_CellUnreachableReturns502(t *testing.T) {
+	cell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	cellURL := cell.URL
+	cell.Close() // 关掉 → 连接被拒
+
+	cfg := config.EdgeForwardConfig{Enabled: true, CellURL: cellURL, Key: "k", Groups: []string{"claude"}}
+	e := newEdgeForwardEngine(cfg, "claude")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("cell 不可达应 502; got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "upstream_error") {
+		t.Fatalf("应返回干净的 upstream_error; got %q", w.Body.String())
+	}
+	if w.Header().Get("X-Handled-By") == "local" || strings.Contains(w.Body.String(), "local-ok") {
+		t.Fatalf("cell 不可达绝不应回落到本地执行; body=%q", w.Body.String())
 	}
 }
