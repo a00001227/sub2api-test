@@ -1,37 +1,65 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )
 
-// EdgeForward 是中央网关“执行→转发”中间件（P1 walking skeleton）。
+// EdgeForward 是中央网关“执行→转发”中间件。
 //
-// 当 EdgeForward 开启、且当前请求解析出的组 slug 命中配置列表时,把该 /v1 请求
-// 手动流式反向代理到边缘 cell（不带中央凭据,cell 用它本地的号执行）,并把 cell 的
-// 响应(含 SSE 流,逐块 flush)原样回传给客户端;否则放行,走中央本地选号执行(与
-// 今天一致)。
+// 开启且请求组 slug 命中配置列表时,把该 /v1 请求手动流式反向代理到边缘 cell(不带
+// 中央凭据,cell 用它本地的号执行),SSE/WS 逐块原样回传;否则放行走中央本地执行。
 //
-// 默认关(Enabled=false / CellURL 空 / Groups 空)= 完全 no-op。WebSocket 升级
-// 请求本 skeleton 不转发(放行走本地),留待后续。
+// 选路(P3-2):配了 RegistryURL 就从 Portal 动态拉取存活 cell(按健康分降序)并
+// 缓存,按分数选最优;传输失败(写任何响应前)顺位转移到下一候选,全挂才 502。未配
+// RegistryURL 则退回静态单 CellURL(旧行为);动态模式下 static 作为最后兜底候选。
 //
-// 用手写流式代理而非 httputil.ReverseProxy:后者会触碰 gin 的 CloseNotify(在
-// 某些 ResponseWriter / h2c 下会 panic),且手写更利于逐块 flush SSE。
+// 默认关(Enabled=false / Groups 空 / 既无 CellURL 也无 RegistryURL)= 完全 no-op。
+//
+// 用手写流式代理而非 httputil.ReverseProxy:后者会触碰 gin 的 CloseNotify(在某些
+// ResponseWriter / h2c 下会 panic),且手写更利于逐块 flush SSE。
 func EdgeForward(cfg config.EdgeForwardConfig) gin.HandlerFunc {
-	if !cfg.Enabled || strings.TrimSpace(cfg.CellURL) == "" || len(cfg.Groups) == 0 {
-		return func(c *gin.Context) { c.Next() }
+	noop := func(c *gin.Context) { c.Next() }
+	if !cfg.Enabled || len(cfg.Groups) == 0 {
+		return noop
 	}
-	target, err := url.Parse(strings.TrimSpace(cfg.CellURL))
-	if err != nil || target.Scheme == "" || target.Host == "" {
-		slog.Error("edge_forward: 无效的 cell_url,已禁用转发", "cell_url", cfg.CellURL, "err", err)
-		return func(c *gin.Context) { c.Next() }
+
+	// 静态 cell(可选):RegistryURL 为空时是唯一目标;有 Registry 时作兜底候选。
+	var static *url.URL
+	if s := strings.TrimSpace(cfg.CellURL); s != "" {
+		u, err := url.Parse(s)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			slog.Error("edge_forward: 无效的 cell_url,已忽略", "cell_url", cfg.CellURL, "err", err)
+		} else {
+			static = u
+		}
+	}
+
+	var resolver cellResolver
+	if ru := strings.TrimSpace(cfg.RegistryURL); ru != "" {
+		d := &dynamicResolver{static: static}
+		interval := time.Duration(cfg.RefreshSeconds) * time.Second
+		if interval <= 0 {
+			interval = 15 * time.Second
+		}
+		startRegistryRefresh(context.Background(), d, ru, strings.TrimSpace(cfg.RegistryToken), interval)
+		resolver = d
+		slog.Info("edge_forward: 动态选路启用", "registry", ru, "refresh", interval.String())
+	} else if static != nil {
+		resolver = &staticResolver{target: static}
+	} else {
+		slog.Error("edge_forward: 已启用但既无 cell_url 也无 registry_url,转发禁用(no-op)")
+		return noop
 	}
 
 	groupSet := make(map[string]struct{}, len(cfg.Groups))
@@ -40,8 +68,12 @@ func EdgeForward(cfg config.EdgeForwardConfig) gin.HandlerFunc {
 			groupSet[s] = struct{}{}
 		}
 	}
-	forwardKey := strings.TrimSpace(cfg.Key)
+	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key))
+}
 
+// newEdgeForwardHandler 构造转发处理函数(组命中→选候选→WS/失败转移流式回传)。
+// 与配置解析分离,便于用注入的 resolver 直接测试选路/失败转移。
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	client := &http.Client{Transport: http.DefaultTransport}
 
@@ -55,65 +87,99 @@ func EdgeForward(cfg config.EdgeForwardConfig) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+
+		cands := resolver.candidates()
+		if len(cands) == 0 {
+			slog.Error("edge_forward: 无可路由 cell", "path", c.Request.URL.Path)
+			writeEdgeError(c)
+			return
+		}
+
 		if isWebSocketUpgrade(c.Request) {
-			proxyWebSocket(c, target, forwardKey)
+			// WS 无请求体可重放,失败转移意义有限:用最优候选,拨号失败即收尾。
+			proxyWebSocket(c, cands[0], forwardKey)
 			c.Abort()
 			return
 		}
 
-		// 构造到 cell 的出站请求:同 method/path/query/body,鉴权换成 cell key。
-		outURL := *target
-		outURL.Path = c.Request.URL.Path
-		outURL.RawQuery = c.Request.URL.RawQuery
-		outReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, outURL.String(), c.Request.Body)
-		if err != nil {
-			writeEdgeError(c)
-			return
-		}
-		copyProxyHeaders(outReq.Header, c.Request.Header)
-		outReq.ContentLength = c.Request.ContentLength
-		if forwardKey != "" {
-			outReq.Header.Set("Authorization", "Bearer "+forwardKey)
-			outReq.Header.Del("X-Api-Key")
-			outReq.Header.Del("x-api-key")
+		// 缓冲请求体以支持失败转移(同一请求重放给下一候选)。上游 bodyLimit 已封顶,
+		// 内存可控;响应仍是流式,不缓冲。
+		var body []byte
+		if c.Request.Body != nil {
+			b, rerr := io.ReadAll(c.Request.Body)
+			_ = c.Request.Body.Close()
+			if rerr != nil {
+				writeEdgeError(c)
+				return
+			}
+			body = b
 		}
 
-		resp, err := client.Do(outReq)
-		if err != nil {
-			slog.Error("edge_forward: 转发到 cell 失败", "cell", target.Host, "path", c.Request.URL.Path, "err", err)
-			writeEdgeError(c)
-			return
-		}
-		defer resp.Body.Close()
+		var lastErr error
+		for i, target := range cands {
+			outURL := *target
+			outURL.Path = c.Request.URL.Path
+			outURL.RawQuery = c.Request.URL.RawQuery
+			outReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, outURL.String(), bytes.NewReader(body))
+			if err != nil {
+				writeEdgeError(c)
+				return
+			}
+			copyProxyHeaders(outReq.Header, c.Request.Header)
+			outReq.ContentLength = int64(len(body))
+			if forwardKey != "" {
+				outReq.Header.Set("Authorization", "Bearer "+forwardKey)
+				outReq.Header.Del("X-Api-Key")
+				outReq.Header.Del("x-api-key")
+			}
 
-		// 回写响应头 + 状态码,再逐块流式回传(SSE 每块 flush)。
-		h := c.Writer.Header()
-		for k, vv := range resp.Header {
-			if isHopByHopHeader(k) {
+			resp, err := client.Do(outReq)
+			if err != nil {
+				// 仅“写任何响应前”的传输错误才转移;一旦开始回传就不再转移
+				// (避免把非幂等请求重放到第二个号 → 双执行)。
+				lastErr = err
+				slog.Warn("edge_forward: 转发到 cell 失败,尝试下一候选",
+					"cell", target.Host, "idx", i, "err", err)
 				continue
 			}
-			for _, v := range vv {
-				h.Add(k, v)
+			streamCellResponse(c, resp)
+			c.Abort()
+			return
+		}
+		slog.Error("edge_forward: 所有候选 cell 均不可达", "candidates", len(cands), "err", lastErr)
+		writeEdgeError(c)
+	}
+}
+
+// streamCellResponse 回写 cell 响应头+状态码,再逐块流式回传(SSE 每块 flush)。
+// 一旦调用即已选定某个 cell,不再失败转移(见 EdgeForward 循环内注释)。
+func streamCellResponse(c *gin.Context, resp *http.Response) {
+	defer resp.Body.Close()
+	h := c.Writer.Header()
+	for k, vv := range resp.Header {
+		if isHopByHopHeader(k) {
+			continue
+		}
+		for _, v := range vv {
+			h.Add(k, v)
+		}
+	}
+	c.Writer.WriteHeader(resp.StatusCode)
+	flusher, _ := c.Writer.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := c.Writer.Write(buf[:n]); werr != nil {
+				break // 客户端断开
+			}
+			if flusher != nil {
+				flusher.Flush()
 			}
 		}
-		c.Writer.WriteHeader(resp.StatusCode)
-		flusher, _ := c.Writer.(http.Flusher)
-		buf := make([]byte, 32*1024)
-		for {
-			n, rerr := resp.Body.Read(buf)
-			if n > 0 {
-				if _, werr := c.Writer.Write(buf[:n]); werr != nil {
-					break // 客户端断开
-				}
-				if flusher != nil {
-					flusher.Flush()
-				}
-			}
-			if rerr != nil {
-				break
-			}
+		if rerr != nil {
+			break
 		}
-		c.Abort()
 	}
 }
 

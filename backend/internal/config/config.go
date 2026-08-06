@@ -112,9 +112,14 @@ type Config struct {
 // EdgeForwardConfig：中央把命中组的 /v1 请求转发给边缘 cell。
 type EdgeForwardConfig struct {
 	Enabled bool     `mapstructure:"enabled" yaml:"enabled"`
-	CellURL string   `mapstructure:"cell_url" yaml:"cell_url"` // cell 可达基址,如 http://10.8.0.5:8091
+	CellURL string   `mapstructure:"cell_url" yaml:"cell_url"` // 静态 cell 基址(RegistryURL 为空时用;有 Registry 时作兜底候选)
 	Key     string   `mapstructure:"key" yaml:"key"`           // cell 接受的消费者 key(Authorization: Bearer)
 	Groups  []string `mapstructure:"groups" yaml:"groups"`     // 要转发的组 slug 列表;空=不转发
+	// P3-2 动态选路:配了 RegistryURL 就周期性从 Portal 拉可路由 cell 列表(按健康分
+	// 降序),按分数选最优并在传输失败时顺位转移;为空则退回静态单 CellURL(旧行为)。
+	RegistryURL    string `mapstructure:"registry_url" yaml:"registry_url"`       // Portal routable 端点,如 https://portal-api/internal/cells/routable
+	RegistryToken  string `mapstructure:"registry_token" yaml:"registry_token"`   // 内部 token;为空则回退 provider_connect.internal_token
+	RefreshSeconds int    `mapstructure:"refresh_seconds" yaml:"refresh_seconds"` // 拉取间隔秒,默认 15
 }
 
 // CellRegistryConfig：边缘 cell 自注册/心跳到 Portal。
@@ -1519,6 +1524,22 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	if cfg.CellRegistry.IntervalSeconds <= 0 {
 		cfg.CellRegistry.IntervalSeconds = 30
+	}
+	// EDGE_FORWARD 动态选路(P3-2)env 兜底。放在 provider_connect 之后,以便
+	// RegistryToken 为空时回退到已解析的 internal token。
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_REGISTRY_URL")); v != "" {
+		cfg.EdgeForward.RegistryURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_REGISTRY_TOKEN")); v != "" {
+		cfg.EdgeForward.RegistryToken = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_REFRESH_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.EdgeForward.RefreshSeconds = n
+		}
+	}
+	if strings.TrimSpace(cfg.EdgeForward.RegistryToken) == "" {
+		cfg.EdgeForward.RegistryToken = strings.TrimSpace(cfg.ProviderConnect.InternalToken)
 	}
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
