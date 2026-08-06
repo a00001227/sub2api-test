@@ -31,6 +31,9 @@ func RegisterGatewayRoutes(
 	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
 	requireGroupGoogle := middleware.RequireGroupAssignment(settingService, middleware.GoogleErrorWriter)
 
+	// 中央“执行→转发”中间件建一次,复用到 /v1 组 + 无前缀别名 + codexDirect（默认关 = no-op）。
+	edgeForward := middleware.EdgeForward(cfg.EdgeForward)
+
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)
@@ -39,6 +42,8 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.Use(requireGroupAnthropic)
+	// 中央“执行→转发”:命中配置组的请求反向代理到边缘 cell（默认关 = no-op）。
+	gateway.Use(edgeForward)
 	{
 		// /v1/messages: auto-route based on group platform
 		gateway.POST("/messages", func(c *gin.Context) {
@@ -130,19 +135,21 @@ func RegisterGatewayRoutes(
 		})
 	}
 
-	// Gemini 原生 API 兼容层（Gemini SDK/CLI 直连）
-	gemini := r.Group("/v1beta")
-	gemini.Use(bodyLimit)
-	gemini.Use(clientRequestID)
-	gemini.Use(opsErrorLogger)
-	gemini.Use(endpointNorm)
-	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
-	gemini.Use(requireGroupGoogle)
-	{
-		gemini.GET("/models", h.Gateway.GeminiV1BetaListModels)
-		gemini.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)
-		// Gin treats ":" as a param marker, but Gemini uses "{model}:{action}" in the same segment.
-		gemini.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
+	// Gemini 原生 API 兼容层（Gemini SDK/CLI 直连）。EDGE_MODE：cell 不用 gemini，关闭。
+	if !cfg.EdgeMode {
+		gemini := r.Group("/v1beta")
+		gemini.Use(bodyLimit)
+		gemini.Use(clientRequestID)
+		gemini.Use(opsErrorLogger)
+		gemini.Use(endpointNorm)
+		gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
+		gemini.Use(requireGroupGoogle)
+		{
+			gemini.GET("/models", h.Gateway.GeminiV1BetaListModels)
+			gemini.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)
+			// Gin treats ":" as a param marker, but Gemini uses "{model}:{action}" in the same segment.
+			gemini.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
+		}
 	}
 
 	// OpenAI Responses API（不带v1前缀的别名）— auto-route based on group platform
@@ -153,25 +160,25 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.Responses(c)
 	}
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
+	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward, responsesHandler)
+	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward, responsesHandler)
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward, h.OpenAIGateway.ResponsesWebSocket)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic)
+	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward)
 	{
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
 		codexDirect.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
 	})
-	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -184,7 +191,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Embeddings(c)
 	})
-	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -197,7 +204,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Images(c)
 	})
-	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -211,65 +218,68 @@ func RegisterGatewayRoutes(
 		h.OpenAIGateway.Images(c)
 	})
 
-	// Antigravity 模型列表
-	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
+	// EDGE_MODE：cell 关闭 antigravity 与消费者账号管理 API（/balance、/sub-keys、/usage-logs）。
+	if !cfg.EdgeMode {
+		// Antigravity 模型列表
+		r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
 
-	// ── Derouter Account API ─────────────────────────────────────
-	// 对外契约挂载在网关根路径（/balance、/sub-keys…）；同时在 /api/account
-	// 前缀下再注册一份，供 portal-ui 等自有前端复用既有的 /api 代理与放行
-	// 规则，无需在每层基础设施上单独放行根路径。
-	registerAccountAPI := func(g gin.IRoutes) {
-		bearerOnly := middleware.RequireBearerOnly()
-		auth := gin.HandlerFunc(apiKeyAuth)
+		// ── Derouter Account API ─────────────────────────────────────
+		// 对外契约挂载在网关根路径（/balance、/sub-keys…）；同时在 /api/account
+		// 前缀下再注册一份，供 portal-ui 等自有前端复用既有的 /api 代理与放行
+		// 规则，无需在每层基础设施上单独放行根路径。
+		registerAccountAPI := func(g gin.IRoutes) {
+			bearerOnly := middleware.RequireBearerOnly()
+			auth := gin.HandlerFunc(apiKeyAuth)
 
-		// 账号密钥余额查询（只接受 Authorization: Bearer，不进入模型路由）
-		g.GET("/balance", bearerOnly, auth, h.AccountAPI.Balance)
+			// 账号密钥余额查询（只接受 Authorization: Bearer，不进入模型路由）
+			g.GET("/balance", bearerOnly, auth, h.AccountAPI.Balance)
 
-		// 客户密钥自身预算查询（只接受 Authorization: Bearer <client_key>）
-		g.GET("/sub-key/balance", bearerOnly, auth, h.AccountAPI.GetSubKeyBalance)
+			// 客户密钥自身预算查询（只接受 Authorization: Bearer <client_key>）
+			g.GET("/sub-key/balance", bearerOnly, auth, h.AccountAPI.GetSubKeyBalance)
 
-		// 客户密钥管理（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
-		g.POST("/sub-keys", bearerOnly, auth, h.AccountAPI.CreateSubKey)
-		g.GET("/sub-keys", bearerOnly, auth, h.AccountAPI.ListSubKeys)
-		g.PUT("/sub-keys/:id", bearerOnly, auth, h.AccountAPI.UpdateSubKey)
-		g.DELETE("/sub-keys/:id", bearerOnly, auth, h.AccountAPI.DeleteSubKey)
+			// 客户密钥管理（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
+			g.POST("/sub-keys", bearerOnly, auth, h.AccountAPI.CreateSubKey)
+			g.GET("/sub-keys", bearerOnly, auth, h.AccountAPI.ListSubKeys)
+			g.PUT("/sub-keys/:id", bearerOnly, auth, h.AccountAPI.UpdateSubKey)
+			g.DELETE("/sub-keys/:id", bearerOnly, auth, h.AccountAPI.DeleteSubKey)
 
-		// 用量日志查询（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
-		g.GET("/usage-logs", bearerOnly, auth, h.AccountAPI.GetUsageLogs)
-		g.GET("/sub-key/usage-logs", bearerOnly, auth, h.AccountAPI.GetSubKeyUsageLogs)
-	}
-	registerAccountAPI(r)
-	registerAccountAPI(r.Group("/api/account"))
+			// 用量日志查询（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
+			g.GET("/usage-logs", bearerOnly, auth, h.AccountAPI.GetUsageLogs)
+			g.GET("/sub-key/usage-logs", bearerOnly, auth, h.AccountAPI.GetSubKeyUsageLogs)
+		}
+		registerAccountAPI(r)
+		registerAccountAPI(r.Group("/api/account"))
 
-	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
-	antigravityV1 := r.Group("/antigravity/v1")
-	antigravityV1.Use(bodyLimit)
-	antigravityV1.Use(clientRequestID)
-	antigravityV1.Use(opsErrorLogger)
-	antigravityV1.Use(endpointNorm)
-	antigravityV1.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth))
-	antigravityV1.Use(requireGroupAnthropic)
-	{
-		antigravityV1.POST("/messages", h.Gateway.Messages)
-		antigravityV1.POST("/messages/count_tokens", h.Gateway.CountTokens)
-		antigravityV1.GET("/models", h.Gateway.AntigravityModels)
-		antigravityV1.GET("/usage", h.Gateway.Usage)
-	}
+		// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
+		antigravityV1 := r.Group("/antigravity/v1")
+		antigravityV1.Use(bodyLimit)
+		antigravityV1.Use(clientRequestID)
+		antigravityV1.Use(opsErrorLogger)
+		antigravityV1.Use(endpointNorm)
+		antigravityV1.Use(middleware.ForcePlatform(service.PlatformAntigravity))
+		antigravityV1.Use(gin.HandlerFunc(apiKeyAuth))
+		antigravityV1.Use(requireGroupAnthropic)
+		{
+			antigravityV1.POST("/messages", h.Gateway.Messages)
+			antigravityV1.POST("/messages/count_tokens", h.Gateway.CountTokens)
+			antigravityV1.GET("/models", h.Gateway.AntigravityModels)
+			antigravityV1.GET("/usage", h.Gateway.Usage)
+		}
 
-	antigravityV1Beta := r.Group("/antigravity/v1beta")
-	antigravityV1Beta.Use(bodyLimit)
-	antigravityV1Beta.Use(clientRequestID)
-	antigravityV1Beta.Use(opsErrorLogger)
-	antigravityV1Beta.Use(endpointNorm)
-	antigravityV1Beta.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
-	antigravityV1Beta.Use(requireGroupGoogle)
-	{
-		antigravityV1Beta.GET("/models", h.Gateway.GeminiV1BetaListModels)
-		antigravityV1Beta.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)
-		antigravityV1Beta.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
-	}
+		antigravityV1Beta := r.Group("/antigravity/v1beta")
+		antigravityV1Beta.Use(bodyLimit)
+		antigravityV1Beta.Use(clientRequestID)
+		antigravityV1Beta.Use(opsErrorLogger)
+		antigravityV1Beta.Use(endpointNorm)
+		antigravityV1Beta.Use(middleware.ForcePlatform(service.PlatformAntigravity))
+		antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
+		antigravityV1Beta.Use(requireGroupGoogle)
+		{
+			antigravityV1Beta.GET("/models", h.Gateway.GeminiV1BetaListModels)
+			antigravityV1Beta.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)
+			antigravityV1Beta.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
+		}
+	} // end if !cfg.EdgeMode
 
 }
 

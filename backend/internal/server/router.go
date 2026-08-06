@@ -61,8 +61,9 @@ func SetupRouter(
 		return nil
 	}))
 
-	// Serve embedded frontend with settings injection if available
-	if web.HasEmbeddedFrontend() {
+	// Serve embedded frontend with settings injection if available.
+	// EDGE_MODE：cell 不对外暴露 Web UI，跳过整块前端挂载。
+	if !cfg.EdgeMode && web.HasEmbeddedFrontend() {
 		frontendServer, err := web.NewFrontendServer(settingService)
 		if err != nil {
 			log.Printf("Warning: Failed to create frontend server with settings injection: %v, using legacy mode", err)
@@ -106,21 +107,33 @@ func registerRoutes(
 	// API v1
 	v1 := r.Group("/api/v1")
 
-	// 注册各模块路由
-	routes.RegisterAuthRoutes(v1, h, jwtAuth, redisClient, settingService)
-	routes.RegisterUserRoutes(v1, h, jwtAuth, settingService)
-	routes.RegisterAdminRoutes(v1, h, adminAuth, settingService)
+	// EDGE_MODE：边缘 cell 只保留“网关执行面 + Provider 内部接入面 + 健康检查”，
+	// 关掉消费者/管理/支付/公告/定价页等控制面（Web UI 在 SetupRouter 处已按 EdgeMode 跳过）。
+	if !cfg.EdgeMode {
+		routes.RegisterAuthRoutes(v1, h, jwtAuth, redisClient, settingService)
+		routes.RegisterUserRoutes(v1, h, jwtAuth, settingService)
+		routes.RegisterAdminRoutes(v1, h, adminAuth, settingService)
+	}
+
+	// 网关执行面（cell 的核心；EDGE 下由 RegisterGatewayRoutes 内部再裁掉
+	// gemini/antigravity/api-account 管理，保留 /v1 + 别名 + codex + 分组前缀 + key 认证）。
 	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, cfg)
-	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, settingService)
-	routes.RegisterPublicRoutes(v1, h)
+
+	if !cfg.EdgeMode {
+		routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, settingService)
+		routes.RegisterPublicRoutes(v1, h)
+	}
 
 	// Provider Portal 内部接入面（Phase 21E-6C-2B-1）：独立 secret 鉴权，
 	// 挂在 /internal 而非 /api/v1；token 为空时 fail-closed（中间件返回 401）。
+	// cell 也保留：用于凭据下发/接入。
 	routes.RegisterProviderInternalRoutes(
 		r,
 		h.ProviderConnect,
 		middleware2.NewProviderInternalAuth(cfg.ProviderConnect.InternalToken),
 	)
 
-	handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService)
+	if !cfg.EdgeMode {
+		handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService)
+	}
 }

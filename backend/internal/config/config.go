@@ -93,10 +93,25 @@ type Config struct {
 	// 环境变量：PROVIDER_CONNECT_INTERNAL_TOKEN。
 	ProviderConnect ProviderConnectConfig `mapstructure:"provider_connect"`
 	RunMode         string                `mapstructure:"run_mode" yaml:"run_mode"`
-	Timezone        string                `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
-	Gemini          GeminiConfig          `mapstructure:"gemini"`
-	Update          UpdateConfig          `mapstructure:"update"`
-	Idempotency     IdempotencyConfig     `mapstructure:"idempotency"`
+	// EdgeMode：以边缘 cell 身份运行——同一份二进制,开=裁掉管理/用户/支付/公告/Web UI
+	// 及 gemini/antigravity 网关,只保留网关执行面 + Provider 内部接入面 + 健康检查;
+	// 关(默认)=中央行为与今天完全一致。环境变量：EDGE_MODE（1/true/on）。
+	EdgeMode bool `mapstructure:"edge_mode" yaml:"edge_mode"`
+	// EdgeForward：中央网关“执行→转发”到边缘 cell（P1 walking skeleton）。默认关;
+	// 开启且请求命中配置的组时,把该 /v1 请求反向代理到 cell,不走本地选号。
+	EdgeForward EdgeForwardConfig `mapstructure:"edge_forward" yaml:"edge_forward"`
+	Timezone    string            `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	Gemini      GeminiConfig      `mapstructure:"gemini"`
+	Update      UpdateConfig      `mapstructure:"update"`
+	Idempotency IdempotencyConfig `mapstructure:"idempotency"`
+}
+
+// EdgeForwardConfig：中央把命中组的 /v1 请求转发给边缘 cell。
+type EdgeForwardConfig struct {
+	Enabled bool     `mapstructure:"enabled" yaml:"enabled"`
+	CellURL string   `mapstructure:"cell_url" yaml:"cell_url"` // cell 可达基址,如 http://10.8.0.5:8091
+	Key     string   `mapstructure:"key" yaml:"key"`           // cell 接受的消费者 key(Authorization: Bearer)
+	Groups  []string `mapstructure:"groups" yaml:"groups"`     // 要转发的组 slug 列表;空=不转发
 }
 
 type LogConfig struct {
@@ -1433,6 +1448,31 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
+	// EDGE_MODE 环境变量显式覆盖（viper AutomaticEnv 对未在 config 出现的键有时不生效，
+	// 这里兜底保证 EDGE_MODE=1/true/on 一定开启边缘模式）。
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_MODE"))); v == "1" || v == "true" || v == "on" {
+		cfg.EdgeMode = true
+	}
+	// EDGE_FORWARD_* 环境变量兜底（中央“执行→转发”开关与目标 cell）。
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_ENABLED"))); v == "1" || v == "true" || v == "on" {
+		cfg.EdgeForward.Enabled = true
+	}
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_CELL_URL")); v != "" {
+		cfg.EdgeForward.CellURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_KEY")); v != "" {
+		cfg.EdgeForward.Key = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_GROUPS")); v != "" {
+		parts := strings.Split(v, ",")
+		groups := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if s := strings.TrimSpace(p); s != "" {
+				groups = append(groups, s)
+			}
+		}
+		cfg.EdgeForward.Groups = groups
+	}
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "debug"

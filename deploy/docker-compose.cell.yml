@@ -1,0 +1,124 @@
+# =============================================================================
+# Sub2API —— 边缘 Cell 独立部署栈（EDGE_MODE）
+# =============================================================================
+# 与中央完全隔离:自带 postgres + redis + 卷 + 网络 + 端口。同一台机可多开,
+# 每个 cell 用不同的 project 名 + 不同的 .env.cell 文件即可。
+#
+# 用法(在 deploy/ 目录):
+#   cp .env.cell.example .env.cell1        # 改密码/secret/端口/Portal 回调
+#   docker compose -p cell1 --env-file .env.cell1 -f docker-compose.cell.yml up -d --build
+#   docker compose -p cell1 --env-file .env.cell1 -f docker-compose.cell.yml logs -f sub2api
+#
+# 说明:
+#   - EDGE_MODE=1 → 只保留网关执行面 + /internal/provider-* 接入面 + 健康检查;
+#     管理台/用户/支付/公告/Web UI/gemini/antigravity 全部关闭。
+#   - 不设 container_name,由 project 名(-p)自动前缀,支持同机多开。
+#   - 账号(≤5 个)+ 凭据 + 各自住宅代理由 Portal 经 /internal/provider-* 下发到本 cell 本地库。
+#     (临时冒烟:也可先用 EDGE_MODE=0 起、admin 加号,再切回 EDGE_MODE=1。)
+# =============================================================================
+
+services:
+  sub2api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ulimits:
+      nofile: { soft: 100000, hard: 100000 }
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${CELL_PORT:-8091}:8080"
+    volumes:
+      - cell_data:/app/data
+    environment:
+      - AUTO_SETUP=true
+      # ── 边缘模式(核心) ─────────────────────────────
+      - EDGE_MODE=1
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - SERVER_MODE=${SERVER_MODE:-release}
+      - RUN_MODE=${RUN_MODE:-standard}
+      - TZ=${TZ:-Asia/Shanghai}
+      # ── 本 cell 独立数据库 ─────────────────────────
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=${POSTGRES_USER:-sub2api}
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - DATABASE_DBNAME=${POSTGRES_DB:-sub2api}
+      - DATABASE_SSLMODE=disable
+      # ── 本 cell 独立 Redis ─────────────────────────
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      # ── 固定 secret(重启不失效) ───────────────────
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - JWT_EXPIRE_HOUR=${JWT_EXPIRE_HOUR:-24}
+      - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sub2api.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # ── Provider Portal 对接 ───────────────────────
+      # 接入面 secret:Portal 经 /internal/provider-* 给本 cell 下发号/凭据(与中央同一个 token)。
+      - PROVIDER_CONNECT_INTERNAL_TOKEN=${PROVIDER_CONNECT_INTERNAL_TOKEN:?PROVIDER_CONNECT_INTERNAL_TOKEN is required}
+      # 用量回流:本 cell 执行完把用量事件发回 Portal(HMAC 签名)。
+      - PROVIDER_CONNECT_WEBHOOK_URL=${PROVIDER_CONNECT_WEBHOOK_URL:?PROVIDER_CONNECT_WEBHOOK_URL is required}
+      - PROVIDER_CONNECT_WEBHOOK_SECRET=${PROVIDER_CONNECT_WEBHOOK_SECRET:-}
+      # ── 访问 GitHub/定价数据的代理(可选) ───────────
+      - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    ulimits:
+      nofile: { soft: 100000, hard: 100000 }
+    volumes:
+      - cell_postgres_data:/var/lib/postgresql/data
+    environment:
+      - PGDATA=/var/lib/postgresql/data
+      - POSTGRES_USER=${POSTGRES_USER:-sub2api}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-sub2api}
+      - TZ=${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    ulimits:
+      nofile: { soft: 100000, hard: 100000 }
+    volumes:
+      - cell_redis_data:/data
+    command: >
+      sh -c '
+        redis-server
+        --save 60 1
+        --appendonly yes
+        --appendfsync everysec
+        ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - REDISCLI_AUTH=${REDIS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  cell_data: { driver: local }
+  cell_postgres_data: { driver: local }
+  cell_redis_data: { driver: local }
