@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
@@ -68,12 +69,12 @@ func EdgeForward(cfg config.EdgeForwardConfig) gin.HandlerFunc {
 			groupSet[s] = struct{}{}
 		}
 	}
-	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key))
+	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key), rand.Float64)
 }
 
-// newEdgeForwardHandler 构造转发处理函数(组命中→选候选→WS/失败转移流式回传)。
-// 与配置解析分离,便于用注入的 resolver 直接测试选路/失败转移。
-func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string) gin.HandlerFunc {
+// newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
+// 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string, rng func() float64) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	client := &http.Client{Transport: http.DefaultTransport}
 
@@ -88,16 +89,30 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			return
 		}
 
-		cands := resolver.candidates()
-		if len(cands) == 0 {
+		// 加权随机选序(P3-3b):按信誉分对存活池加权随机排序,首个 = 加权首选,其余
+		// 顺位作失败转移候选;静态兜底 append 到最后(仅动态池全空/全挂时才会用到)。
+		order := weightedOrder(resolver.poolCandidates(), rng)
+		if fb := resolver.fallback(); fb != nil {
+			present := false
+			for _, u := range order {
+				if u.String() == fb.String() {
+					present = true
+					break
+				}
+			}
+			if !present {
+				order = append(order, fb)
+			}
+		}
+		if len(order) == 0 {
 			slog.Error("edge_forward: 无可路由 cell", "path", c.Request.URL.Path)
 			writeEdgeError(c)
 			return
 		}
 
 		if isWebSocketUpgrade(c.Request) {
-			// WS 无请求体可重放,失败转移意义有限:用最优候选,拨号失败即收尾。
-			proxyWebSocket(c, cands[0], forwardKey)
+			// WS 无请求体可重放,失败转移意义有限:用加权首选,拨号失败即收尾。
+			proxyWebSocket(c, order[0], forwardKey)
 			c.Abort()
 			return
 		}
@@ -116,7 +131,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		}
 
 		var lastErr error
-		for i, target := range cands {
+		for i, target := range order {
 			outURL := *target
 			outURL.Path = c.Request.URL.Path
 			outURL.RawQuery = c.Request.URL.RawQuery
@@ -146,7 +161,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			c.Abort()
 			return
 		}
-		slog.Error("edge_forward: 所有候选 cell 均不可达", "candidates", len(cands), "err", lastErr)
+		slog.Error("edge_forward: 所有候选 cell 均不可达", "candidates", len(order), "err", lastErr)
 		writeEdgeError(c)
 	}
 }
