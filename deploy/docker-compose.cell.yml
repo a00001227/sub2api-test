@@ -68,7 +68,9 @@ services:
       - CELL_REGION=${CELL_REGION:-}
       - CELL_NODE=${CELL_NODE:-}
       - CELL_HEARTBEAT_SECONDS=${CELL_HEARTBEAT_SECONDS:-30}
-      # ── 访问 GitHub/定价数据的代理(可选) ───────────
+      # ── 上游统一出口代理(建议配;所有上游含 OAuth 换码走它,revoke-safe) ──
+      - CELL_UPSTREAM_PROXY=${CELL_UPSTREAM_PROXY:-}
+      # ── 访问 GitHub/定价数据的代理(可选,和上游无关) ───────────
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
     depends_on:
       postgres: { condition: service_healthy }

@@ -98,6 +98,12 @@ type Config struct {
 	// 及 gemini/antigravity 网关,只保留网关执行面 + Provider 内部接入面 + 健康检查;
 	// 关(默认)=中央行为与今天完全一致。环境变量：EDGE_MODE（1/true/on）。
 	EdgeMode bool `mapstructure:"edge_mode" yaml:"edge_mode"`
+	// EdgeUpstreamProxy：仅 EDGE cell 生效。设了之后,这台 cell 的**所有上游请求**
+	// (API 调用 + OAuth 换码 + token 刷新 + 校验)统一走这个代理出口 —— 让整台 cell
+	// 是单一固定出口,满足 revoke-safe(铸造/使用/刷新同一出口 IP)。空=按账号代理/
+	// 直连本机出口(旧行为)。环境变量:CELL_UPSTREAM_PROXY(http/https/socks5,可带
+	// user:pass)。中央模式忽略此项。
+	EdgeUpstreamProxy string `mapstructure:"edge_upstream_proxy" yaml:"edge_upstream_proxy"`
 	// EdgeForward：中央网关“执行→转发”到边缘 cell（P1 walking skeleton）。默认关;
 	// 开启且请求命中配置的组时,把该 /v1 请求反向代理到 cell,不走本地选号。
 	EdgeForward EdgeForwardConfig `mapstructure:"edge_forward" yaml:"edge_forward"`
@@ -1469,6 +1475,16 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	// 这里兜底保证 EDGE_MODE=1/true/on 一定开启边缘模式）。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_MODE"))); v == "1" || v == "true" || v == "on" {
 		cfg.EdgeMode = true
+	}
+	// CELL_UPSTREAM_PROXY 环境变量兜底(EDGE cell 统一上游出口代理)。轻校验协议,
+	// 非法则告警并忽略(退回按账号代理/直连,而非让 cell 起不来)。
+	if v := strings.TrimSpace(os.Getenv("CELL_UPSTREAM_PROXY")); v != "" {
+		if u, err := url.Parse(v); err == nil && u.Host != "" &&
+			(u.Scheme == "http" || u.Scheme == "https" || u.Scheme == "socks5" || u.Scheme == "socks5h") {
+			cfg.EdgeUpstreamProxy = v
+		} else {
+			slog.Warn("CELL_UPSTREAM_PROXY 非法(需 http/https/socks5://host:port),已忽略", "err", err)
+		}
 	}
 	// EDGE_FORWARD_* 环境变量兜底（中央“执行→转发”开关与目标 cell）。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_ENABLED"))); v == "1" || v == "true" || v == "on" {

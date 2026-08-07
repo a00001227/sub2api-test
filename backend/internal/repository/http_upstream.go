@@ -160,10 +160,24 @@ func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
 // 注意:
 //   - 调用方必须关闭 resp.Body，否则会导致 inFlight 计数泄漏
 //   - inFlight > 0 的客户端不会被淘汰，确保活跃请求不被中断
+// effectiveUpstreamProxy 决定本次上游请求实际用哪个代理:EDGE cell 配了
+// CELL_UPSTREAM_PROXY 就用它(整台 cell 统一出口,覆盖按账号代理),否则用传入的
+// proxyURL(空=直连)。中央模式(非 EdgeMode)永不覆盖。覆盖所有上游(含 OAuth
+// 换码/刷新/校验)以保证 revoke-safe:铸造、使用、刷新走同一出口 IP。
+func effectiveUpstreamProxy(cfg *config.Config, proxyURL string) string {
+	if cfg != nil && cfg.EdgeMode {
+		if override := strings.TrimSpace(cfg.EdgeUpstreamProxy); override != "" {
+			return override
+		}
+	}
+	return proxyURL
+}
+
 func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	if err := s.validateRequestHost(req); err != nil {
 		return nil, err
 	}
+	proxyURL = effectiveUpstreamProxy(s.cfg, proxyURL)
 	profile := service.HTTPUpstreamProfileDefault
 	if req != nil {
 		profile = service.HTTPUpstreamProfileFromContext(req.Context())
@@ -207,6 +221,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	if profile == nil {
 		return s.Do(req, proxyURL, accountID, accountConcurrency)
 	}
+	proxyURL = effectiveUpstreamProxy(s.cfg, proxyURL)
 	upstreamProfile := service.HTTPUpstreamProfileDefault
 	if req != nil {
 		upstreamProfile = service.HTTPUpstreamProfileFromContext(req.Context())
@@ -218,7 +233,11 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 	proxyInfo := "direct"
 	if proxyURL != "" {
-		proxyInfo = proxyURL
+		// 脱敏:代理 URL 可能带 user:pass,Redacted() 会把密码打码,绝不落明文。
+		proxyInfo = "set"
+		if _, parsed, perr := proxyurl.Parse(proxyURL); perr == nil && parsed != nil {
+			proxyInfo = parsed.Redacted()
+		}
 	}
 	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyInfo, "profile", profile.Name)
 
