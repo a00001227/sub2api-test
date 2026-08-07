@@ -8,11 +8,42 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+// 回归:EDGE cell 配了 CELL_UPSTREAM_PROXY 时,OAuth 全流程(含换码)必须走该出口
+// 代理 —— 之前只覆盖了 API 调用路径,OAuth 走自己的 clientFactory 绕过了覆盖,导致
+// 机房直连 IP 换码被 Anthropic 403。
+func TestClaudeOAuth_newClientAppliesCellProxy(t *testing.T) {
+	const override = "socks5://u:p@204.0.11.115:443"
+	var got string
+	s := &claudeOAuthService{
+		cfg:           &config.Config{EdgeMode: true, EdgeUpstreamProxy: override},
+		clientFactory: func(p string) (*req.Client, error) { got = p; return req.C(), nil },
+	}
+	if _, err := s.newClient("http://per-account:3128"); err != nil {
+		t.Fatalf("newClient: %v", err)
+	}
+	if got != override {
+		t.Fatalf("OAuth 应走 cell 出口代理; got %q want %q", got, override)
+	}
+
+	// 未配 → 用传入的按账号代理(回归旧行为)。
+	s2 := &claudeOAuthService{
+		cfg:           &config.Config{EdgeMode: true},
+		clientFactory: func(p string) (*req.Client, error) { got = p; return req.C(), nil },
+	}
+	if _, err := s2.newClient("http://per-account:3128"); err != nil {
+		t.Fatalf("newClient: %v", err)
+	}
+	if got != "http://per-account:3128" {
+		t.Fatalf("未配 override 应用传入; got %q", got)
+	}
+}
 
 type ClaudeOAuthServiceSuite struct {
 	suite.Suite
@@ -87,7 +118,7 @@ func (s *ClaudeOAuthServiceSuite) TestGetOrganizationUUID() {
 				tt.handler(w, r)
 			}), nil)
 
-			client, ok := NewClaudeOAuthClient().(*claudeOAuthService)
+			client, ok := NewClaudeOAuthClient(nil).(*claudeOAuthService)
 			require.True(s.T(), ok, "type assertion failed")
 			s.client = client
 			s.client.baseURL = "http://in-process"
@@ -165,7 +196,7 @@ func (s *ClaudeOAuthServiceSuite) TestGetAuthorizationCode() {
 				tt.handler(w, r)
 			}), nil)
 
-			client, ok := NewClaudeOAuthClient().(*claudeOAuthService)
+			client, ok := NewClaudeOAuthClient(nil).(*claudeOAuthService)
 			require.True(s.T(), ok, "type assertion failed")
 			s.client = client
 			s.client.baseURL = "http://in-process"
@@ -272,7 +303,7 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 				tt.handler(w, r)
 			}), nil)
 
-			client, ok := NewClaudeOAuthClient().(*claudeOAuthService)
+			client, ok := NewClaudeOAuthClient(nil).(*claudeOAuthService)
 			require.True(s.T(), ok, "type assertion failed")
 			s.client = client
 			s.client.tokenURL = "http://in-process/token"
@@ -368,7 +399,7 @@ func (s *ClaudeOAuthServiceSuite) TestRefreshToken() {
 				tt.handler(w, r)
 			}), nil)
 
-			client, ok := NewClaudeOAuthClient().(*claudeOAuthService)
+			client, ok := NewClaudeOAuthClient(nil).(*claudeOAuthService)
 			require.True(s.T(), ok, "type assertion failed")
 			s.client = client
 			s.client.tokenURL = "http://in-process/token"

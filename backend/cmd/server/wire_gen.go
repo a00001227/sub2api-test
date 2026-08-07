@@ -125,7 +125,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		return nil, err
 	}
 	deferredService := service.ProvideDeferredService(accountRepository, timingWheelService)
-	claudeOAuthClient := repository.NewClaudeOAuthClient()
+	claudeOAuthClient := repository.NewClaudeOAuthClient(configConfig)
 	oAuthService := service.NewOAuthService(proxyRepository, claudeOAuthClient)
 	regionRepository := repository.NewRegionRepository(client)
 	regionService := service.NewRegionService(regionRepository)

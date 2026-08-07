@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
@@ -18,8 +19,9 @@ import (
 	"github.com/imroc/req/v3"
 )
 
-func NewClaudeOAuthClient() service.ClaudeOAuthClient {
+func NewClaudeOAuthClient(cfg *config.Config) service.ClaudeOAuthClient {
 	return &claudeOAuthService{
+		cfg:           cfg,
 		baseURL:       "https://claude.ai",
 		tokenURL:      oauth.TokenURL,
 		clientFactory: createReqClient,
@@ -27,13 +29,21 @@ func NewClaudeOAuthClient() service.ClaudeOAuthClient {
 }
 
 type claudeOAuthService struct {
+	cfg           *config.Config
 	baseURL       string
 	tokenURL      string
 	clientFactory func(proxyURL string) (*req.Client, error)
 }
 
+// newClient 建 OAuth 上游客户端。EDGE cell 配了 CELL_UPSTREAM_PROXY 时,把 OAuth
+// 全流程(取组织/授权码/换 token/刷新)也统一走该出口代理——和 API 调用同一固定
+// 出口,满足 revoke-safe,并避开机房直连 IP 被 Anthropic 边缘 403。
+func (s *claudeOAuthService) newClient(proxyURL string) (*req.Client, error) {
+	return s.clientFactory(effectiveUpstreamProxy(s.cfg, proxyURL))
+}
+
 func (s *claudeOAuthService) GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error) {
-	client, err := s.clientFactory(proxyURL)
+	client, err := s.newClient(proxyURL)
 	if err != nil {
 		return "", fmt.Errorf("create HTTP client: %w", err)
 	}
@@ -92,7 +102,7 @@ func (s *claudeOAuthService) GetOrganizationUUID(ctx context.Context, sessionKey
 }
 
 func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error) {
-	client, err := s.clientFactory(proxyURL)
+	client, err := s.newClient(proxyURL)
 	if err != nil {
 		return "", fmt.Errorf("create HTTP client: %w", err)
 	}
@@ -172,7 +182,7 @@ func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKe
 }
 
 func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
-	client, err := s.clientFactory(proxyURL)
+	client, err := s.newClient(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
@@ -233,7 +243,7 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 }
 
 func (s *claudeOAuthService) RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
-	client, err := s.clientFactory(proxyURL)
+	client, err := s.newClient(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
@@ -301,7 +311,7 @@ func (s *claudeOAuthService) FetchRateLimitTier(ctx context.Context, accessToken
 	ctx, cancel := context.WithTimeout(ctx, profileFetchTimeout)
 	defer cancel()
 
-	client, err := s.clientFactory(proxyURL)
+	client, err := s.newClient(proxyURL)
 	if err != nil {
 		return "", fmt.Errorf("create HTTP client: %w", err)
 	}
