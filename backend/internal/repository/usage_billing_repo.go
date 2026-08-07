@@ -51,8 +51,12 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	}
 
 	result := &service.UsageBillingApplyResult{Applied: true}
-	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
-		return nil, err
+	// 方案 B:EDGE cell 可信转发时跳过消费者计费(额度/余额/订阅扣减 —— 那是中央的
+	// 职责),但下面的 provider 用量 outbox 照常入队(按账号)→ earning 不受影响。
+	if !cmd.SkipConsumerBilling {
+		if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
+			return nil, err
+		}
 	}
 
 	// Provider Usage Outbox (Phase 21E-6D-6B-2): enqueue the billable usage

@@ -32,7 +32,11 @@ services:
     environment:
       - AUTO_SETUP=true
       # ── 边缘模式(核心) ─────────────────────────────
-      - EDGE_MODE=1
+      # 默认 1(边缘 cell)。临时进 admin 建东西时可在 .env 设 EDGE_MODE=0 再重启。
+      - EDGE_MODE=${EDGE_MODE:-1}
+      # cell 网关 key(方案 B):= 中央 EDGE_FORWARD_KEY;设了则 cell 认它为可信转发,
+      # 无需在 cell 上手动建消费者 key/分组。
+      - CELL_GATEWAY_KEY=${CELL_GATEWAY_KEY:-}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}

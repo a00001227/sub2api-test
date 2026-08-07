@@ -225,14 +225,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 
 	// 2. 【新增】Wait后二次检查余额/订阅
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("gateway.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
+	// 方案 B:EDGE cell 可信转发不做消费者额度校验(消费者计费是中央的职责)。
+	if !middleware2.IsEdgeTrusted(c) {
+		if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+			reqLog.Info("gateway.billing_eligibility_check_failed", zap.Error(err))
+			status, code, message, retryAfter := billingErrorDetails(err)
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			h.handleStreamingAwareError(c, status, code, message, streamStarted)
+			return
 		}
-		h.handleStreamingAwareError(c, status, code, message, streamStarted)
-		return
 	}
 
 	// 设置请求所属分组 ID（用于渠道级功能判断，如 WebSearch 模拟）
@@ -516,22 +519,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 			forceCacheBilling := fs.ForceCacheBilling
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+			// 方案 B:在 c 仍有效时取出 edge-trusted,捕获进后台任务(勿在闭包里碰 c)。
+			edgeTrusted := middleware2.IsEdgeTrusted(c)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					QuotaPlatform:      quotaPlatform,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					ForceCacheBilling:  forceCacheBilling,
-					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+					Result:              result,
+					QuotaPlatform:       quotaPlatform,
+					APIKey:              apiKey,
+					User:                apiKey.User,
+					Account:             account,
+					Subscription:        subscription,
+					InboundEndpoint:     inboundEndpoint,
+					UpstreamEndpoint:    upstreamEndpoint,
+					UserAgent:           userAgent,
+					IPAddress:           clientIP,
+					RequestPayloadHash:  requestPayloadHash,
+					ForceCacheBilling:   forceCacheBilling,
+					APIKeyService:       h.apiKeyService,
+					SkipConsumerBilling: edgeTrusted,
+					ChannelUsageFields:  channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -943,22 +949,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 			forceCacheBilling := fs.ForceCacheBilling
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
+			// 方案 B:在 c 仍有效时取出 edge-trusted,捕获进后台任务(勿在闭包里碰 c)。
+			edgeTrusted := middleware2.IsEdgeTrusted(c)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					QuotaPlatform:      quotaPlatform,
-					APIKey:             currentAPIKey,
-					User:               currentAPIKey.User,
-					Account:            account,
-					Subscription:       currentSubscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					ForceCacheBilling:  forceCacheBilling,
-					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+					Result:              result,
+					QuotaPlatform:       quotaPlatform,
+					APIKey:              currentAPIKey,
+					User:                currentAPIKey.User,
+					Account:             account,
+					Subscription:        currentSubscription,
+					InboundEndpoint:     inboundEndpoint,
+					UpstreamEndpoint:    upstreamEndpoint,
+					UserAgent:           userAgent,
+					IPAddress:           clientIP,
+					RequestPayloadHash:  requestPayloadHash,
+					ForceCacheBilling:   forceCacheBilling,
+					APIKeyService:       h.apiKeyService,
+					SkipConsumerBilling: edgeTrusted,
+					ChannelUsageFields:  channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),

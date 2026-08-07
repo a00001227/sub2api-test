@@ -8947,6 +8947,9 @@ type RecordUsageInput struct {
 	ForceCacheBilling  bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService      APIKeyQuotaUpdater // 可选：用于更新API Key配额
 	QuotaPlatform      string             // user×platform 配额计量平台：handler 在请求 ctx 内经 QuotaPlatform() 算定后传入（后扣运行在 worker 池 background ctx 上，取不到 ForcePlatform）
+	// SkipConsumerBilling(方案 B):EDGE cell 收到中央可信转发时置真 → 跳过消费者
+	// 计费(那是中央的职责),仍发 provider 用量(按账号)。handler 从 IsEdgeTrusted 取。
+	SkipConsumerBilling bool
 
 	ChannelUsageFields // 渠道映射信息（由 handler 在 Forward 前解析）
 }
@@ -8977,6 +8980,7 @@ type postUsageBillingParams struct {
 	AccountRateMultiplier float64
 	APIKeyService         APIKeyQuotaUpdater
 	Platform              string // 来自 APIKey 关联 Group 的平台标识
+	SkipConsumerBilling   bool   // 方案 B:EDGE 可信转发 → 跳过消费者计费,仍发 provider 用量
 }
 
 // PlatformFromAPIKey 从 APIKey 关联的 Group 推导 platform 名称。
@@ -9023,6 +9027,19 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 	defer cancel()
 
 	cost := p.Cost
+
+	// 方案 B:EDGE cell 可信转发 → 跳过所有消费者扣费(余额/订阅/apikey 配额/限流/平台
+	// 配额),消费者计费是中央的职责,只保留账号侧配额累加。防御性:正常 EDGE 请求
+	// repo 非空且带 requestID,不会走到本 legacy 兜底路径。
+	if p.SkipConsumerBilling {
+		if p.shouldUpdateAccountQuota() {
+			accountCost := cost.TotalCost * p.AccountRateMultiplier
+			if err := deps.accountRepo.IncrementQuotaUsed(billingCtx, p.Account.ID, accountCost); err != nil {
+				slog.Error("increment account quota used failed", "account_id", p.Account.ID, "cost", accountCost, "error", err)
+			}
+		}
+		return
+	}
 
 	if p.IsSubscriptionBill {
 		// Subscription usage tracked by ActualCost so group rate multiplier
@@ -9121,12 +9138,13 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	}
 
 	cmd := &UsageBillingCommand{
-		RequestID:          requestID,
-		APIKeyID:           p.APIKey.ID,
-		UserID:             p.User.ID,
-		AccountID:          p.Account.ID,
-		AccountType:        p.Account.Type,
-		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
+		RequestID:           requestID,
+		APIKeyID:            p.APIKey.ID,
+		UserID:              p.User.ID,
+		AccountID:           p.Account.ID,
+		AccountType:         p.Account.Type,
+		RequestPayloadHash:  strings.TrimSpace(p.RequestPayloadHash),
+		SkipConsumerBilling: p.SkipConsumerBilling,
 	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
@@ -9217,6 +9235,15 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
 	if p == nil || p.Cost == nil || deps == nil {
+		return
+	}
+
+	// 方案 B:EDGE cell 可信转发 → 跳过所有消费者侧写回(余额/订阅/apikey 限流/平台
+	// 配额/余额低通知),消费者计费是中央的职责。仅保留账号侧记账(last-used /
+	// 账号配额通知),见函数末尾。若不跳过则与原逻辑完全一致。
+	if p.SkipConsumerBilling {
+		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+		go notifyAccountQuota(p, deps, result)
 		return
 	}
 
@@ -9441,10 +9468,11 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		UserAgent:          input.UserAgent,
 		IPAddress:          input.IPAddress,
 		RequestPayloadHash: input.RequestPayloadHash,
-		ForceCacheBilling:  input.ForceCacheBilling,
-		APIKeyService:      input.APIKeyService,
-		QuotaPlatform:      input.QuotaPlatform,
-		ChannelUsageFields: input.ChannelUsageFields,
+		ForceCacheBilling:   input.ForceCacheBilling,
+		APIKeyService:       input.APIKeyService,
+		QuotaPlatform:       input.QuotaPlatform,
+		SkipConsumerBilling: input.SkipConsumerBilling,
+		ChannelUsageFields:  input.ChannelUsageFields,
 	}, &recordUsageOpts{})
 }
 
@@ -9504,9 +9532,10 @@ type recordUsageCoreInput struct {
 	UserAgent          string
 	IPAddress          string
 	RequestPayloadHash string
-	ForceCacheBilling  bool
-	APIKeyService      APIKeyQuotaUpdater
-	QuotaPlatform      string
+	ForceCacheBilling   bool
+	APIKeyService       APIKeyQuotaUpdater
+	QuotaPlatform       string
+	SkipConsumerBilling bool // 方案 B:EDGE 可信转发 → 跳过消费者计费,仍发 provider 用量
 	ChannelUsageFields
 }
 
@@ -9621,6 +9650,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		AccountRateMultiplier: accountRateMultiplier,
 		APIKeyService:         input.APIKeyService,
 		Platform:              quotaPlatform,
+		SkipConsumerBilling:   input.SkipConsumerBilling,
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {

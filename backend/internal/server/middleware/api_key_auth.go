@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
@@ -63,6 +64,32 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if apiKeyString == "" {
 			AbortWithError(c, 401, "API_KEY_REQUIRED", "API key is required in Authorization header (Bearer scheme), x-api-key header, or x-goog-api-key header")
 			return
+		}
+
+		// ── 1.5 EDGE cell 信任转发(方案 B)─────────────────────────────
+		// 仅 EDGE 模式 + 配了 CellGatewayKey + 常量时间匹配时:把请求当作"中央可信
+		// 转发",不在 cell 上建立/校验消费者身份、不跑消费者计费(那是中央的职责),
+		// 用一个无分组的最小内部身份放行 → 选号默认 claude + 本地未分组号,执行后只
+		// 发 provider 用量(按账号)。跳过下面的 GetByKey / 订阅 / 额度全套。
+		if cfg.EdgeMode {
+			if gwKey := strings.TrimSpace(cfg.CellGatewayKey); gwKey != "" &&
+				subtle.ConstantTimeCompare([]byte(apiKeyString), []byte(gwKey)) == 1 {
+				edgeKey := &service.APIKey{
+					Status:            "active",
+					GroupID:           nil, // 无分组 → SelectAccount 默认 claude + 未分组本地号
+					DisplayMultiplier: 1,
+					// 最小内部身份;不参与消费者计费(edge-trusted 分支会跳过)。
+					// 高并发值,避免消费者侧并发限制误伤 cell 转发流量。
+					User: &service.User{Role: "user", Concurrency: 1 << 20},
+				}
+				c.Set(string(ContextKeyAPIKey), edgeKey)
+				c.Set(string(ContextKeyUser), AuthSubject{UserID: 0, Concurrency: 1 << 20})
+				c.Set(string(ContextKeyUserRole), edgeKey.User.Role)
+				c.Set(string(ContextKeyEdgeTrusted), true)
+				setGroupContext(c, nil)
+				c.Next()
+				return
+			}
 		}
 
 		// ── 2. 验证 Key 存在 ─────────────────────────────────────────

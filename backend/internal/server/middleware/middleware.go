@@ -29,7 +29,21 @@ const (
 	// apiKey 已加载但尚未写入 ContextKeyAPIKey；该键让 Ops 错误日志仍能取到
 	// user/group/platform。仅供 Ops 错误日志读取，不代表请求已通过鉴权。
 	ContextKeyOpsFallbackAPIKey ContextKey = "ops_fallback_api_key"
+	// ContextKeyEdgeTrusted 标记本请求是 EDGE cell 收到的"中央可信转发"(方案 B)。
+	// 置位时:cell 不做消费者鉴权/计费(那是中央的职责),只用本地号执行 + 发 provider
+	// 用量(按账号)。由 apiKeyAuth 在匹配 CellGatewayKey 时置位。
+	ContextKeyEdgeTrusted ContextKey = "edge_trusted"
 )
+
+// IsEdgeTrusted 返回本请求是否为 EDGE cell 的中央可信转发(方案 B)。
+func IsEdgeTrusted(c *gin.Context) bool {
+	v, ok := c.Get(string(ContextKeyEdgeTrusted))
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
 
 // ForcePlatform 返回设置强制平台的中间件
 // 同时设置 request.Context（供 Service 使用）和 gin.Context（供 Handler 快速检查）
@@ -113,6 +127,12 @@ func GoogleErrorWriter(c *gin.Context, status int, message string) {
 //  2. 未分组 Key：若系统设置不允许未分组 Key 调度则 403。
 func RequireGroupAssignment(settingService *service.SettingService, writeError GatewayErrorWriter) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// EDGE cell 可信转发(方案 B):无分组是设计使然(选号默认 claude + 本地未分组
+		// 号),放行,不套用消费者的分组校验。
+		if IsEdgeTrusted(c) {
+			c.Next()
+			return
+		}
 		apiKey, ok := GetAPIKeyFromContext(c)
 		if !ok {
 			c.Next()

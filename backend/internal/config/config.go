@@ -104,6 +104,12 @@ type Config struct {
 	// 直连本机出口(旧行为)。环境变量:CELL_UPSTREAM_PROXY(http/https/socks5,可带
 	// user:pass)。中央模式忽略此项。
 	EdgeUpstreamProxy string `mapstructure:"edge_upstream_proxy" yaml:"edge_upstream_proxy"`
+	// CellGatewayKey：仅 EDGE cell 生效。cell 信任的"来自中央的转发 key"——中央
+	// EdgeForward 转发时带的 Authorization Bearer 值。设了之后,cell 收到用该 key 的
+	// /v1 请求即视为"中央可信转发":不在 cell 上要求/建立消费者身份,直接用本地号池
+	// 执行 + 发 provider 用量(按账号)→ Portal。消费者计费仍在中央,cell 不碰。
+	// 空=不启用(cell 仍按普通消费者网关鉴权)。环境变量:CELL_GATEWAY_KEY。
+	CellGatewayKey string `mapstructure:"cell_gateway_key" yaml:"cell_gateway_key"`
 	// EdgeForward：中央网关“执行→转发”到边缘 cell（P1 walking skeleton）。默认关;
 	// 开启且请求命中配置的组时,把该 /v1 请求反向代理到 cell,不走本地选号。
 	EdgeForward EdgeForwardConfig `mapstructure:"edge_forward" yaml:"edge_forward"`
@@ -1485,6 +1491,9 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		} else {
 			slog.Warn("CELL_UPSTREAM_PROXY 非法(需 http/https/socks5://host:port),已忽略", "err", err)
 		}
+	}
+	if v := strings.TrimSpace(os.Getenv("CELL_GATEWAY_KEY")); v != "" {
+		cfg.CellGatewayKey = v
 	}
 	// EDGE_FORWARD_* 环境变量兜底（中央“执行→转发”开关与目标 cell）。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_ENABLED"))); v == "1" || v == "true" || v == "on" {

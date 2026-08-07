@@ -47,6 +47,11 @@ type UsageBillingCommand struct {
 	BillingMode     string // "token" | "image" | "per_request" (usageLog.BillingMode)
 	ImageSizeTier   string // e.g. "1K"/"2K"/"4K" (usageLog.ImageSize)
 	UsageOccurredAt time.Time
+
+	// SkipConsumerBilling(方案 B):EDGE cell 收到中央可信转发时置真。置真时
+	// Apply 跳过消费者计费(额度/余额/订阅扣减,那是中央的职责),但**仍**入
+	// provider 用量 outbox(按账号)→ Portal → earning。默认 false = 正常全额计费。
+	SkipConsumerBilling bool
 }
 
 func (c *UsageBillingCommand) Normalize() {
