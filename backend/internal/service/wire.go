@@ -433,6 +433,21 @@ func ProvideScheduledTestRunnerService(
 	return svc
 }
 
+// ProvideCellSelfHealSeeder creates the cell self-heal test-plan seeder and
+// starts it ONLY in EDGE_MODE (#92). On central, admins create test plans
+// themselves, so seeding is not wanted there.
+func ProvideCellSelfHealSeeder(
+	accountRepo AccountRepository,
+	scheduledSvc *ScheduledTestService,
+	cfg *config.Config,
+) *CellSelfHealSeeder {
+	svc := NewCellSelfHealSeeder(accountRepo, scheduledSvc)
+	if cfg != nil && cfg.EdgeMode {
+		svc.Start()
+	}
+	return svc
+}
+
 // ProvideOpsScheduledReportService creates and starts OpsScheduledReportService.
 func ProvideOpsScheduledReportService(
 	opsService *OpsService,
