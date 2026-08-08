@@ -31,11 +31,20 @@ import (
 // 的第二次 Create 命中唯一冲突并报错，由 service 层反查收敛。
 type providerConnectAccountRepository struct {
 	client *dbent.Client
+	// edgeMode: on a cell, serving picks UNGROUPED local accounts (the edge
+	// trusted-forward key has GroupID=nil → ListSchedulableUngrouped). So on a
+	// cell we must NOT auto-bind groups — the central "bind all active groups"
+	// rule (needed for group-based ListSchedulableByGroupID on central) would
+	// make the account invisible to edge serving. See #85 invariant + CELL
+	// handoff gotcha #4.
+	edgeMode bool
 }
 
-// NewProviderConnectAccountRepository creates the repository.
-func NewProviderConnectAccountRepository(client *dbent.Client) service.ProviderConnectAccountRepository {
-	return &providerConnectAccountRepository{client: client}
+// NewProviderConnectAccountRepository creates the repository. edgeMode gates the
+// group-binding behavior (central binds all active platform groups; edge leaves
+// the account ungrouped).
+func NewProviderConnectAccountRepository(client *dbent.Client, edgeMode bool) service.ProviderConnectAccountRepository {
+	return &providerConnectAccountRepository{client: client, edgeMode: edgeMode}
 }
 
 func (r *providerConnectAccountRepository) CreateConnectedAccount(
@@ -43,12 +52,19 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 ) (int64, error) {
 	// 1) 解析该 platform 下所有活跃分组（决策 A：无组则拒绝创建）。
 	//    先查再建，避免建了账号却绑不了组、留下不可消费的死账号。
-	groupIDs, err := r.activeGroupIDsByPlatform(ctx, in.Platform)
-	if err != nil {
-		return 0, err
-	}
-	if len(groupIDs) == 0 {
-		return 0, fmt.Errorf("no active group for platform %q: cannot create schedulable provider account", in.Platform)
+	//    EDGE_MODE（cell）例外：serving 按「未分组本地号」选号（信任转发 key
+	//    GroupID=nil → ListSchedulableUngrouped），因此 cell 上不绑组、也不要求
+	//    有组——号保持未分组才能被 edge serving 选到（#85 不变量）。
+	var groupIDs []int64
+	if !r.edgeMode {
+		var err error
+		groupIDs, err = r.activeGroupIDsByPlatform(ctx, in.Platform)
+		if err != nil {
+			return 0, err
+		}
+		if len(groupIDs) == 0 {
+			return 0, fmt.Errorf("no active group for platform %q: cannot create schedulable provider account", in.Platform)
+		}
 	}
 
 	// 2) 事务内：建账号 + 绑定所有活跃分组，保证原子性。
@@ -116,16 +132,19 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 		return 0, err
 	}
 
-	agBuilders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
-	for i, gid := range groupIDs {
-		agBuilders = append(agBuilders, tx.AccountGroup.Create().
-			SetAccountID(row.ID).
-			SetGroupID(gid).
-			SetPriority(i+1),
-		)
-	}
-	if _, err := tx.AccountGroup.CreateBulk(agBuilders...).Save(ctx); err != nil {
-		return 0, err
+	// EDGE_MODE: groupIDs is empty → leave the account ungrouped (no binding).
+	if len(groupIDs) > 0 {
+		agBuilders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
+		for i, gid := range groupIDs {
+			agBuilders = append(agBuilders, tx.AccountGroup.Create().
+				SetAccountID(row.ID).
+				SetGroupID(gid).
+				SetPriority(i+1),
+			)
+		}
+		if _, err := tx.AccountGroup.CreateBulk(agBuilders...).Save(ctx); err != nil {
+			return 0, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

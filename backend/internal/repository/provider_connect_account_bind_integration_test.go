@@ -25,7 +25,7 @@ func (s *ProviderConnectAccountBindSuite) SetupTest() {
 	s.ctx = context.Background()
 	// 用非事务 client：CreateConnectedAccount 内部会自己开 Tx。
 	client := testEntClient(s.T())
-	s.repo = NewProviderConnectAccountRepository(client)
+	s.repo = NewProviderConnectAccountRepository(client, false)
 }
 
 func TestProviderConnectAccountBindSuite(t *testing.T) {

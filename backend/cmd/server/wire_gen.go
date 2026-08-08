@@ -53,7 +53,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyRepository := repository.NewProxyRepository(client, db)
 	proxyAllocationRepository := repository.NewProxyAllocationRepository(client, db)
 	providerConnectSessionRepository := repository.NewProviderConnectSessionRepository(client)
-	providerConnectAccountRepository := repository.NewProviderConnectAccountRepository(client)
+	providerConnectAccountRepository := repository.NewProviderConnectAccountRepository(client, configConfig.EdgeMode)
 	settingService := service.ProvideSettingService(settingRepository, groupRepository, proxyRepository, configConfig)
 	emailCache := repository.NewEmailCache(redisClient)
 	emailService := service.NewEmailService(settingRepository, emailCache)
