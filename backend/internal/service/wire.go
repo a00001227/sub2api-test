@@ -160,7 +160,11 @@ func ProvideAntigravityTokenProvider(
 func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *DashboardAggregationService {
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
+	// EDGE_MODE(#91 worker 卫生): 消费者仪表盘聚合是中央专属,cell 无消费者数据可
+	// 聚合。对象仍完整构造(Stop 幂等安全),只是不启动后台循环。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	return svc
 }
 
@@ -186,12 +190,15 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 }
 
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
-func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
+func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(notificationEmailService)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
+	// EDGE_MODE(#91): 订阅到期是中央专属,cell 无订阅。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	return svc
 }
 
@@ -293,7 +300,10 @@ func ProvideOpsMetricsCollector(
 	cfg *config.Config,
 ) *OpsMetricsCollector {
 	collector := NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
-	collector.Start()
+	// EDGE_MODE(#91): ops 观测是中央专属,cell 不采集(Stop 幂等安全)。
+	if cfg == nil || !cfg.EdgeMode {
+		collector.Start()
+	}
 	return collector
 }
 
@@ -306,7 +316,10 @@ func ProvideOpsAggregationService(
 	cfg *config.Config,
 ) *OpsAggregationService {
 	svc := NewOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
-	svc.Start()
+	// EDGE_MODE(#91): ops 预聚合是中央专属,cell 不跑。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	return svc
 }
 
@@ -320,7 +333,10 @@ func ProvideOpsAlertEvaluatorService(
 	proxyRepo ProxyRepository,
 ) *OpsAlertEvaluatorService {
 	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg, proxyRepo)
-	svc.Start()
+	// EDGE_MODE(#91): ops 告警评估是中央专属,cell 不跑。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	return svc
 }
 
@@ -339,7 +355,11 @@ func ProvideOpsCleanupService(
 	opsService *OpsService,
 ) *OpsCleanupService {
 	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, settingRepo)
-	svc.Start()
+	// EDGE_MODE(#91): ops 清理 cron 是中央专属,cell 不启动(cron 未建 → Stop 安全)。
+	// 仍保留 SetCleanupReloader 挂接,行为与中央一致。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	if opsService != nil {
 		opsService.SetCleanupReloader(svc)
 	}
@@ -422,7 +442,10 @@ func ProvideOpsScheduledReportService(
 	cfg *config.Config,
 ) *OpsScheduledReportService {
 	svc := NewOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
-	svc.Start()
+	// EDGE_MODE(#91): ops 定时报表(邮件)是中央专属,cell 不跑。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	return svc
 }
 
@@ -640,7 +663,10 @@ var ProviderSet = wire.NewSet(
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
 	svc := NewUserPlatformQuotaUsageFlusher(cfg, cache, quotaRepo, tw)
-	svc.Start()
+	// EDGE_MODE(#91): 消费者×平台配额 flush 是中央专属,cell 无消费者配额。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	return svc
 }
 
@@ -665,10 +691,13 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 }
 
 // ProvidePaymentOrderExpiryService creates and starts PaymentOrderExpiryService.
-func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
+func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
+	// EDGE_MODE(#91): 支付订单到期是中央专属,cell 无支付。
+	if cfg == nil || !cfg.EdgeMode {
+		svc.Start()
+	}
 	return svc
 }
 

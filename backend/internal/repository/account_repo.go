@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -25,9 +26,11 @@ import (
 	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	dbproxy "github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/service/providerwebhook"
 	"github.com/lib/pq"
 
 	entsql "entgo.io/ent/dialect/sql"
@@ -49,6 +52,19 @@ type accountRepository struct {
 	// Used to proactively sync account snapshot to cache when status changes,
 	// ensuring sticky sessions can promptly detect unavailable accounts.
 	schedulerCache service.SchedulerCache
+	// statusReflow 把账号状态变更(SetError/ClearError)回流给 Provider Portal。
+	// nil 或未配置(URL/secret 缺失)时为 no-op —— Portal 不可用绝不影响账号操作。
+	// statusReflow mirrors account status transitions back to the Provider
+	// Portal. nil / disabled = no-op; a Portal outage never affects operation.
+	statusReflow StatusReflowNotifier
+}
+
+// StatusReflowNotifier delivers account status-change events to the Provider
+// Portal. *providerwebhook.Sender satisfies it. Kept as a narrow interface so
+// tests can inject a fake and a nil value is a safe no-op.
+type StatusReflowNotifier interface {
+	Enabled() bool
+	SendAsync(ev providerwebhook.Event)
 }
 
 var schedulerNeutralExtraKeyPrefixes = []string{
@@ -68,8 +84,19 @@ const postgresParameterBatchSize = 50000
 
 // NewAccountRepository 创建账户仓储实例。
 // 这是对外暴露的构造函数，返回接口类型以便于依赖注入。
-func NewAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache) service.AccountRepository {
-	return newAccountRepositoryWithSQL(client, sqlDB, schedulerCache)
+func NewAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache, cfg *config.Config) service.AccountRepository {
+	r := newAccountRepositoryWithSQL(client, sqlDB, schedulerCache)
+	// Follow the codebase idiom (ProvideProviderUsageOutboxWorker): build a
+	// per-consumer Sender from the shared ProviderConnect webhook config.
+	// Disabled config (URL/secret empty) yields a no-op sender, so this is
+	// safe on central and on cells that have not configured the Portal callback.
+	if cfg != nil {
+		r.statusReflow = providerwebhook.NewSender(providerwebhook.Config{
+			URL:    cfg.ProviderConnect.WebhookURL,
+			Secret: cfg.ProviderConnect.WebhookSecret,
+		}, slog.Default())
+	}
+	return r
 }
 
 // newAccountRepositoryWithSQL 是内部构造函数，支持依赖注入 SQL 执行器。
@@ -788,7 +815,56 @@ func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg str
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue set error failed: account=%d err=%v", id, err)
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
+	// #87: mirror the error transition (StatusError → Portal "invalid") back to
+	// the Portal. This is called AFTER the caller already decided to error the
+	// account — it adds NO new status logic and no new trigger (e.g. claude 401
+	// still does not reach here because it does not call SetError).
+	r.emitProviderStatusReflow(ctx, id, "invalid")
 	return nil
+}
+
+// emitProviderStatusReflow mirrors a status transition that ALREADY happened on
+// this account back to the Provider Portal (cell #87). It is invoked only from
+// the existing SetError/ClearError chokepoints and merely reflects the
+// transition the caller just committed — it adds NO status logic of its own.
+//
+// Scope: Portal-linked accounts only (external_provider_account_id present).
+// Fail-safe: config-gated + asynchronous — a Portal outage or a missing row can
+// never affect account operation (worst case a dropped notification the Portal
+// reconciles out-of-band). rate_limited/quota reflow is deliberately NOT emitted
+// here: sub2api models rate limiting as a transient timestamp with no clean
+// recovery chokepoint, so emitting a sticky "rate_limited" would leave the
+// Portal stuck. Only the symmetric invalid⇄active pair is reflected in v1.
+func (r *accountRepository) emitProviderStatusReflow(ctx context.Context, id int64, portalStatus string) {
+	if r == nil || r.statusReflow == nil || !r.statusReflow.Enabled() {
+		return
+	}
+	// Resolve external ref (Portal-owned pa_<uuid>). sqlExecutor exposes
+	// QueryContext only (no QueryRowContext — ent.Tx compatibility).
+	rows, err := r.sql.QueryContext(ctx,
+		`SELECT external_provider_account_id FROM accounts WHERE id = $1`, id)
+	if err != nil {
+		return
+	}
+	var externalRef sql.NullString
+	if rows.Next() {
+		if scanErr := rows.Scan(&externalRef); scanErr != nil {
+			_ = rows.Close()
+			return
+		}
+	}
+	_ = rows.Close()
+	ref := strings.TrimSpace(externalRef.String)
+	if !externalRef.Valid || ref == "" {
+		return // not a Portal-linked account → nothing to reflow
+	}
+	ev := providerwebhook.BuildStatusChanged(providerwebhook.StatusChangedInput{
+		EventID:                   providerwebhook.StatusChangedEventID(ref, portalStatus, time.Now().UnixNano()),
+		CreatedAt:                 time.Now().UTC().Format(time.RFC3339),
+		ExternalProviderAccountID: ref,
+		Status:                    portalStatus,
+	})
+	r.statusReflow.SendAsync(ev)
 }
 
 // syncSchedulerAccountSnapshot 在账号状态变更时主动同步快照到调度器缓存。
@@ -872,6 +948,9 @@ func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear error failed: account=%d err=%v", id, err)
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
+	// #87: mirror recovery (StatusActive → Portal "active"), symmetric with the
+	// SetError → "invalid" reflow above.
+	r.emitProviderStatusReflow(ctx, id, "active")
 	return nil
 }
 

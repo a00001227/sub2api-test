@@ -90,6 +90,20 @@ func (f *fakeConnectAccountRepo) ReleaseAllocationByExternalRef(_ context.Contex
 	return nil
 }
 
+// #90-A2/B: 接口新增的账号配置读改写(这些用例不涉及,给最小桩)。
+func (f *fakeConnectAccountRepo) GetAccountConfig(_ context.Context, ref string) (*ProviderAccountConfigSnapshot, bool, error) {
+	if _, ok := f.byRef[ref]; !ok {
+		return nil, false, nil
+	}
+	return &ProviderAccountConfigSnapshot{}, true, nil
+}
+func (f *fakeConnectAccountRepo) UpdateAccountConfig(_ context.Context, ref string, _ ProviderAccountConfigPatch) error {
+	if _, ok := f.byRef[ref]; !ok {
+		return ErrProviderAccountNotFound
+	}
+	return nil
+}
+
 // --- 假 OAuth 换 token ---
 type fakeExchanger struct {
 	gotSessionID string

@@ -195,6 +195,76 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	return s.testClaudeAccountConnection(c, account, modelID)
 }
 
+// AccountTestResult 是"测试连接"的 JSON 结论(非 SSE)。用于 #90 admin-only 的
+// provider-internal 测试端点。
+type AccountTestResult struct {
+	Success bool   `json:"success"`
+	Model   string `json:"model,omitempty"`
+	Message string `json:"message,omitempty"` // 失败原因 / 成功内容摘要
+}
+
+// RunConnectionTestJSON 复用 TestAccountConnection 的全部平台测试逻辑,但用一个
+// 由 httptest.Recorder 支撑的 gin.Context 缓冲其 SSE 输出,再把帧归纳成一个 JSON
+// 结论。为的是给 Portal(admin)一个 non-SSE 的"测试连接"结果,而不必重写这份
+// 深度耦合 SSE 的测试实现。
+//
+// 副作用与 SSE 版**完全一致**:测试失败仍可能 SetError(403)/SetRateLimited(429)
+// (并因此连带触发账号状态回流 #87)。这是刻意保持一致——测试即真实探活。
+func (s *AccountTestService) RunConnectionTestJSON(ctx context.Context, accountID int64, modelID, prompt, mode string) AccountTestResult {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/internal/account-test", nil).WithContext(ctx)
+
+	runErr := s.TestAccountConnection(c, accountID, modelID, prompt, mode)
+
+	res := AccountTestResult{Model: modelID}
+	var lastContent string
+	sc := bufio.NewScanner(bytes.NewReader(rec.Body.Bytes()))
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(sseDataPrefix.ReplaceAllString(line, ""))
+		if payload == "" {
+			continue
+		}
+		var ev TestEvent
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			continue
+		}
+		switch ev.Type {
+		case "test_start":
+			if ev.Model != "" {
+				res.Model = ev.Model
+			}
+		case "test_complete":
+			if ev.Success {
+				res.Success = true
+			}
+			if ev.Model != "" {
+				res.Model = ev.Model
+			}
+		case "error":
+			if ev.Error != "" {
+				res.Message = ev.Error
+			}
+		case "content":
+			if ev.Text != "" {
+				lastContent = ev.Text
+			}
+		}
+	}
+	if !res.Success && res.Message == "" && runErr != nil {
+		res.Message = runErr.Error()
+	}
+	if res.Success && res.Message == "" && lastContent != "" {
+		res.Message = lastContent
+	}
+	return res
+}
+
 // testClaudeAccountConnection tests an Anthropic Claude account's connection
 func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string) error {
 	ctx := c.Request.Context()

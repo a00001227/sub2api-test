@@ -111,6 +111,11 @@ type ProviderConnectAccountRepository interface {
 	// 归还可分配池（Phase 21E-6E proxy-exclusive）。幂等：无活跃占用时 no-op。
 	// 能力就绪：待 Portal→Sub2API 的账号 removed 通道接线后调用。
 	ReleaseAllocationByExternalRef(ctx context.Context, externalRef, reason string) error
+	// #90-A2/B: 读/改单账号配置(model_mapping / priority / max_sessions /
+	// intercept_warmup / temp_unschedulable)。Update 为 token-safe 的读改写——
+	// 分散在 column/extra/credentials,只改 patch 里提供的字段,绝不动 OAuth token。
+	GetAccountConfig(ctx context.Context, externalRef string) (snap *ProviderAccountConfigSnapshot, found bool, err error)
+	UpdateAccountConfig(ctx context.Context, externalRef string, patch ProviderAccountConfigPatch) error
 }
 
 // CreateConnectedAccountInput 创建接入账号的入参。

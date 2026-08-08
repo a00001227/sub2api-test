@@ -39,6 +39,12 @@ func RegisterProviderInternalRoutes(
 		internal.POST("/:external_ref/pacing-mode", h.SetPacingMode)
 		// Phase 21I provider-scheduling: 可逆暂停/恢复账号调度（只切 schedulable）。
 		internal.POST("/:external_ref/scheduling", h.SetScheduling)
+		// #90 admin-only 测试连接: 触发真实连通性测试, 返回 JSON 结论。
+		// "仅 admin" 由 Portal 侧 AdminGuard 把关; 本端同 provider-internal 鉴权。
+		internal.POST("/:external_ref/test", h.TestConnection)
+		// #90-A2/B 账号配置: 读/改可配置项(先接 model_mapping 白名单)。
+		internal.GET("/:external_ref/config", h.GetAccountConfig)
+		internal.POST("/:external_ref/config", h.SetAccountConfig)
 	}
 
 	// 完成流程挂在 /internal/provider/connect（同一鉴权）。

@@ -81,6 +81,16 @@ func BuildStatusChanged(in StatusChangedInput) Event {
 	}
 }
 
+// StatusChangedEventID derives a UNIQUE-per-occurrence event id for a status
+// reflow. Unlike activation/usage (STABLE ids meant to dedup), each status
+// transition is a distinct fact — a flapping account (invalid→active→invalid)
+// must deliver every hop, so the id embeds a caller-supplied nonce (unix nanos)
+// that stays fixed across that one occurrence's delivery retries but differs
+// between occurrences. The external ref is Portal-owned and non-sensitive.
+func StatusChangedEventID(externalRef, status string, nonce int64) string {
+	return fmt.Sprintf("evt_status_%s_%s_%d", externalRef, status, nonce)
+}
+
 // ConnectActivatedEventID derives a STABLE event id from the connect
 // session id: the same completed session always yields the same evt id, so
 // a retry (or a duplicate completion) reuses it and Portal's inbox

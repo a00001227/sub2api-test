@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +76,50 @@ func (f *fakeMetricsRPM) GetRequestOutcome(_ context.Context, _ int64) (int64, i
 	return f.success, f.total, nil
 }
 
+// #90 健康/错误详情：错误信息透出 + 当前限流按 reset_at 派生。
+func TestMetrics_HealthErrorDetail_Active(t *testing.T) {
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	reset := now.Add(30 * time.Minute)
+	svc := &ProviderAccountMetricsService{
+		locator: &fakeMetricsLocator{id: 5, found: true},
+		accounts: &fakeMetricsAccountReader{acc: &Account{
+			Status:           StatusError,
+			ErrorMessage:     "OAuth access token has been revoked",
+			RateLimitResetAt: &reset,
+		}},
+		usage: &fakeMetricsUsageReader{},
+		now:   func() time.Time { return now },
+	}
+	m, err := svc.Metrics(context.Background(), "pa_abc")
+	require.NoError(t, err)
+	require.Equal(t, "OAuth access token has been revoked", m.ErrorMessage)
+	require.True(t, m.RateLimited)
+	require.NotNil(t, m.RateLimitResetAt)
+	require.Equal(t, "2026-07-31T12:30:00Z", *m.RateLimitResetAt)
+}
+
+// 已过期的限流窗口 → 不算限流；超长错误信息 → 截断 + 省略号。
+func TestMetrics_HealthErrorDetail_ExpiredAndTruncate(t *testing.T) {
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Minute)
+	svc := &ProviderAccountMetricsService{
+		locator: &fakeMetricsLocator{id: 5, found: true},
+		accounts: &fakeMetricsAccountReader{acc: &Account{
+			Status:           StatusActive,
+			ErrorMessage:     strings.Repeat("x", 600),
+			RateLimitResetAt: &past,
+		}},
+		usage: &fakeMetricsUsageReader{},
+		now:   func() time.Time { return now },
+	}
+	m, err := svc.Metrics(context.Background(), "pa_abc")
+	require.NoError(t, err)
+	require.False(t, m.RateLimited)
+	require.Nil(t, m.RateLimitResetAt)
+	require.Equal(t, maxProviderErrorMessageLen+1, len([]rune(m.ErrorMessage)))
+	require.True(t, strings.HasSuffix(m.ErrorMessage, "…"))
+}
+
 // 成功：组装状态/并发/用量窗口/配额/订阅等级/今日请求（全脱敏）。
 func TestMetrics_Success(t *testing.T) {
 	reset := time.Date(2026, 7, 18, 19, 0, 0, 0, time.UTC)
@@ -87,7 +132,9 @@ func TestMetrics_Success(t *testing.T) {
 				FiveHour:         &UsageProgress{Utilization: 97, ResetsAt: &reset, RemainingSeconds: 3600},
 				SevenDay:         &UsageProgress{Utilization: 94, RemainingSeconds: 449400},
 			},
-			today: &WindowStats{Requests: 13, Tokens: 12345},
+			// TodayTokens = InputTokens + OutputTokens（不含缓存读写，见 Metrics 注释）；
+			// 旧夹具只填了 Tokens 字段,与实际口径不符 → 修正为分项。
+			today: &WindowStats{Requests: 13, InputTokens: 12000, OutputTokens: 345},
 		},
 	)
 

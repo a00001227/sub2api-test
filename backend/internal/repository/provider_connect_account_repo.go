@@ -77,18 +77,36 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 	profile := service.PacingProfileForTier(tier)
 	defaultMode := service.PacingModeHumanized
 
+	// 接入即默认配置(#90-A1):在既有 pacing/会话默认之上,叠加平台默认——拦截预热
+	// (省 token)+ 临时不可调度规则(命中即临时绕开坏号,请求侧自愈)。仅 anthropic
+	// 预置(关键词按 Anthropic 响应体英文串);其它平台留给「每账号配置编辑器」(#90-B)。
+	// TLS 指纹 / 会话 ID 伪装属反封面(业务方自负),本项目不设,见 helper 内占位。
+	extra := map[string]any{
+		"pacing_mode":  defaultMode,
+		"max_sessions": profile.MaxSessions,
+	}
+	creds := normalizeJSONMap(in.Credentials)
+	extraDefaults, credDefaults := defaultProviderAccountConfig(in.Platform)
+	for k, v := range extraDefaults {
+		if _, exists := extra[k]; !exists {
+			extra[k] = v
+		}
+	}
+	for k, v := range credDefaults {
+		if _, exists := creds[k]; !exists { // 不覆盖调用方已带的键
+			creds[k] = v
+		}
+	}
+
 	builder := tx.Account.Create().
 		SetName(in.Name).
 		SetPlatform(in.Platform).
 		SetType(service.AccountTypeOAuth).
-		SetCredentials(normalizeJSONMap(in.Credentials)).
+		SetCredentials(creds).
 		SetStatus(service.StatusActive).
 		SetExternalProviderAccountID(in.ExternalProviderAccountID).
 		SetConcurrency(service.PacingModeConcurrencyFor(defaultMode)).
-		SetExtra(map[string]any{
-			"pacing_mode":  defaultMode,
-			"max_sessions": profile.MaxSessions,
-		})
+		SetExtra(extra)
 	if in.ProxyID != nil {
 		builder = builder.SetProxyID(*in.ProxyID)
 	}
@@ -114,6 +132,37 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 		return 0, err
 	}
 	return row.ID, nil
+}
+
+// defaultProviderAccountConfig 返回接入时要叠加到号上的平台默认配置(#90-A1):
+// 返回 (extra 追加, credentials 追加)。覆盖 anthropic(claude)与 openai(chatgpt/codex)
+// ——两者能力面一致,拦截预热两条路径(claude / codex-responses)都认。gemini 暂不预置。
+// temp_unschedulable 关键词按上游响应体英文串(小写子串)通配:429/503 对两平台都命中,
+// 529(overloaded)是 anthropic 专属,对 openai 是无害空转(永不匹配)。
+func defaultProviderAccountConfig(platform string) (extra map[string]any, creds map[string]any) {
+	extra = map[string]any{}
+	creds = map[string]any{}
+	if platform != service.PlatformAnthropic && platform != service.PlatformOpenAI {
+		return extra, creds
+	}
+	// 拦截预热:标题生成等预热请求返回 mock,不耗上游 token(默认开)。
+	creds["intercept_warmup_requests"] = true
+	// 临时不可调度:错误码 + 关键词同时命中 → 临时禁用 5 分钟(见 ratelimit_service
+	// tryTempUnschedulable:rule.ErrorCode==statusCode 且关键词是响应体小写子串)。
+	// 关键词与时长均沿用 sub2api admin 原预设(EditAccountModal.vue tempUnschedPresets):
+	//   529 "overloaded, too many" 60min / 429 "rate limit, too many requests" 10min /
+	//   503 "unavailable, maintenance" 30min。
+	creds["temp_unschedulable_enabled"] = true
+	creds["temp_unschedulable_rules"] = []any{
+		map[string]any{"error_code": 529, "keywords": []any{"overloaded", "too many"}, "duration_minutes": 60, "description": "过载"},
+		map[string]any{"error_code": 429, "keywords": []any{"rate limit", "too many requests"}, "duration_minutes": 10, "description": "限流"},
+		map[string]any{"error_code": 503, "keywords": []any{"unavailable", "maintenance"}, "duration_minutes": 30, "description": "维护"},
+	}
+	// —— 反封面(业务方自负),本项目不设置;若要默认开启,你自行在此填 ——
+	// extra["enable_tls_fingerprint"] = true
+	// extra["tls_fingerprint_profile_id"] = <profileID>
+	// extra["session_id_masking_enabled"] = true
+	return extra, creds
 }
 
 // activeGroupIDsByPlatform 返回指定 platform 下所有活跃（未软删）分组 id。
@@ -158,6 +207,116 @@ func (r *providerConnectAccountRepository) ReleaseAllocationByExternalRef(
 	_ = externalRef
 	_ = reason
 	return nil
+}
+
+// GetAccountConfig 读单账号配置全量快照(#90-A2/B)。未找到 → (nil,false,nil)。
+// 复用规范 getter 解析分散在 column/extra/credentials 的各项(脱敏,不含 token)。
+func (r *providerConnectAccountRepository) GetAccountConfig(
+	ctx context.Context, externalRef string,
+) (*service.ProviderAccountConfigSnapshot, bool, error) {
+	row, err := r.client.Account.Query().
+		Where(account.ExternalProviderAccountIDEQ(externalRef)).
+		Only(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	acc := &service.Account{
+		Credentials: row.Credentials,
+		Extra:       row.Extra,
+		Priority:    row.Priority,
+	}
+	return &service.ProviderAccountConfigSnapshot{
+		ModelMapping:       acc.GetModelMapping(),
+		Priority:           row.Priority,
+		MaxSessions:        acc.GetMaxSessions(),
+		InterceptWarmup:    acc.IsInterceptWarmupEnabled(),
+		TempUnschedEnabled: acc.IsTempUnschedulableEnabled(),
+		TempUnschedRules:   acc.GetTempUnschedulableRules(),
+	}, true, nil
+}
+
+// UpdateAccountConfig token-safe 部分更新单账号配置(#90-A2/B):读全量行 → 只改
+// patch 里提供(非 nil)的字段(分散在 priority 列 / extra.max_sessions /
+// credentials.{model_mapping,intercept_warmup_requests,temp_unschedulable_*})
+// → 一次 ent 更新写回,绝不动 OAuth token 与其它未涉及的键。
+func (r *providerConnectAccountRepository) UpdateAccountConfig(
+	ctx context.Context, externalRef string, patch service.ProviderAccountConfigPatch,
+) error {
+	row, err := r.client.Account.Query().
+		Where(account.ExternalProviderAccountIDEQ(externalRef)).
+		Only(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return service.ErrProviderAccountNotFound
+		}
+		return err
+	}
+
+	upd := r.client.Account.UpdateOneID(row.ID)
+
+	// credentials 相关:model_mapping / intercept_warmup / temp_unschedulable_*。
+	credsChanged := false
+	creds := map[string]any{}
+	for k, v := range row.Credentials {
+		creds[k] = v
+	}
+	if patch.ModelMapping != nil {
+		mm := make(map[string]any, len(patch.ModelMapping))
+		for k, v := range patch.ModelMapping {
+			mm[k] = v
+		}
+		creds["model_mapping"] = mm
+		credsChanged = true
+	}
+	if patch.InterceptWarmup != nil {
+		creds["intercept_warmup_requests"] = *patch.InterceptWarmup
+		credsChanged = true
+	}
+	if patch.TempUnschedEnabled != nil {
+		creds["temp_unschedulable_enabled"] = *patch.TempUnschedEnabled
+		credsChanged = true
+	}
+	if patch.TempUnschedRules != nil {
+		rules := make([]any, 0, len(*patch.TempUnschedRules))
+		for _, rule := range *patch.TempUnschedRules {
+			kw := make([]any, 0, len(rule.Keywords))
+			for _, k := range rule.Keywords {
+				kw = append(kw, k)
+			}
+			rules = append(rules, map[string]any{
+				"error_code":       rule.ErrorCode,
+				"keywords":         kw,
+				"duration_minutes": rule.DurationMinutes,
+				"description":      rule.Description,
+			})
+		}
+		creds["temp_unschedulable_rules"] = rules
+		credsChanged = true
+	}
+	if credsChanged {
+		upd = upd.SetCredentials(creds)
+	}
+
+	// extra.max_sessions。
+	if patch.MaxSessions != nil {
+		extra := map[string]any{}
+		for k, v := range row.Extra {
+			extra[k] = v
+		}
+		extra["max_sessions"] = *patch.MaxSessions
+		upd = upd.SetExtra(extra)
+	}
+
+	// priority 列。
+	if patch.Priority != nil {
+		upd = upd.SetPriority(*patch.Priority)
+	}
+
+	_, err = upd.Save(ctx)
+	return err
 }
 
 // ensureProxyBindingCapacity 在事务内校验代理对某个平台还有绑定余量。先

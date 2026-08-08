@@ -28,6 +28,8 @@ type ProviderConnectHandler struct {
 	reauth     *service.ProviderConnectReauthService
 	pacing     *service.ProviderAccountPacingService
 	scheduling *service.ProviderAccountSchedulingService
+	test       *service.ProviderAccountTestService
+	config     *service.ProviderAccountConfigService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -42,8 +44,122 @@ func NewProviderConnectHandler(
 	reauth *service.ProviderConnectReauthService,
 	pacing *service.ProviderAccountPacingService,
 	scheduling *service.ProviderAccountSchedulingService,
+	test *service.ProviderAccountTestService,
+	config *service.ProviderAccountConfigService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config}
+}
+
+// accountConfigRuleRequest 是一条临时不可调度规则的请求体。
+type accountConfigRuleRequest struct {
+	ErrorCode       int      `json:"error_code"`
+	Keywords        []string `json:"keywords"`
+	DurationMinutes int      `json:"duration_minutes"`
+	Description     string   `json:"description"`
+}
+
+// accountConfigRequest 是 SetAccountConfig 的部分更新体(字段缺省/nil=不改该项)。
+type accountConfigRequest struct {
+	// model_mapping 缺省(nil)=不动;提供(含 {})=覆盖白名单/映射。
+	ModelMapping       map[string]string           `json:"model_mapping"`
+	Priority           *int                        `json:"priority"`
+	MaxSessions        *int                        `json:"max_sessions"`
+	InterceptWarmup    *bool                       `json:"intercept_warmup"`
+	TempUnschedEnabled *bool                       `json:"temp_unschedulable_enabled"`
+	TempUnschedRules   *[]accountConfigRuleRequest `json:"temp_unschedulable_rules"`
+}
+
+// GetAccountConfig handles GET /internal/provider-accounts/:external_ref/config
+// 回读单账号可配置项(脱敏,不含 token/凭据),供 Portal 编辑器展示当前值。
+func (h *ProviderConnectHandler) GetAccountConfig(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	cfg, err := h.config.GetConfig(c.Request.Context(), externalRef)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// SetAccountConfig handles POST /internal/provider-accounts/:external_ref/config
+// 部分更新账号配置(#90-A2/B)。"仅 admin"由 Portal 侧 AdminGuard 把关。
+// 目前接 model_mapping(平台默认白名单下发 + admin 手动改共用此端点)。
+func (h *ProviderConnectHandler) SetAccountConfig(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req accountConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	input := service.ProviderAccountConfigInput{
+		ModelMapping:       req.ModelMapping,
+		Priority:           req.Priority,
+		MaxSessions:        req.MaxSessions,
+		InterceptWarmup:    req.InterceptWarmup,
+		TempUnschedEnabled: req.TempUnschedEnabled,
+	}
+	if req.TempUnschedRules != nil {
+		rules := make([]service.TempUnschedulableRule, 0, len(*req.TempUnschedRules))
+		for _, r := range *req.TempUnschedRules {
+			rules = append(rules, service.TempUnschedulableRule{
+				ErrorCode:       r.ErrorCode,
+				Keywords:        r.Keywords,
+				DurationMinutes: r.DurationMinutes,
+				Description:     r.Description,
+			})
+		}
+		input.TempUnschedRules = &rules
+	}
+	cfg, err := h.config.SetConfig(c.Request.Context(), externalRef, input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// testConnectionRequest is the OPTIONAL body for TestConnection (all fields
+// default when absent: platform default model / prompt / mode).
+type testConnectionRequest struct {
+	ModelID string `json:"model_id"`
+	Prompt  string `json:"prompt"`
+	Mode    string `json:"mode"`
+}
+
+// TestConnection handles
+// POST /internal/provider-accounts/:external_ref/test
+//
+// 触发单账号的真实连通性测试(#90)。"仅 admin"由 Portal 侧 AdminGuard 把关;
+// 本端仍按 provider-internal token 鉴权。复用 sub2api 完整测试逻辑,归纳为 JSON。
+// 注意:失败可能把账号置为 error/限流(与后台"测试"一致),并连带触发回流(#87)。
+func (h *ProviderConnectHandler) TestConnection(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req testConnectionRequest
+	_ = c.ShouldBindJSON(&req) // body optional — empty body leaves zero values
+	result, err := h.test.Test(
+		c.Request.Context(),
+		externalRef,
+		strings.TrimSpace(req.ModelID),
+		req.Prompt,
+		strings.TrimSpace(req.Mode),
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 // Regions handles

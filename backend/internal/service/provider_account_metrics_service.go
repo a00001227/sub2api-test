@@ -90,6 +90,26 @@ type ProviderAccountMetrics struct {
 	SessionsMax  int    `json:"sessions_max"`
 	SessionsUsed int    `json:"sessions_used"`
 	UpdatedAt    string `json:"updated_at"` // RFC3339
+	// #90 健康/错误详情（provider 自己的号，看得到"为什么不可用"）。
+	// ErrorMessage 是上游状态描述(如 "OAuth token revoked" / "429")，非凭据；
+	// 防御性截断,避免把大体响应体透出。空 = 无错误。
+	ErrorMessage string `json:"error_message,omitempty"`
+	// RateLimited = 当前是否处于限流窗口内(派生自 reset_at)；RateLimitResetAt
+	// = 限流解除时间 RFC3339(nil = 未限流或无重置时间)。
+	RateLimited      bool    `json:"rate_limited"`
+	RateLimitResetAt *string `json:"rate_limit_reset_at,omitempty"`
+}
+
+// maxProviderErrorMessageLen 限制回流给 Portal 的错误详情长度,纯防御性——
+// 上游错误偶尔会带很长的响应体,面板只需一句原因。
+const maxProviderErrorMessageLen = 500
+
+func truncateProviderErrorMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if len([]rune(msg)) <= maxProviderErrorMessageLen {
+		return msg
+	}
+	return string([]rune(msg)[:maxProviderErrorMessageLen]) + "…"
 }
 
 // PacingScore 账号综合评分（0-100）及其构成，纯展示层，不参与调度。
@@ -188,6 +208,17 @@ func (s *ProviderAccountMetricsService) Metrics(
 	}
 	if !acc.CreatedAt.IsZero() {
 		out.CreatedAt = acc.CreatedAt.UTC().Format(time.RFC3339)
+	}
+
+	// #90 健康/错误详情:回流账号"为什么不可用"。error_message 与 sub2api 后台
+	// 展示同源(desensitized 上游状态串),截断后透出;限流按 reset_at 派生当前状态。
+	if msg := truncateProviderErrorMessage(acc.ErrorMessage); msg != "" {
+		out.ErrorMessage = msg
+	}
+	if acc.RateLimitResetAt != nil && s.now().Before(*acc.RateLimitResetAt) {
+		out.RateLimited = true
+		reset := acc.RateLimitResetAt.UTC().Format(time.RFC3339)
+		out.RateLimitResetAt = &reset
 	}
 
 	// Current concurrency occupancy (DeRouter's 0/2 left value). Best-effort.
