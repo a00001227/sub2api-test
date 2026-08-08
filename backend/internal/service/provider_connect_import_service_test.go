@@ -194,19 +194,38 @@ func TestImport_AccountCreateFailed_NoWebhook(t *testing.T) {
 	require.Len(t, wh.sent, 0)
 }
 
-// provider_type 非 claude → PROVIDER_TYPE_UNSUPPORTED（本阶段不支持 codex）
+// provider_type 不在支持集(claude/codex/openai)→ PROVIDER_TYPE_UNSUPPORTED。
+// gemini 目前不支持导入。
 func TestImport_ProviderTypeUnsupported(t *testing.T) {
 	accounts := newFakeConnectAccountRepo()
 	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
 	svc := newImportSvc(accounts, alloc, &fakeCookieAuth{token: &TokenInfo{AccessToken: "at"}}, &fakeWebhookNotifier{enabled: true})
 
 	in := okInput()
-	in.ProviderType = "codex"
+	in.ProviderType = "gemini"
 	res, err := svc.ImportCredential(context.Background(), in)
 	require.Nil(t, res)
 	var appErr *infraerrors.ApplicationError
 	require.ErrorAs(t, err, &appErr)
 	require.Equal(t, "PROVIDER_TYPE_UNSUPPORTED", appErr.Reason)
+}
+
+// codex/openai 导入:纯解析 access_token(不走 CookieAuth 交换),建 platform=openai
+// 的 oauth 号,发 activated webhook(providerType=codex)。
+func TestImport_CodexSuccess(t *testing.T) {
+	accounts := newFakeConnectAccountRepo()
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
+	// cookie 交换故意给 nil token —— codex 分支不该调用它,若调用会失败暴露问题。
+	svc := newImportSvc(accounts, alloc, &fakeCookieAuth{}, &fakeWebhookNotifier{enabled: true})
+
+	in := okInput()
+	in.ProviderType = "codex"
+	in.Credential = "codex-access-token-opaque" // 非 JWT:解析成 access_token,带警告但成功
+
+	res, err := svc.ImportCredential(context.Background(), in)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Equal(t, "active", res.Status)
 }
 
 // 请求参数校验：缺 external_ref / 非 pa_ 前缀 / 空 credential / 空 region

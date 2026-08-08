@@ -59,9 +59,16 @@ func PlatformForProviderType(providerType string) (string, bool) {
 	return p, ok
 }
 
-// connectTokenExchanger 是完成流程对 OAuthService 的最小依赖面。
+// connectTokenExchanger 是完成流程对 claude OAuthService 的最小依赖面。
 type connectTokenExchanger interface {
 	ExchangeCode(ctx context.Context, input *ExchangeCodeInput) (*TokenInfo, error)
+}
+
+// connectOpenAIExchanger 是完成流程对 OpenAIOAuthService 的最小依赖面(#95 手动授权):
+// 用 session_id + code + state 换 token,并构造账号 credentials。*OpenAIOAuthService 天然满足。
+type connectOpenAIExchanger interface {
+	ExchangeCode(ctx context.Context, input *OpenAIExchangeCodeInput) (*OpenAITokenInfo, error)
+	BuildAccountCredentials(tokenInfo *OpenAITokenInfo) map[string]any
 }
 
 // connectReauthAccountUpdater 重授权完成时更新既有账号的最小依赖面
@@ -134,6 +141,9 @@ type CreateConnectedAccountInput struct {
 type CompleteAuthorizationInput struct {
 	SessionID int64
 	Code      string
+	// State (#95 openai 手动授权): OpenAI OAuth 的 PKCE state,由前端从 auth_url
+	// 解析后回传(claude 不用)。ExchangeCode 用它比对会话防 CSRF。
+	State string
 }
 
 // CompleteAuthorizationResult 完成结果。Portal 用这些字段在 /complete 请求内
@@ -156,6 +166,7 @@ type ProviderConnectCompletionService struct {
 	// 更新既有账号凭证并恢复 active/schedulable，而非新建账号。
 	reauthAccounts connectReauthAccountUpdater
 	oauth          connectTokenExchanger
+	openaiOAuth    connectOpenAIExchanger // #95: openai 手动授权;可为 nil(未装配则 openai 走不通)
 	webhook        ProviderWebhookNotifier // 可为 nil（未配置时不通知）
 	now            func() time.Time
 }
@@ -166,9 +177,10 @@ func NewProviderConnectCompletionService(
 	accounts ProviderConnectAccountRepository,
 	reauthAccounts connectReauthAccountUpdater,
 	oauth *OAuthService,
+	openaiOAuth *OpenAIOAuthService,
 	webhook ProviderWebhookNotifier,
 ) *ProviderConnectCompletionService {
-	return &ProviderConnectCompletionService{
+	svc := &ProviderConnectCompletionService{
 		sessions:       sessions,
 		accounts:       accounts,
 		reauthAccounts: reauthAccounts,
@@ -176,6 +188,11 @@ func NewProviderConnectCompletionService(
 		webhook:        webhook,
 		now:            time.Now,
 	}
+	// 只在非 nil 时赋值,避免 typed-nil 接口(*OpenAIOAuthService(nil) != interface nil)。
+	if openaiOAuth != nil {
+		svc.openaiOAuth = openaiOAuth
+	}
+	return svc
 }
 
 // CompleteAuthorization 完成一个 pending 会话：换 token → 建账号 →
@@ -245,29 +262,62 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 		return nil, ErrConnectInvalidProviderType
 	}
 
-	tokenInfo, err := s.oauth.ExchangeCode(ctx, &ExchangeCodeInput{
-		SessionID: *session.OAuthSessionID,
-		Code:      strings.TrimSpace(input.Code),
-		ProxyID:   session.ProxyID,
-	})
-	if err != nil {
-		// OAuth 失败：会话置 failed，不保存任何 token
-		_ = s.sessions.MarkFailed(ctx, session.ID)
-		return nil, err
-	}
-
-	// Reauth 分支（Phase 21G）：pending 会话预填了 sub2api_account_id → 这是
-	// 对既有账号的重授权。更新其凭证并恢复 active/schedulable，不新建账号、
-	// 不做容量检查（账号本来就占着自己的 proxy 名额）。
-	if session.Sub2apiAccountID != nil {
-		return s.completeReauthorization(ctx, session, tokenInfo)
+	// 按平台换 token（#95）：claude 用 OAuthService(OOB code);openai 用
+	// OpenAIOAuthService(session_id + code + state,state 由前端从 auth_url 解析回传)。
+	// 产出规范化的 credentials/email/plan 供后续建号；claude reauth 分支原样保留,
+	// openai 目前只支持新建号。
+	var credentials map[string]any
+	var email, plan string
+	switch platform {
+	case PlatformAnthropic:
+		tokenInfo, xerr := s.oauth.ExchangeCode(ctx, &ExchangeCodeInput{
+			SessionID: *session.OAuthSessionID,
+			Code:      strings.TrimSpace(input.Code),
+			ProxyID:   session.ProxyID,
+		})
+		if xerr != nil {
+			_ = s.sessions.MarkFailed(ctx, session.ID)
+			return nil, xerr
+		}
+		// Reauth 分支（Phase 21G）：pending 会话预填了 sub2api_account_id → 对既有
+		// 账号重授权,更新凭证并恢复 active/schedulable,不新建账号、不做容量检查。
+		if session.Sub2apiAccountID != nil {
+			return s.completeReauthorization(ctx, session, tokenInfo)
+		}
+		credentials = tokenInfoToCredentials(tokenInfo)
+		email = tokenInfo.EmailAddress
+		plan = tokenInfo.RateLimitTier
+	case PlatformOpenAI:
+		if s.openaiOAuth == nil {
+			return nil, ErrConnectInvalidProviderType
+		}
+		// openai reauth 暂不支持(claude 优先);预填了账号 id 直接拒并置 failed。
+		if session.Sub2apiAccountID != nil {
+			_ = s.sessions.MarkFailed(ctx, session.ID)
+			return nil, ErrConnectSessionNotAuthorizable
+		}
+		oaTok, xerr := s.openaiOAuth.ExchangeCode(ctx, &OpenAIExchangeCodeInput{
+			SessionID: *session.OAuthSessionID,
+			Code:      strings.TrimSpace(input.Code),
+			State:     strings.TrimSpace(input.State),
+			ProxyID:   session.ProxyID,
+		})
+		if xerr != nil {
+			_ = s.sessions.MarkFailed(ctx, session.ID)
+			return nil, xerr
+		}
+		credentials = s.openaiOAuth.BuildAccountCredentials(oaTok)
+		email = oaTok.Email
+		plan = oaTok.PlanType
+	default:
+		return nil, ErrConnectInvalidProviderType
 	}
 
 	// Step 4: 复用账号创建仓储建 type=oauth 账号（带归属引用 + proxy 绑定）
 	accountID, err := s.accounts.CreateConnectedAccount(ctx, CreateConnectedAccountInput{
 		Name:                      session.ExternalProviderAccountID,
 		Platform:                  platform,
-		Credentials:               tokenInfoToCredentials(tokenInfo),
+		Credentials:               credentials,
 		ProxyID:                   session.ProxyID,
 		ExternalProviderAccountID: session.ExternalProviderAccountID,
 		Region:                    session.Region,
@@ -317,8 +367,8 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 			ProviderType:              strings.ToLower(session.ProviderType),
 			Platform:                  platform,
 			Region:                    derefString(session.Region),
-			Email:                     tokenInfo.EmailAddress,
-			Plan:                      tokenInfo.RateLimitTier,
+			Email:                     email,
+			Plan:                      plan,
 		})
 	}
 
@@ -326,9 +376,9 @@ func (s *ProviderConnectCompletionService) CompleteAuthorization(
 		Status:                    "completed",
 		AccountID:                 accountID,
 		ExternalProviderAccountID: session.ExternalProviderAccountID,
-		Email:                     tokenInfo.EmailAddress,
+		Email:                     email,
 		Region:                    derefString(session.Region),
-		Plan:                      tokenInfo.RateLimitTier,
+		Plan:                      plan,
 	}, nil
 }
 

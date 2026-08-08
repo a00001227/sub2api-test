@@ -73,6 +73,12 @@ type connectOAuthURLGenerator interface {
 	GenerateAuthURL(ctx context.Context, proxyID *int64) (*GenerateAuthURLResult, error)
 }
 
+// connectOpenAIURLGenerator 是 openai 手动授权(#95)对 OpenAIOAuthService 的最小依赖面。
+// 比 claude 多 redirectURI + platform 入参(redirectURI 空→默认 localhost:1455 回调)。
+type connectOpenAIURLGenerator interface {
+	GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string) (*OpenAIAuthURLResult, error)
+}
+
 // CreateOnboardingSessionInput Portal 发起的接入请求。
 type CreateOnboardingSessionInput struct {
 	ExternalProviderAccountID string
@@ -91,10 +97,11 @@ type CreateOnboardingSessionResult struct {
 
 // ProviderConnectService 编排渠道商接入会话的创建。
 type ProviderConnectService struct {
-	sessions  ProviderConnectSessionRepository
-	allocator *ProxyAllocator
-	oauth     connectOAuthURLGenerator
-	now       func() time.Time // 可注入时钟，便于测试
+	sessions    ProviderConnectSessionRepository
+	allocator   *ProxyAllocator
+	oauth       connectOAuthURLGenerator
+	openaiOAuth connectOpenAIURLGenerator // #95: openai 手动授权;nil 则 openai 走不通
+	now         func() time.Time          // 可注入时钟，便于测试
 }
 
 // NewProviderConnectService creates the service.
@@ -102,13 +109,18 @@ func NewProviderConnectService(
 	sessions ProviderConnectSessionRepository,
 	allocator *ProxyAllocator,
 	oauth *OAuthService,
+	openaiOAuth *OpenAIOAuthService,
 ) *ProviderConnectService {
-	return &ProviderConnectService{
+	svc := &ProviderConnectService{
 		sessions:  sessions,
 		allocator: allocator,
 		oauth:     oauth,
 		now:       time.Now,
 	}
+	if openaiOAuth != nil { // 避免 typed-nil 接口
+		svc.openaiOAuth = openaiOAuth
+	}
+	return svc
 }
 
 // CreateOnboardingSession 创建一个渠道商接入会话：
@@ -147,21 +159,35 @@ func (s *ProviderConnectService) CreateOnboardingSession(
 		proxyID = &pid
 	}
 
-	// 3) 复用现有 OAuthService 生成授权 URL（零改动调用）。
-	//    先于会话落库：GenerateAuthURL 在 OAuth 内存 SessionStore 里创建
-	//    了带 state/codeVerifier/proxyURL 的会话，其 SessionID 是后续
-	//    ExchangeCode 的必需入参（21E-6C-2B-1 的遗漏修复：必须保存它）。
+	// 3) 生成授权 URL（按平台）。OAuth service 在其内存 SessionStore 里创建带
+	//    state/codeVerifier/proxyURL 的会话,SessionID 是后续 ExchangeCode 的必需入参。
+	//    - claude: OAuthService.GenerateAuthURL(proxyID)(OOB)。
+	//    - openai/codex(#95): OpenAIOAuthService.GenerateAuthURL(proxyID,"","openai"),
+	//      redirectURI 空→默认 localhost:1455 回调;auth_url 内含 state(前端解析回传)。
 	//    OAuth 失败则整体失败、不留孤儿会话。proxyID 为 nil = 直连。
-	authRes, err := s.oauth.GenerateAuthURL(ctx, proxyID)
-	if err != nil {
-		return nil, err
+	var authURL, oauthSessionID string
+	switch platform {
+	case PlatformOpenAI:
+		if s.openaiOAuth == nil {
+			return nil, ErrConnectInvalidProviderType
+		}
+		res, gerr := s.openaiOAuth.GenerateAuthURL(ctx, proxyID, "", "openai")
+		if gerr != nil {
+			return nil, gerr
+		}
+		authURL, oauthSessionID = res.AuthURL, res.SessionID
+	default: // claude(anthropic)
+		res, gerr := s.oauth.GenerateAuthURL(ctx, proxyID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		authURL, oauthSessionID = res.AuthURL, res.SessionID
 	}
 
 	// 4) 落库 pending 会话（会话是完成流程的事实锚点），保存
 	//    oauth_session_id 以便 completion 阶段调用 ExchangeCode。
 	region := strings.ToUpper(strings.TrimSpace(input.Region))
 	expiresAt := s.now().Add(providerConnectSessionTTL)
-	oauthSessionID := authRes.SessionID
 	session, err := s.sessions.Create(ctx, &ProviderConnectSession{
 		ExternalProviderAccountID: accountRef,
 		ProviderType:              providerType,
@@ -178,7 +204,7 @@ func (s *ProviderConnectService) CreateOnboardingSession(
 
 	return &CreateOnboardingSessionResult{
 		OnboardingSessionID: formatConnectSessionID(session.ID),
-		OnboardingURL:       authRes.AuthURL,
+		OnboardingURL:       authURL,
 		ExpiresAt:           expiresAt,
 	}, nil
 }

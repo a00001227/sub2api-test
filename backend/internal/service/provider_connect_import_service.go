@@ -109,12 +109,15 @@ func (s *ProviderConnectImportService) ImportCredential(
 		return nil, ErrImportInvalidRequest
 	}
 	providerType := strings.ToLower(strings.TrimSpace(in.ProviderType))
-	// 本阶段仅 claude。
-	if providerType != "claude" {
-		return nil, ErrImportProviderTypeUnsupported
-	}
 	platform, ok := providerTypeToPlatform[providerType]
 	if !ok {
+		return nil, ErrImportProviderTypeUnsupported
+	}
+	// 支持:claude(sessionKey → CookieAuth 网络交换)、codex/openai(access_token
+	// JWT / codex session JSON 纯解析,不走交换)。gemini 暂不支持导入。
+	switch providerType {
+	case "claude", "codex", "openai":
+	default:
 		return nil, ErrImportProviderTypeUnsupported
 	}
 	if strings.TrimSpace(in.Credential) == "" || len(in.Credential) > providerImportMaxCredentialLen {
@@ -143,25 +146,44 @@ func (s *ProviderConnectImportService) ImportCredential(
 		proxyID = &pid
 	}
 
-	// Step 4: 用选中的 proxy 执行 credential 验证/换 token（验证出口 = 后续
-	// 使用出口）。CookieAuth: sessionKey → org → authcode → OAuth token。
-	// 失败一律转成 INVALID_CREDENTIAL —— 底层 error 可能含 sessionKey 片段，
-	// 绝不外传。
-	tokenInfo, err := s.cookie.CookieAuth(ctx, &CookieAuthInput{
-		SessionKey: in.Credential,
-		ProxyID:    proxyID,
-		Scope:      "full",
-	})
-	if err != nil || tokenInfo == nil || strings.TrimSpace(tokenInfo.AccessToken) == "" {
-		return nil, ErrImportInvalidCredential
+	// Step 4: 按平台产出标准 OAuth 凭据。失败一律转 INVALID_CREDENTIAL —— 底层
+	// error 可能含凭据片段,绝不外传。
+	//   - claude:  sessionKey → CookieAuth 网络交换(验证出口 = 后续使用出口)。
+	//   - codex/openai: 纯解析 access_token(JWT)/ codex session JSON,不走交换。
+	var credentials map[string]any
+	var email, plan string
+	switch platform {
+	case PlatformAnthropic:
+		tokenInfo, cerr := s.cookie.CookieAuth(ctx, &CookieAuthInput{
+			SessionKey: in.Credential,
+			ProxyID:    proxyID,
+			Scope:      "full",
+		})
+		if cerr != nil || tokenInfo == nil || strings.TrimSpace(tokenInfo.AccessToken) == "" {
+			return nil, ErrImportInvalidCredential
+		}
+		credentials = tokenInfoToCredentials(tokenInfo)
+		email = tokenInfo.EmailAddress
+		plan = tokenInfo.RateLimitTier
+	case PlatformOpenAI:
+		parsed, perr := ParseCodexCredentialString(in.Credential)
+		if perr != nil || parsed == nil {
+			return nil, ErrImportInvalidCredential
+		}
+		credentials = parsed.Credentials
+		email = parsed.Email
+		plan = parsed.PlanType
+	default:
+		return nil, ErrImportProviderTypeUnsupported
 	}
 
-	// Step 5: 建 type=oauth 账号（复用完成流程同一仓储；credentials 为换取
-	// 后的标准 OAuth token 结构，Gateway/token refresh 直接识别）。
+	// Step 5: 建 type=oauth 账号(复用完成流程同一仓储;credentials 为标准 OAuth
+	// token 结构,Gateway/token refresh 直接识别)。A1 平台默认(anthropic+openai)
+	// 在此叠加。
 	accountID, err := s.accounts.CreateConnectedAccount(ctx, CreateConnectedAccountInput{
 		Name:                      accountRef,
 		Platform:                  platform,
-		Credentials:               tokenInfoToCredentials(tokenInfo),
+		Credentials:               credentials,
 		ProxyID:                   proxyID,
 		ExternalProviderAccountID: accountRef,
 		Region:                    &region,
@@ -185,8 +207,8 @@ func (s *ProviderConnectImportService) ImportCredential(
 			Platform:                  platform,
 			Region:                    region,
 			EventID:                   providerwebhook.ImportActivatedEventID(accountRef),
-			Email:                     tokenInfo.EmailAddress,
-			Plan:                      tokenInfo.RateLimitTier,
+			Email:                     email,
+			Plan:                      plan,
 		})
 	}
 

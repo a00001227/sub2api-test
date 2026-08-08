@@ -1,6 +1,7 @@
 package handler
 
 import (
+	neturl "net/url"
 	"strconv"
 	"strings"
 
@@ -377,7 +378,12 @@ func (h *ProviderConnectHandler) CreateOnboardingSession(c *gin.Context) {
 
 type completeAuthorizationRequest struct {
 	SessionID string `json:"session_id" binding:"required"`
-	Code      string `json:"code" binding:"required"`
+	// Code 可以是裸 code,也可以是整条回调 URL(http://localhost:1455/...?code=X&state=Y)
+	// —— 服务端"系统自动识别"抽取 code(见 extractConnectCodeState)。
+	Code string `json:"code" binding:"required"`
+	// State(#95 openai 手动授权): OpenAI PKCE state,前端从 auth_url 解析后回传;
+	// 若 Code 粘的是整条回调 URL 且未单独给 state,则从 URL 里抽。claude 忽略。
+	State string `json:"state"`
 }
 
 // CompleteAuthorization handles
@@ -393,15 +399,36 @@ func (h *ProviderConnectHandler) CompleteAuthorization(c *gin.Context) {
 		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_SESSION_ID", "invalid session_id"))
 		return
 	}
+	code, state := extractConnectCodeState(req.Code, req.State)
 	result, err := h.completion.CompleteAuthorization(c.Request.Context(), service.CompleteAuthorizationInput{
 		SessionID: sessionID,
-		Code:      req.Code,
+		Code:      code,
+		State:     state,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, result)
+}
+
+// extractConnectCodeState 从"裸 code / 整条回调 URL"里抽出 code(和 state)。
+// 比照 sub2api admin 前端 OAuthAuthorizationFlow.vue 的自动识别:粘 URL 则解析
+// ?code=&state=,粘裸 code 则原样;显式 state 优先,URL 里的 state 兜底。
+func extractConnectCodeState(rawCode, rawState string) (code, state string) {
+	code = strings.TrimSpace(rawCode)
+	state = strings.TrimSpace(rawState)
+	if strings.Contains(code, "?") && strings.Contains(code, "code=") {
+		if u, err := neturl.Parse(code); err == nil {
+			if c := u.Query().Get("code"); c != "" {
+				code = c
+			}
+			if state == "" {
+				state = u.Query().Get("state")
+			}
+		}
+	}
+	return code, state
 }
 
 // importCredentialsRequest 单条 credential 导入请求（Phase 21E-6E-4）。
