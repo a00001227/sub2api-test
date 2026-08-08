@@ -379,7 +379,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
-		if resp.StatusCode == http.StatusForbidden {
+		// 手动测试路径:403(封禁)或 401(凭据吊销/失效)都标记 error 状态
+		// (仅"测试连接"路径,不影响网关 serving 对瞬时 401 的容忍策略)。
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
@@ -449,7 +451,9 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusForbidden {
+		// 手动测试路径:403(封禁)或 401(凭据吊销/失效)都标记 error 状态
+		// (仅"测试连接"路径,不影响网关 serving 对瞬时 401 的容忍策略)。
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
