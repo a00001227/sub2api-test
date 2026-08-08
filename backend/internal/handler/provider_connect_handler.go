@@ -267,6 +267,35 @@ func (h *ProviderConnectHandler) CreateReauthSession(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// reauthSessionKeyRequest sessionKey 就地重认证请求。
+type reauthSessionKeyRequest struct {
+	SessionKey string `json:"session_key" binding:"required"`
+}
+
+// ReauthSessionKey handles
+// POST /internal/provider-accounts/:external_ref/reauth-sessionkey
+//
+// sessionKey 就地重认证既有 claude 账号:CookieAuth 换新 token → 更新凭证 + 恢复
+// active/schedulable。容器/邮箱/proxy 不变。无 OAuth 会话(直接换)。
+func (h *ProviderConnectHandler) ReauthSessionKey(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req reauthSessionKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	result, err := h.reauth.ReauthWithSessionKey(c.Request.Context(), externalRef, req.SessionKey)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 // pacingModeRequest 设置调度档位请求（Phase 21H）。
 type pacingModeRequest struct {
 	Mode string `json:"mode" binding:"required"`

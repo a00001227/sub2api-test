@@ -30,17 +30,19 @@ type reauthAccountLocator interface {
 	FindAccountIDByExternalRef(ctx context.Context, externalRef string) (int64, bool, error)
 }
 
-// reauthAccountReader 读取账号（取已绑定的 proxy id）。
+// reauthAccountReader 读取账号（取已绑定的 proxy id）+ 就地更新（sessionKey 重认证）。
 type reauthAccountReader interface {
 	GetByID(ctx context.Context, id int64) (*Account, error)
+	Update(ctx context.Context, account *Account) error
 }
 
-// ProviderConnectReauthService 创建重授权会话。
+// ProviderConnectReauthService 创建重授权会话 + sessionKey 就地重认证。
 type ProviderConnectReauthService struct {
 	sessions ProviderConnectSessionRepository
 	locator  reauthAccountLocator
 	accounts reauthAccountReader
 	oauth    connectOAuthURLGenerator
+	cookie   connectCookieAuthenticator // sessionKey → token 交换(claude);= 同一个 *OAuthService
 	now      func() time.Time
 }
 
@@ -56,6 +58,7 @@ func NewProviderConnectReauthService(
 		locator:  locator,
 		accounts: accounts,
 		oauth:    oauth,
+		cookie:   oauth, // *OAuthService 同时实现 GenerateAuthURL 与 CookieAuth
 		now:      time.Now,
 	}
 }
@@ -126,5 +129,60 @@ func (s *ProviderConnectReauthService) CreateReauthSession(
 		OnboardingSessionID: formatConnectSessionID(session.ID),
 		OnboardingURL:       authRes.AuthURL,
 		ExpiresAt:           expiresAt,
+	}, nil
+}
+
+// ReauthWithSessionKey sessionKey 就地重认证既有 claude 账号:用账号已绑定的 proxy
+// 执行 CookieAuth 换新 token → 更新 credentials + 恢复 active/schedulable/清错误。
+// 容器/邮箱/proxy 不变。仅 claude(sessionKey 是 claude 概念)。无 OAuth 会话(直接换)。
+func (s *ProviderConnectReauthService) ReauthWithSessionKey(
+	ctx context.Context, externalRef, sessionKey string,
+) (*CompleteAuthorizationResult, error) {
+	accountRef := strings.TrimSpace(externalRef)
+	if accountRef == "" || !strings.HasPrefix(accountRef, "pa_") || strings.TrimSpace(sessionKey) == "" {
+		return nil, ErrConnectInvalidAccountRef
+	}
+	id, found, err := s.locator.FindAccountIDByExternalRef(ctx, accountRef)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrReauthAccountNotFound
+	}
+	acc, err := s.accounts.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil {
+		return nil, ErrReauthAccountNotFound
+	}
+	if acc.Platform != PlatformAnthropic {
+		return nil, ErrConnectInvalidProviderType // sessionKey 仅 claude
+	}
+
+	// 用账号已绑定的 proxy 换 token(同一出口环境;失败一律 INVALID_CREDENTIAL,不外传)。
+	tokenInfo, err := s.cookie.CookieAuth(ctx, &CookieAuthInput{
+		SessionKey: strings.TrimSpace(sessionKey),
+		ProxyID:    acc.ProxyID,
+		Scope:      "full",
+	})
+	if err != nil || tokenInfo == nil || strings.TrimSpace(tokenInfo.AccessToken) == "" {
+		return nil, ErrImportInvalidCredential
+	}
+
+	acc.Credentials = tokenInfoToCredentials(tokenInfo)
+	acc.Status = StatusActive
+	acc.ErrorMessage = ""
+	acc.Schedulable = true
+	if err := s.accounts.Update(ctx, acc); err != nil {
+		return nil, err
+	}
+
+	return &CompleteAuthorizationResult{
+		Status:                    "completed",
+		AccountID:                 acc.ID,
+		ExternalProviderAccountID: accountRef,
+		Email:                     tokenInfo.EmailAddress,
+		Plan:                      tokenInfo.RateLimitTier,
 	}, nil
 }
