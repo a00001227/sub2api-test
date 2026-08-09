@@ -28,7 +28,7 @@ func newEdgeForwardEngine(cfg config.EdgeForwardConfig, groupSlug string) *gin.E
 			}
 			c.Next()
 		},
-		EdgeForward(cfg),
+		EdgeForward(cfg, nil),
 		func(c *gin.Context) {
 			c.Header("X-Handled-By", "local")
 			c.String(http.StatusOK, "local-ok")
@@ -120,7 +120,7 @@ func TestEdgeForward_WebSocketForwards(t *testing.T) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
 			c.Next()
 		},
-		EdgeForward(cfg),
+		EdgeForward(cfg, nil),
 		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
 	)
 	central := httptest.NewServer(e)
@@ -175,7 +175,7 @@ func TestEdgeForward_SSEStreamsChunked(t *testing.T) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
 			c.Next()
 		},
-		EdgeForward(cfg),
+		EdgeForward(cfg, nil),
 		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
 	)
 	central := httptest.NewServer(e)

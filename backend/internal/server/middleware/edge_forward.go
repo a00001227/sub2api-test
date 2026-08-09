@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -12,9 +13,14 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )
+
+// EdgeConsumerBiller 由中央在转发成功、从 cell 响应剥出权威用量后调用,给消费者计费
+// (#86b)。nil = 不计费(默认关时无意义)。实现见 handler.GatewayHandler。
+type EdgeConsumerBiller func(c *gin.Context, env service.EdgeUsageEnvelope)
 
 // EdgeForward 是中央网关“执行→转发”中间件。
 //
@@ -29,7 +35,7 @@ import (
 //
 // 用手写流式代理而非 httputil.ReverseProxy:后者会触碰 gin 的 CloseNotify(在某些
 // ResponseWriter / h2c 下会 panic),且手写更利于逐块 flush SSE。
-func EdgeForward(cfg config.EdgeForwardConfig) gin.HandlerFunc {
+func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller) gin.HandlerFunc {
 	noop := func(c *gin.Context) { c.Next() }
 	if !cfg.Enabled || len(cfg.Groups) == 0 {
 		return noop
@@ -69,12 +75,12 @@ func EdgeForward(cfg config.EdgeForwardConfig) gin.HandlerFunc {
 			groupSet[s] = struct{}{}
 		}
 	}
-	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key), rand.Float64)
+	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key), rand.Float64, biller)
 }
 
 // newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
 // 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
-func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string, rng func() float64) gin.HandlerFunc {
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string, rng func() float64, biller EdgeConsumerBiller) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	client := &http.Client{Transport: http.DefaultTransport}
 	// 会话→cell 亲和(P3-3c),处理函数生命周期内共享。
@@ -173,7 +179,11 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			if stickyKey != "" {
 				affinity.put(stickyKey, target)
 			}
-			streamCellResponse(c, resp)
+			env := streamCellResponse(c, resp)
+			// #86b:cell 带回权威用量 → 给消费者计费(占位号,不重复发 provider 用量)。
+			if env != nil && biller != nil {
+				biller(c, *env)
+			}
 			c.Abort()
 			return
 		}
@@ -184,12 +194,17 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 
 // streamCellResponse 回写 cell 响应头+状态码,再逐块流式回传(SSE 每块 flush)。
 // 一旦调用即已选定某个 cell,不再失败转移(见 EdgeForward 循环内注释)。
-func streamCellResponse(c *gin.Context, resp *http.Response) {
+//
+// #86b:顺带取出 cell 带回的权威用量给中央做消费者计费:
+//   - 非流式:X-Sub2api-Usage 响应头(不透传给客户端);
+//   - 流式:末尾的 `event: sub2api_usage` 事件——**剥掉不透传**,只捕获它的 data。
+// 返回捕获到的 envelope(没有则 nil)。
+func streamCellResponse(c *gin.Context, resp *http.Response) *service.EdgeUsageEnvelope {
 	defer resp.Body.Close()
 	h := c.Writer.Header()
 	for k, vv := range resp.Header {
-		if isHopByHopHeader(k) {
-			continue
+		if isHopByHopHeader(k) || strings.EqualFold(k, service.EdgeUsageHeader) {
+			continue // 用量头不透传给消费者客户端
 		}
 		for _, v := range vv {
 			h.Add(k, v)
@@ -197,21 +212,70 @@ func streamCellResponse(c *gin.Context, resp *http.Response) {
 	}
 	c.Writer.WriteHeader(resp.StatusCode)
 	flusher, _ := c.Writer.(http.Flusher)
-	buf := make([]byte, 32*1024)
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, werr := c.Writer.Write(buf[:n]); werr != nil {
-				break // 客户端断开
+
+	var captured *service.EdgeUsageEnvelope
+	// 非流式:用量在响应头(cell 后续会加;body 原样拷)。
+	if hv := resp.Header.Get(service.EdgeUsageHeader); hv != "" {
+		if env, err := service.ParseEdgeUsageEnvelope([]byte(hv)); err == nil {
+			captured = &env
+		}
+	}
+
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	if !strings.Contains(ct, "text/event-stream") {
+		// 非 SSE:原样拷贝。
+		buf := make([]byte, 32*1024)
+		for {
+			n, rerr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, werr := c.Writer.Write(buf[:n]); werr != nil {
+					break
+				}
+				if flusher != nil {
+					flusher.Flush()
+				}
 			}
-			if flusher != nil {
-				flusher.Flush()
+			if rerr != nil {
+				break
+			}
+		}
+		return captured
+	}
+
+	// SSE:逐行转发;识别并剥掉 sub2api_usage 事件、捕获其 data。ReadString 对任意长
+	// 度的 data 行安全(bufio.Scanner 有 token 上限)。
+	reader := bufio.NewReader(resp.Body)
+	inSentinel := false
+	for {
+		line, rerr := reader.ReadString('\n')
+		if len(line) > 0 {
+			trimmed := strings.TrimRight(line, "\r\n")
+			switch {
+			case trimmed == "event: "+service.EdgeUsageEventName:
+				inSentinel = true // 该事件所有行都丢弃,不透传
+			case inSentinel:
+				if strings.HasPrefix(trimmed, "data: ") {
+					if env, err := service.ParseEdgeUsageEnvelope([]byte(strings.TrimPrefix(trimmed, "data: "))); err == nil {
+						captured = &env
+					}
+				}
+				if trimmed == "" {
+					inSentinel = false // 空行 = 事件结束
+				}
+			default:
+				if _, werr := c.Writer.Write([]byte(line)); werr != nil {
+					return captured // 客户端断开
+				}
+				if flusher != nil {
+					flusher.Flush()
+				}
 			}
 		}
 		if rerr != nil {
 			break
 		}
 	}
+	return captured
 }
 
 // proxyWebSocket 把客户端 WS 双向代理到 cell 的 WS 端点。

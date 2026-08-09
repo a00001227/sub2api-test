@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -651,6 +652,12 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+
+	// #86b 中央「执行→转发」消费者计费:占位 account(懒建 + 缓存)。转发请求在中央
+	// 没有本地 account,用它满足 usage_log 的 account FK;它 external ref 为空 → provider
+	// outbox 天然跳过(不重复发),schedulable=false → 永不被选号。
+	forwardPlaceholderMu  sync.Mutex
+	forwardPlaceholderAcc *Account
 }
 
 // NewGatewayService creates a new GatewayService

@@ -32,7 +32,8 @@ func RegisterGatewayRoutes(
 	requireGroupGoogle := middleware.RequireGroupAssignment(settingService, middleware.GoogleErrorWriter)
 
 	// 中央“执行→转发”中间件建一次,复用到 /v1 组 + 无前缀别名 + codexDirect（默认关 = no-op）。
-	edgeForward := middleware.EdgeForward(cfg.EdgeForward)
+	// #86b:转发成功后用 cell 带回的权威用量给消费者计费(占位号,不重复发 provider 用量)。
+	edgeForward := middleware.EdgeForward(cfg.EdgeForward, h.Gateway.RecordForwardedConsumerUsage)
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")

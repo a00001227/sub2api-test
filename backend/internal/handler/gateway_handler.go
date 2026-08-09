@@ -2154,6 +2154,35 @@ func (h *GatewayHandler) emitEdgeUsageSentinel(c *gin.Context, result *service.F
 	}
 }
 
+// RecordForwardedConsumerUsage(#86b):中央 EdgeForward 从 cell 响应剥出权威 usage 后调用,
+// 用 context 里的消费者身份 + 占位号给消费者计费(复用现成 RecordUsage,零 money 代码改动)。
+// best-effort:失败只记日志,不影响已回传给客户端的响应。用 detached ctx,请求结束也能跑完。
+func (h *GatewayHandler) RecordForwardedConsumerUsage(c *gin.Context, env service.EdgeUsageEnvelope) {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.User == nil {
+		return
+	}
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	in := &service.ForwardedConsumerUsageInput{
+		Env:              env,
+		APIKey:           apiKey,
+		User:             apiKey.User,
+		Subscription:     subscription,
+		QuotaPlatform:    service.QuotaPlatform(c.Request.Context(), apiKey),
+		InboundEndpoint:  GetInboundEndpoint(c),
+		UpstreamEndpoint: GetUpstreamEndpoint(c, service.PlatformFromAPIKey(apiKey)),
+		UserAgent:        c.GetHeader("User-Agent"),
+		IPAddress:        ip.GetClientIP(c),
+		APIKeyService:    h.apiKeyService,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := h.gatewayService.RecordForwardedConsumerUsage(ctx, in); err != nil {
+		logger.L().With(zap.String("component", "handler.gateway.edge_forward")).
+			Warn("edge_forward.consumer_billing_failed", zap.Error(err))
+	}
+}
+
 func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
 	if task == nil {
 		return
