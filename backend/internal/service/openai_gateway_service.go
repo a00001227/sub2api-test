@@ -5309,6 +5309,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
+	s.writeEdgeUsageHeaderOpenAI(c, originalModel, usage)
 	c.Data(resp.StatusCode, contentType, body)
 
 	return &openaiNonStreamingResult{
@@ -5323,6 +5324,19 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 func isEventStreamResponse(header http.Header) bool {
 	contentType := strings.ToLower(header.Get("Content-Type"))
 	return strings.Contains(contentType, "text/event-stream")
+}
+
+// writeEdgeUsageHeaderOpenAI(#99):edge-trusted 非流式 OpenAI 响应,把 cell 权威用量放
+// X-Sub2api-Usage 响应头带回中央(中央剥掉、不透传客户端;流式走末尾 SSE 事件)。
+// usage 在写 body 前已知,可用响应头。best-effort。
+func (s *OpenAIGatewayService) writeEdgeUsageHeaderOpenAI(c *gin.Context, model string, usage *OpenAIUsage) {
+	if usage == nil || c == nil || !c.GetBool("edge_trusted") {
+		return
+	}
+	env := BuildEdgeUsageEnvelopeOpenAI(&OpenAIForwardResult{Model: model, Usage: *usage})
+	if hv, err := env.HeaderValue(); err == nil {
+		c.Header(EdgeUsageHeader, hv)
+	}
 }
 
 func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
@@ -5375,6 +5389,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			contentType = "text/event-stream"
 		}
 	}
+	s.writeEdgeUsageHeaderOpenAI(c, originalModel, usage)
 	c.Data(resp.StatusCode, contentType, body)
 
 	return &openaiNonStreamingResult{

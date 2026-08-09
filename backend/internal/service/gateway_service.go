@@ -8902,6 +8902,15 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 
 	body = reverseToolNamesIfPresent(c, body)
 
+	// #99:edge-trusted 非流式请求,把 cell 权威用量放响应头带回中央(中央剥掉、不透传
+	// 给消费者客户端)。usage 在写 body 前已知,可用响应头(流式则走末尾 SSE 事件)。
+	if c.GetBool("edge_trusted") {
+		env := EdgeUsageEnvelope{Platform: PlatformAnthropic, Model: originalModel, Usage: response.Usage}
+		if hv, herr := env.HeaderValue(); herr == nil {
+			c.Header(EdgeUsageHeader, hv)
+		}
+	}
+
 	// 写入响应
 	c.Data(resp.StatusCode, contentType, body)
 
