@@ -130,14 +130,16 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 2. Re-check billing
-	if err := h.billingCacheService.CheckBillingEligibility(requestCtx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(requestCtx, apiKey)); err != nil {
-		reqLog.Info("gateway.responses.billing_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
+	if !middleware2.IsEdgeTrusted(c) {
+		if err := h.billingCacheService.CheckBillingEligibility(requestCtx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(requestCtx, apiKey)); err != nil {
+			reqLog.Info("gateway.responses.billing_check_failed", zap.Error(err))
+			status, code, message, retryAfter := billingErrorDetails(err)
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			h.responsesErrorResponse(c, status, code, message)
+			return
 		}
-		h.responsesErrorResponse(c, status, code, message)
-		return
 	}
 
 	// Parse request for session hash
@@ -259,21 +261,23 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		edgeTrusted := middleware2.IsEdgeTrusted(c)
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-				Result:             result,
-				QuotaPlatform:      quotaPlatform,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.apiKeyService,
-				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+				Result:              result,
+				QuotaPlatform:       quotaPlatform,
+				APIKey:              apiKey,
+				User:                apiKey.User,
+				Account:             account,
+				Subscription:        subscription,
+				InboundEndpoint:     inboundEndpoint,
+				UpstreamEndpoint:    upstreamEndpoint,
+				UserAgent:           userAgent,
+				IPAddress:           clientIP,
+				RequestPayloadHash:  requestPayloadHash,
+				APIKeyService:       h.apiKeyService,
+				ChannelUsageFields:  channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+				SkipConsumerBilling: edgeTrusted,
 			}); err != nil {
 				reqLog.Error("gateway.responses.record_usage_failed",
 					zap.Int64("account_id", account.ID),

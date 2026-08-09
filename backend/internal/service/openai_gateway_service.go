@@ -5838,6 +5838,9 @@ type OpenAIRecordUsageInput struct {
 	APIKeyService      APIKeyQuotaUpdater
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
+	// SkipConsumerBilling(方案 B / #86a):EDGE cell 收到中央可信转发时置真 → 跳过消费者
+	// 计费(那是中央的职责),仍发 provider 用量(按账号)。与 claude 的 RecordUsageInput 一致。
+	SkipConsumerBilling bool
 	ChannelUsageFields
 }
 
@@ -6122,6 +6125,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
 			Platform:              PlatformFromAPIKey(apiKey),
+			SkipConsumerBilling:   input.SkipConsumerBilling,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

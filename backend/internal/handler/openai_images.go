@@ -124,14 +124,16 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("openai.images.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
+	if !middleware2.IsEdgeTrusted(c) {
+		if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+			reqLog.Info("openai.images.billing_eligibility_check_failed", zap.Error(err))
+			status, code, message, retryAfter := billingErrorDetails(err)
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			h.handleStreamingAwareError(c, status, code, message, streamStarted)
+			return
 		}
-		h.handleStreamingAwareError(c, status, code, message, streamStarted)
-		return
 	}
 
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
@@ -332,20 +334,22 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if result != nil {
 			upstreamModel = result.UpstreamModel
 		}
+		edgeTrusted := middleware2.IsEdgeTrusted(c)
 		h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.apiKeyService,
-				ChannelUsageFields: channelMapping.ToUsageFields(requestModel, upstreamModel),
+				Result:              result,
+				APIKey:              apiKey,
+				User:                apiKey.User,
+				Account:             account,
+				Subscription:        subscription,
+				InboundEndpoint:     inboundEndpoint,
+				UpstreamEndpoint:    upstreamEndpoint,
+				UserAgent:           userAgent,
+				IPAddress:           clientIP,
+				RequestPayloadHash:  requestPayloadHash,
+				APIKeyService:       h.apiKeyService,
+				ChannelUsageFields:  channelMapping.ToUsageFields(requestModel, upstreamModel),
+				SkipConsumerBilling: edgeTrusted,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.images"),
