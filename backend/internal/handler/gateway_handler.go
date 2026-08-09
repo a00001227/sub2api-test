@@ -521,6 +521,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			// 方案 B:在 c 仍有效时取出 edge-trusted,捕获进后台任务(勿在闭包里碰 c)。
 			edgeTrusted := middleware2.IsEdgeTrusted(c)
+			// #86b:edge-trusted 流式请求,在流末尾吐权威用量事件,供中央剥出来给消费者计费。
+			h.emitEdgeUsageSentinel(c, result, edgeTrusted, reqStream)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:              result,
@@ -951,6 +953,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
 			// 方案 B:在 c 仍有效时取出 edge-trusted,捕获进后台任务(勿在闭包里碰 c)。
 			edgeTrusted := middleware2.IsEdgeTrusted(c)
+			// #86b:edge-trusted 流式请求,在流末尾吐权威用量事件,供中央剥出来给消费者计费。
+			h.emitEdgeUsageSentinel(c, result, edgeTrusted, reqStream)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:              result,
@@ -2128,6 +2132,26 @@ func (h *GatewayHandler) maybeLogCompatibilityFallbackMetrics(reqLog *zap.Logger
 		zap.Float64("session_hash_legacy_read_hit_rate", metrics.SessionHashLegacyReadHitRate),
 		zap.Int64("metadata_legacy_fallback_total", metrics.MetadataLegacyFallbackTotal),
 	)
+}
+
+// emitEdgeUsageSentinel(#86b):edge-trusted 流式请求,在客户端流末尾(message_stop 之后)
+// 追加一个 `event: sub2api_usage` 事件,把 cell 权威用量带回中央——中央 EdgeForward 读到后
+// 消费并剥掉、据此给消费者计费(占位 account 方案,不重复发 provider 用量)。
+// 仅流式:非流式追 SSE 会破坏 JSON body(非流式用响应头承载,另做)。best-effort:写失败不影响主流程。
+func (h *GatewayHandler) emitEdgeUsageSentinel(c *gin.Context, result *service.ForwardResult, edgeTrusted, stream bool) {
+	if !edgeTrusted || !stream || result == nil {
+		return
+	}
+	sse, err := service.BuildEdgeUsageEnvelope(result).SSEBytes()
+	if err != nil {
+		return
+	}
+	if _, werr := c.Writer.Write(sse); werr != nil {
+		return
+	}
+	if f, ok := c.Writer.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
