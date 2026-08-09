@@ -64,6 +64,7 @@ func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller) gin.Ha
 		slog.Info("edge_forward: 动态选路启用", "registry", ru, "refresh", interval.String())
 	} else if static != nil {
 		resolver = &staticResolver{target: static}
+		slog.Info("edge_forward: 静态选路启用", "cell_url", static.String(), "groups", cfg.Groups, "has_key", strings.TrimSpace(cfg.Key) != "")
 	} else {
 		slog.Error("edge_forward: 已启用但既无 cell_url 也无 registry_url,转发禁用(no-op)")
 		return noop
@@ -89,13 +90,24 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.Group == nil {
+			slog.Info("edge_forward: 跳过(无 apiKey/分组)", "path", c.Request.URL.Path,
+				"has_apikey", ok && apiKey != nil, "group_nil", apiKey == nil || apiKey.Group == nil)
 			c.Next()
 			return
 		}
 		if _, hit := groupSet[apiKey.Group.Slug]; !hit {
+			slog.Info("edge_forward: 跳过(组 slug 未命中转发列表)", "path", c.Request.URL.Path,
+				"key_group_slug", apiKey.Group.Slug, "forward_groups", func() []string {
+					gs := make([]string, 0, len(groupSet))
+					for g := range groupSet {
+						gs = append(gs, g)
+					}
+					return gs
+				}())
 			c.Next()
 			return
 		}
+		slog.Info("edge_forward: 命中,转发到 cell", "path", c.Request.URL.Path, "key_group_slug", apiKey.Group.Slug)
 
 		// 加权随机选序(P3-3b):按信誉分对存活池加权随机排序,首个 = 加权首选,其余
 		// 顺位作失败转移候选;静态兜底 append 到最后(仅动态池全空/全挂时才会用到)。
