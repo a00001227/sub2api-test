@@ -46,6 +46,36 @@ func TestEdgeUsageEnvelope_SSERoundTrip(t *testing.T) {
 	}
 }
 
+func TestEdgeUsageEnvelope_OpenAIRoundTrip(t *testing.T) {
+	tier := "priority"
+	src := BuildEdgeUsageEnvelopeOpenAI(&OpenAIForwardResult{
+		Model:         "gpt-5-codex",
+		UpstreamModel: "gpt-5-codex-20260101",
+		Stream:        true,
+		ServiceTier:   &tier,
+		Usage: OpenAIUsage{
+			InputTokens:              300,
+			ImageInputTokens:         12,
+			OutputTokens:             40,
+			CacheCreationInputTokens: 3,
+			CacheReadInputTokens:     20,
+			ImageOutputTokens:        7,
+		},
+	})
+	if !src.IsOpenAI() {
+		t.Fatalf("platform must be openai, got %q", src.Platform)
+	}
+	// 还原成 OpenAI result:token 桶 + image_input + service_tier 必须无损。
+	got := src.ToOpenAIForwardResult()
+	if got.Model != "gpt-5-codex" || got.Usage.InputTokens != 300 || got.Usage.ImageInputTokens != 12 ||
+		got.Usage.OutputTokens != 40 || got.Usage.CacheReadInputTokens != 20 || got.Usage.ImageOutputTokens != 7 {
+		t.Errorf("openai result round-trip mismatch: %+v / usage %+v", got, got.Usage)
+	}
+	if got.ServiceTier == nil || *got.ServiceTier != "priority" {
+		t.Errorf("service_tier lost: %v", got.ServiceTier)
+	}
+}
+
 func TestEdgeUsageEnvelope_HeaderRoundTrip(t *testing.T) {
 	src := BuildEdgeUsageEnvelope(&ForwardResult{
 		Model:  "claude-opus-4-8",

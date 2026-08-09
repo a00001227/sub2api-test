@@ -376,6 +376,10 @@ type OpenAIGatewayService struct {
 	codexSnapshotThrottle               *accountWriteThrottle
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
+
+	// #86a-2 中央转发消费者计费用的占位号(懒建 + 缓存;与 claude 侧共用同一 DB 行)。
+	forwardPlaceholderMu  sync.Mutex
+	forwardPlaceholderAcc *Account
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

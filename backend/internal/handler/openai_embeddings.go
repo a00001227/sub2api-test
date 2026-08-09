@@ -217,6 +217,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 		edgeTrusted := middleware2.IsEdgeTrusted(c)
+		h.emitEdgeUsageSentinel(c, result, edgeTrusted, result.Stream)
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:              result,

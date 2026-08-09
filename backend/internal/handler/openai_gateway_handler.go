@@ -503,6 +503,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 		edgeTrusted := middleware2.IsEdgeTrusted(c)
+		h.emitEdgeUsageSentinel(c, result, edgeTrusted, result.Stream)
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:              result,
@@ -911,6 +912,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 		edgeTrusted := middleware2.IsEdgeTrusted(c)
+		h.emitEdgeUsageSentinel(c, result, edgeTrusted, result.Stream)
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:              result,
@@ -1728,6 +1730,51 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, tas
 		}
 	}()
 	task(ctx)
+}
+
+// RecordForwardedConsumerUsage(#86a-2):中央 EdgeForward 从 cell 响应剥出 OpenAI 权威
+// usage 后调用,用 context 里的消费者身份 + 占位号走 OpenAI 成本路径计消费者账。best-effort。
+func (h *OpenAIGatewayHandler) RecordForwardedConsumerUsage(c *gin.Context, env service.EdgeUsageEnvelope) {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.User == nil {
+		return
+	}
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	in := &service.ForwardedConsumerUsageInput{
+		Env:             env,
+		APIKey:          apiKey,
+		User:            apiKey.User,
+		Subscription:    subscription,
+		QuotaPlatform:   service.QuotaPlatform(c.Request.Context(), apiKey),
+		InboundEndpoint: GetInboundEndpoint(c),
+		UserAgent:       c.GetHeader("User-Agent"),
+		IPAddress:       ip.GetClientIP(c),
+		APIKeyService:   h.apiKeyService,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := h.gatewayService.RecordForwardedConsumerUsage(ctx, in); err != nil {
+		logger.L().With(zap.String("component", "handler.openai_gateway.edge_forward")).
+			Warn("edge_forward.consumer_billing_failed", zap.Error(err))
+	}
+}
+
+// emitEdgeUsageSentinel(#86a-2):edge-trusted 流式请求,在流末尾吐 OpenAI 权威用量事件,
+// 供中央剥出来给消费者计费。仅流式(非流式追 SSE 会破坏 body)。best-effort。
+func (h *OpenAIGatewayHandler) emitEdgeUsageSentinel(c *gin.Context, result *service.OpenAIForwardResult, edgeTrusted, stream bool) {
+	if !edgeTrusted || !stream || result == nil {
+		return
+	}
+	sse, err := service.BuildEdgeUsageEnvelopeOpenAI(result).SSEBytes()
+	if err != nil {
+		return
+	}
+	if _, werr := c.Writer.Write(sse); werr != nil {
+		return
+	}
+	if f, ok := c.Writer.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (h *OpenAIGatewayHandler) submitOpenAIUsageRecordTask(parent context.Context, result *service.OpenAIForwardResult, task service.UsageRecordTask) {

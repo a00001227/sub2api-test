@@ -97,3 +97,61 @@ func (s *GatewayService) RecordForwardedConsumerUsage(ctx context.Context, in *F
 		SkipConsumerBilling: false, // 中央要给消费者计费(与 cell 侧 edge-trusted 相反)
 	})
 }
+
+// ── OpenAI 成本路径(#86a-2)────────────────────────────────────────────────
+// OpenAI 系端点(chat/completions、responses、codex …)的消费者计费必须走 OpenAI 的
+// 成本路径(处理 image_input/service_tier),不能塞进 claude 的 RecordUsage。逻辑同上:
+// 占位号 + 复用现成 OpenAIGatewayService.RecordUsage(SkipConsumerBilling=false)。
+
+// EnsureForwardPlaceholderAccount 懒建/加载占位号(与 claude 侧共用同一 DB 行)。
+func (s *OpenAIGatewayService) EnsureForwardPlaceholderAccount(ctx context.Context) (*Account, error) {
+	s.forwardPlaceholderMu.Lock()
+	defer s.forwardPlaceholderMu.Unlock()
+	if s.forwardPlaceholderAcc != nil {
+		return s.forwardPlaceholderAcc, nil
+	}
+	if found, err := s.accountRepo.FindByExtraField(ctx, forwardPlaceholderExtraKey, "1"); err == nil && len(found) > 0 {
+		acc := found[0]
+		s.forwardPlaceholderAcc = &acc
+		return s.forwardPlaceholderAcc, nil
+	}
+	acc := &Account{
+		Name:        forwardPlaceholderName,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Status:      StatusDisabled,
+		Schedulable: false,
+		Credentials: map[string]any{},
+		Extra:       map[string]any{forwardPlaceholderExtraKey: "1"},
+	}
+	if err := s.accountRepo.Create(ctx, acc); err != nil {
+		return nil, err
+	}
+	s.forwardPlaceholderAcc = acc
+	return s.forwardPlaceholderAcc, nil
+}
+
+// RecordForwardedConsumerUsage 用 cell 带回的 OpenAI 权威 usage 给消费者计费。
+func (s *OpenAIGatewayService) RecordForwardedConsumerUsage(ctx context.Context, in *ForwardedConsumerUsageInput) error {
+	if in == nil || in.APIKey == nil || in.User == nil {
+		return nil
+	}
+	placeholder, err := s.EnsureForwardPlaceholderAccount(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.edge_consumer_billing", "[EdgeForwardBilling] ensure placeholder (openai) failed: %v", err)
+		return err
+	}
+	return s.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result:              in.Env.ToOpenAIForwardResult(),
+		APIKey:              in.APIKey,
+		User:                in.User,
+		Account:             placeholder,
+		Subscription:        in.Subscription,
+		InboundEndpoint:     in.InboundEndpoint,
+		UpstreamEndpoint:    in.UpstreamEndpoint,
+		UserAgent:           in.UserAgent,
+		IPAddress:           in.IPAddress,
+		APIKeyService:       in.APIKeyService,
+		SkipConsumerBilling: false,
+	})
+}

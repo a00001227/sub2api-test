@@ -28,19 +28,26 @@ const EdgeUsageHeader = "X-Sub2api-Usage"
 // ForwardResult 交给现成 RecordUsage 给消费者计费(占位 account 方案:provider
 // outbox 因占位号无 external ref 天然跳过)。
 type EdgeUsageEnvelope struct {
+	// Platform 决定中央用哪条成本路径计费:"openai" → OpenAI 成本路径(处理
+	// image_input/service_tier);其余(空/anthropic)→ claude 成本路径。
+	Platform      string      `json:"platform,omitempty"`
 	Model         string      `json:"model"`
 	UpstreamModel string      `json:"upstream_model,omitempty"`
 	Usage         ClaudeUsage `json:"usage"`
-	ImageCount    int         `json:"image_count,omitempty"`
-	Stream        bool        `json:"stream"`
+	// OpenAI 专有(claude 用不到):图片输入 token 与 service_tier(定价档)。
+	ImageInputTokens int    `json:"image_input_tokens,omitempty"`
+	ServiceTier      string `json:"service_tier,omitempty"`
+	ImageCount       int    `json:"image_count,omitempty"`
+	Stream           bool   `json:"stream"`
 }
 
-// BuildEdgeUsageEnvelope 从 ForwardResult 提取计费所需字段。
+// BuildEdgeUsageEnvelope 从 claude ForwardResult 提取计费所需字段。
 func BuildEdgeUsageEnvelope(result *ForwardResult) EdgeUsageEnvelope {
 	if result == nil {
 		return EdgeUsageEnvelope{}
 	}
 	return EdgeUsageEnvelope{
+		Platform:      PlatformAnthropic,
 		Model:         result.Model,
 		UpstreamModel: result.UpstreamModel,
 		Usage:         result.Usage,
@@ -49,8 +56,36 @@ func BuildEdgeUsageEnvelope(result *ForwardResult) EdgeUsageEnvelope {
 	}
 }
 
-// ToForwardResult 把 envelope 还原成中央计费用的 ForwardResult(RequestID 由中央
-// 自己填,用于消费者计费去重,不复用 cell 的)。
+// BuildEdgeUsageEnvelopeOpenAI 从 OpenAIForwardResult 提取计费所需字段。OpenAIUsage
+// 的 token 桶映射到 ClaudeUsage 的同名字段,image_input/service_tier 单独带。
+func BuildEdgeUsageEnvelopeOpenAI(result *OpenAIForwardResult) EdgeUsageEnvelope {
+	if result == nil {
+		return EdgeUsageEnvelope{}
+	}
+	tier := ""
+	if result.ServiceTier != nil {
+		tier = *result.ServiceTier
+	}
+	return EdgeUsageEnvelope{
+		Platform:      PlatformOpenAI,
+		Model:         result.Model,
+		UpstreamModel: result.UpstreamModel,
+		Usage: ClaudeUsage{
+			InputTokens:              result.Usage.InputTokens,
+			OutputTokens:             result.Usage.OutputTokens,
+			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
+			ImageOutputTokens:        result.Usage.ImageOutputTokens,
+		},
+		ImageInputTokens: result.Usage.ImageInputTokens,
+		ServiceTier:      tier,
+		ImageCount:       result.ImageCount,
+		Stream:           result.Stream,
+	}
+}
+
+// ToForwardResult 把 envelope 还原成中央 claude 计费用的 ForwardResult(RequestID
+// 由中央自己填,用于消费者计费去重,不复用 cell 的)。
 func (e EdgeUsageEnvelope) ToForwardResult() *ForwardResult {
 	return &ForwardResult{
 		Usage:         e.Usage,
@@ -60,6 +95,33 @@ func (e EdgeUsageEnvelope) ToForwardResult() *ForwardResult {
 		ImageCount:    e.ImageCount,
 	}
 }
+
+// ToOpenAIForwardResult 把 envelope 还原成中央 OpenAI 计费用的 OpenAIForwardResult。
+func (e EdgeUsageEnvelope) ToOpenAIForwardResult() *OpenAIForwardResult {
+	var tier *string
+	if e.ServiceTier != "" {
+		t := e.ServiceTier
+		tier = &t
+	}
+	return &OpenAIForwardResult{
+		Model:         e.Model,
+		UpstreamModel: e.UpstreamModel,
+		Usage: OpenAIUsage{
+			InputTokens:              e.Usage.InputTokens,
+			ImageInputTokens:         e.ImageInputTokens,
+			OutputTokens:             e.Usage.OutputTokens,
+			CacheCreationInputTokens: e.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     e.Usage.CacheReadInputTokens,
+			ImageOutputTokens:        e.Usage.ImageOutputTokens,
+		},
+		ServiceTier: tier,
+		ImageCount:  e.ImageCount,
+		Stream:      e.Stream,
+	}
+}
+
+// IsOpenAI 报告该 envelope 是否走 OpenAI 成本路径。
+func (e EdgeUsageEnvelope) IsOpenAI() bool { return e.Platform == PlatformOpenAI }
 
 // MarshalJSON 无副作用的紧凑 JSON(用于 SSE data 行 / 响应头)。
 func (e EdgeUsageEnvelope) marshal() ([]byte, error) {
