@@ -44,6 +44,17 @@ services:
       - AUTO_SETUP=true
 
       # =======================================================================
+      # 中央“执行→转发”到边缘 cell（默认关；设了才转发）。#86
+      # =======================================================================
+      - EDGE_FORWARD_ENABLED=${EDGE_FORWARD_ENABLED:-}
+      - EDGE_FORWARD_KEY=${EDGE_FORWARD_KEY:-}
+      - EDGE_FORWARD_GROUPS=${EDGE_FORWARD_GROUPS:-}
+      - EDGE_FORWARD_CELL_URL=${EDGE_FORWARD_CELL_URL:-}
+      - EDGE_FORWARD_REGISTRY_URL=${EDGE_FORWARD_REGISTRY_URL:-}
+      - EDGE_FORWARD_REGISTRY_TOKEN=${EDGE_FORWARD_REGISTRY_TOKEN:-}
+      - EDGE_FORWARD_REFRESH_SECONDS=${EDGE_FORWARD_REFRESH_SECONDS:-}
+
+      # =======================================================================
       # Server Configuration
       # =======================================================================
       - SERVER_HOST=0.0.0.0
