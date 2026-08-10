@@ -98,6 +98,8 @@ func buildUsageOutboxPayload(cmd *service.UsageBillingCommand, eventID, external
 		OccurredAt:                occurred,
 		InputTokens:               cmd.InputTokens,
 		OutputTokens:              cmd.OutputTokens,
+		CacheReadTokens:           cmd.CacheReadTokens,
+		CacheWriteTokens:          cmd.CacheCreationTokens, // 5m + 1h combined → single cache-write price
 		SizeTier:                  cmd.ImageSizeTier,
 		Quantity:                  cmd.ImageCount,
 	})

@@ -30,10 +30,12 @@ func TestBuildUsageOutboxPayload_Token(t *testing.T) {
 		RequestID:       "client:r1",
 		AccountID:       9001,
 		Model:           "claude-sonnet-5",
-		BillingMode:     "token",
-		InputTokens:     1000,
-		OutputTokens:    500,
-		UsageOccurredAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+		BillingMode:         "token",
+		InputTokens:         1000,
+		OutputTokens:        500,
+		CacheReadTokens:     200,
+		CacheCreationTokens: 300,
+		UsageOccurredAt:     time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	}
 	body := buildUsageOutboxPayload(cmd, "evt_usage_client:r1", "pa_1")
 	// Envelope MUST be present (its absence was the 401 bug): Portal's HMAC
@@ -65,6 +67,9 @@ func TestBuildUsageOutboxPayload_Token(t *testing.T) {
 	}
 	if p["input_tokens"].(int) != 1000 || p["output_tokens"].(int) != 500 {
 		t.Fatalf("tokens: %+v", p)
+	}
+	if p["cache_read_tokens"].(int) != 200 || p["cache_write_tokens"].(int) != 300 {
+		t.Fatalf("cache tokens: %+v", p)
 	}
 	if p["occurred_at"] != "2026-07-14T12:00:00Z" {
 		t.Fatalf("occurred_at: %v", p["occurred_at"])

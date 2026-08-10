@@ -31,6 +31,8 @@ func TestBuildUsageBillable_Token(t *testing.T) {
 		OccurredAt:                "2026-07-14T12:00:00Z",
 		InputTokens:               1000,
 		OutputTokens:              500,
+		CacheReadTokens:           200,
+		CacheWriteTokens:          300,
 	})
 	if ev.EventID != "evt_usage_r1" {
 		t.Fatalf("event id: %s", ev.EventID)
@@ -39,7 +41,7 @@ func TestBuildUsageBillable_Token(t *testing.T) {
 		t.Fatalf("envelope wrong: %+v", ev.Body)
 	}
 	p := ev.Body["payload"].(map[string]any)
-	for _, k := range []string{"request_id", "external_provider_account_id", "sub2api_account_id", "idempotency_key", "model", "billing_type", "occurred_at", "input_tokens", "output_tokens"} {
+	for _, k := range []string{"request_id", "external_provider_account_id", "sub2api_account_id", "idempotency_key", "model", "billing_type", "occurred_at", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"} {
 		if _, ok := p[k]; !ok {
 			t.Fatalf("token payload missing %q", k)
 		}
@@ -49,6 +51,9 @@ func TestBuildUsageBillable_Token(t *testing.T) {
 	}
 	if p["billing_type"] != "TOKEN" || p["input_tokens"].(int) != 1000 || p["output_tokens"].(int) != 500 {
 		t.Fatalf("token fields wrong: %+v", p)
+	}
+	if p["cache_read_tokens"].(int) != 200 || p["cache_write_tokens"].(int) != 300 {
+		t.Fatalf("cache token fields wrong: %+v", p)
 	}
 	// No image fields, and never price/gross/commission.
 	for _, forbidden := range []string{"size_tier", "quantity", "charged_amount_usd_micros", "gross_amount_micros", "commission_bps", "price"} {

@@ -126,6 +126,12 @@ type UsageBillableInput struct {
 	// TOKEN
 	InputTokens  int
 	OutputTokens int
+	// Cache tokens (Anthropic prompt caching): CacheWriteTokens is the total
+	// cache-creation tokens (5m + 1h combined — Portal bills a single cache-write
+	// price). CacheReadTokens is cache hits. OpenAI reports only cached reads
+	// (no cache-write concept) → CacheWriteTokens stays 0 there.
+	CacheReadTokens  int
+	CacheWriteTokens int
 	// IMAGE
 	SizeTier string
 	Quantity int
@@ -150,6 +156,8 @@ func BuildUsageBillable(in UsageBillableInput) Event {
 	} else {
 		payload["input_tokens"] = in.InputTokens
 		payload["output_tokens"] = in.OutputTokens
+		payload["cache_read_tokens"] = in.CacheReadTokens
+		payload["cache_write_tokens"] = in.CacheWriteTokens
 	}
 	return Event{
 		EventID: in.EventID,
