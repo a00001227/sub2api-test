@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"math"
 	neturl "net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -31,6 +33,7 @@ type ProviderConnectHandler struct {
 	scheduling *service.ProviderAccountSchedulingService
 	test       *service.ProviderAccountTestService
 	config     *service.ProviderAccountConfigService
+	pricing    *service.PricingService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -47,8 +50,9 @@ func NewProviderConnectHandler(
 	scheduling *service.ProviderAccountSchedulingService,
 	test *service.ProviderAccountTestService,
 	config *service.ProviderAccountConfigService,
+	pricing *service.PricingService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, pricing: pricing}
 }
 
 // accountConfigRuleRequest 是一条临时不可调度规则的请求体。
@@ -403,6 +407,104 @@ func (h *ProviderConnectHandler) CreateOnboardingSession(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+// modelCatalogEntry — one billable model + its OFFICIAL reference prices, in
+// integer micros so the Portal never handles floats (money rule). model_code
+// equals the string the gateway emits in usage events → Portal earning match is
+// exact. Prices are LiteLLM's; the Portal admin still sets the real billing price.
+type modelCatalogEntry struct {
+	ModelCode                     string `json:"model_code"`
+	Platform                      string `json:"platform"`   // anthropic | openai | gemini
+	ModelType                     string `json:"model_type"` // text | image
+	OfficialInputMicrosPer1m      int64  `json:"official_input_micros_per_1m"`
+	OfficialOutputMicrosPer1m     int64  `json:"official_output_micros_per_1m"`
+	OfficialCacheReadMicrosPer1m  int64  `json:"official_cache_read_micros_per_1m"`
+	OfficialCacheWriteMicrosPer1m int64  `json:"official_cache_write_micros_per_1m"`
+	OfficialImageMicrosPerImage   int64  `json:"official_image_micros_per_image"`
+}
+
+// litellmProviderToPlatform maps a LiteLLM provider onto the Portal platform
+// label; "" = unsupported (skipped from the catalog).
+func litellmProviderToPlatform(p string) string {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "anthropic":
+		return "anthropic"
+	case "openai":
+		return "openai"
+	case "google", "gemini":
+		return "gemini"
+	default:
+		return ""
+	}
+}
+
+// usdPerTokenToMicrosPer1m: LiteLLM USD-per-token → integer micros-per-1M-tokens
+// (× 1e6 tokens/M × 1e6 micros/USD = × 1e12), rounded. 0 for absent/non-positive.
+func usdPerTokenToMicrosPer1m(usdPerToken float64) int64 {
+	if usdPerToken <= 0 {
+		return 0
+	}
+	return int64(math.Round(usdPerToken * 1e12))
+}
+
+// usdToMicros: a USD amount (e.g. per-image price) → integer micros (× 1e6).
+func usdToMicros(usd float64) int64 {
+	if usd <= 0 {
+		return 0
+	}
+	return int64(math.Round(usd * 1e6))
+}
+
+// ModelCatalog handles GET /internal/provider-accounts/model-catalog?platform=
+//
+// Read-only. Returns the billable models (text + image) sub2api can emit, from
+// its bundled LiteLLM catalog, with official reference prices in micros. The
+// Portal caches this into model_catalog and lets an admin pick models to onboard
+// + price. Provider-internal auth (same token as onboarding).
+func (h *ProviderConnectHandler) ModelCatalog(c *gin.Context) {
+	if h.pricing == nil {
+		response.Success(c, gin.H{"models": []modelCatalogEntry{}, "count": 0})
+		return
+	}
+	platformFilter := strings.ToLower(strings.TrimSpace(c.Query("platform")))
+	all := h.pricing.ListAllPricing()
+	items := make([]modelCatalogEntry, 0, len(all))
+	for name, p := range all {
+		if p == nil {
+			continue
+		}
+		platform := litellmProviderToPlatform(p.LiteLLMProvider)
+		if platform == "" {
+			continue
+		}
+		if platformFilter != "" && platform != platformFilter {
+			continue
+		}
+		// Only TOKEN (chat) and IMAGE (image_generation) are billable in the
+		// Portal; embedding / audio / … are skipped.
+		var modelType string
+		switch p.Mode {
+		case "chat", "":
+			modelType = "text"
+		case "image_generation":
+			modelType = "image"
+		default:
+			continue
+		}
+		items = append(items, modelCatalogEntry{
+			ModelCode:                     name,
+			Platform:                      platform,
+			ModelType:                     modelType,
+			OfficialInputMicrosPer1m:      usdPerTokenToMicrosPer1m(p.InputCostPerToken),
+			OfficialOutputMicrosPer1m:     usdPerTokenToMicrosPer1m(p.OutputCostPerToken),
+			OfficialCacheReadMicrosPer1m:  usdPerTokenToMicrosPer1m(p.CacheReadInputTokenCost),
+			OfficialCacheWriteMicrosPer1m: usdPerTokenToMicrosPer1m(p.CacheCreationInputTokenCost),
+			OfficialImageMicrosPerImage:   usdToMicros(p.OutputCostPerImage),
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ModelCode < items[j].ModelCode })
+	response.Success(c, gin.H{"models": items, "count": len(items)})
 }
 
 type completeAuthorizationRequest struct {
