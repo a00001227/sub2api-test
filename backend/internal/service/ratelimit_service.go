@@ -222,6 +222,14 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			msg := "Identity verification required (400): " + upstreamMsg
 			s.handleAuthError(ctx, account, msg)
 			shouldDisable = true
+		} else if strings.Contains(strings.ToLower(upstreamMsg), "consumer terms") ||
+			strings.Contains(strings.ToLower(upstreamMsg), "accept them in claude.ai") {
+			// Anthropic 更新消费者条款/隐私政策，账号需在 claude.ai 接受后才能继续。
+			// 这是账号级不可用（每个请求都会 400），必须标失效并回流给 provider,
+			// 否则账号会一直显示"正常"却每发必败。与 KYC 同级:永久禁用,接受条款后手动恢复。
+			msg := "Consumer terms not accepted (400): " + upstreamMsg
+			s.handleAuthError(ctx, account, msg)
+			shouldDisable = true
 		}
 		// 其他 400 错误（如参数问题）不处理，不禁用账号
 	case 401:
