@@ -126,6 +126,12 @@ type UsageBillableInput struct {
 	// TOKEN
 	InputTokens  int
 	OutputTokens int
+	// Cache token classes (Anthropic): read = cache_read_input_tokens,
+	// write = cache_creation_input_tokens. Distinct from InputTokens (no overlap).
+	// Portal prices them only when the model's token price sets cache prices;
+	// 0/absent → cache simply not billed.
+	CacheReadTokens  int
+	CacheWriteTokens int
 	// IMAGE
 	SizeTier string
 	Quantity int
@@ -150,6 +156,10 @@ func BuildUsageBillable(in UsageBillableInput) Event {
 	} else {
 		payload["input_tokens"] = in.InputTokens
 		payload["output_tokens"] = in.OutputTokens
+		// Additive: cache token classes. Portal folds them into gross only when
+		// the model has cache prices set; older Portals ignore unknown keys.
+		payload["cache_read_tokens"] = in.CacheReadTokens
+		payload["cache_write_tokens"] = in.CacheWriteTokens
 	}
 	return Event{
 		EventID: in.EventID,

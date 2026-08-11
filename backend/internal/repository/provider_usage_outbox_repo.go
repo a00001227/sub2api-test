@@ -98,8 +98,11 @@ func buildUsageOutboxPayload(cmd *service.UsageBillingCommand, eventID, external
 		OccurredAt:                occurred,
 		InputTokens:               cmd.InputTokens,
 		OutputTokens:              cmd.OutputTokens,
-		SizeTier:                  cmd.ImageSizeTier,
-		Quantity:                  cmd.ImageCount,
+		// cache write = cache_creation_input_tokens; cache read = cache_read_input_tokens.
+		CacheReadTokens:  cmd.CacheReadTokens,
+		CacheWriteTokens: cmd.CacheCreationTokens,
+		SizeTier:         cmd.ImageSizeTier,
+		Quantity:         cmd.ImageCount,
 	})
 	return ev.Body
 }
