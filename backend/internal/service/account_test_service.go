@@ -381,7 +381,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		// 403 表示账号被上游封禁，标记为 error 状态
 		// 手动测试路径:403(封禁)或 401(凭据吊销/失效)都标记 error 状态
 		// (仅"测试连接"路径,不影响网关 serving 对瞬时 401 的容忍策略)。
-		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+		if testFailureShouldSetError(resp.StatusCode, body) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
@@ -453,7 +453,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 		// 手动测试路径:403(封禁)或 401(凭据吊销/失效)都标记 error 状态
 		// (仅"测试连接"路径,不影响网关 serving 对瞬时 401 的容忍策略)。
-		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+		if testFailureShouldSetError(resp.StatusCode, body) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
@@ -1811,4 +1811,25 @@ func parseTestSSEOutput(body string) (responseText, errMsg string) {
 	}
 	responseText = strings.Join(texts, "")
 	return
+}
+
+// testFailureShouldSetError 判定一次"测试连接"/自检 的上游失败是否为账号级故障,
+// 需要把账号翻成 error(→ #87 回流 Portal,provider 侧可见"失效")。
+//   - 401/403:凭据吊销 / 账号封禁。
+//   - 400 "Consumer Terms"/"accept them in claude.ai":组织未接受新版消费者条款,
+//     每个请求都会 400,语义上同样是账号级不可用。与网关 serving 侧
+//     RateLimitService.HandleUpstreamError 的 400 分类保持一致,避免"测试报 400、
+//     账号却一直显示正常、发一个失败一个"的割裂。
+func testFailureShouldSetError(statusCode int, body []byte) bool {
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		return true
+	}
+	if statusCode == http.StatusBadRequest {
+		lower := strings.ToLower(string(body))
+		if strings.Contains(lower, "consumer terms") ||
+			strings.Contains(lower, "accept them in claude.ai") {
+			return true
+		}
+	}
+	return false
 }
