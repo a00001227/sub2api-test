@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"math/rand"
@@ -187,6 +188,25 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 					"cell", target.Host, "idx", i, "err", err)
 				continue
 			}
+			// 选号前失败(503「no available accounts」):cell 在调上游之前就没挑到
+			// 账号 —— 它压根没执行这次请求,所以改投下一个 cell 不会双执行。视同该
+			// 候选不可用、顺位转移,而不是把 503 透传给客户端。这样只要任一 cell 有
+			// 空号,请求就不会失败(解决 cell 间容量不均 / 单号被限流)。其它 503 /
+			// 正常响应仍按下方原样回传,绝不转移。
+			if resp.StatusCode == http.StatusServiceUnavailable {
+				peek, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+				_ = resp.Body.Close()
+				if isCellNoAvailableAccounts(peek) {
+					lastErr = errCellNoAvailableAccounts
+					slog.Warn("edge_forward: cell 无可用账号(选号前失败),尝试下一候选",
+						"cell", target.Host, "idx", i)
+					continue
+				}
+				// 其它 503(cell/上游真实错误)→ 原样回传已缓冲的响应,不转移。
+				relayBufferedResponse(c, resp, peek)
+				c.Abort()
+				return
+			}
 			// 成功落到某 cell → 绑定会话亲和(下一轮同会话回到这台 cell)。
 			if stickyKey != "" {
 				affinity.put(stickyKey, target)
@@ -204,12 +224,46 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 	}
 }
 
+// errCellNoAvailableAccounts marks a candidate cell that returned 503
+// 「no available accounts」— a pre-upstream scheduling miss. Used only for the
+// final all-candidates-exhausted log line.
+var errCellNoAvailableAccounts = errors.New("cell has no available accounts")
+
+// isCellNoAvailableAccounts reports whether a 503 body is the gateway's
+// "no available accounts" scheduling failure. That failure happens BEFORE the
+// cell calls upstream, so retrying the request on another cell is
+// idempotency-safe (the request was never executed).
+func isCellNoAvailableAccounts(body []byte) bool {
+	return bytes.Contains(bytes.ToLower(body), []byte("no available accounts"))
+}
+
+// relayBufferedResponse writes a fully-buffered cell response (headers + status
+// + body) to the client. Used for a non-failover 503 whose body was already read
+// to classify it — mirrors streamCellResponse's header filtering.
+func relayBufferedResponse(c *gin.Context, resp *http.Response, body []byte) {
+	h := c.Writer.Header()
+	for k, vv := range resp.Header {
+		if isHopByHopHeader(k) || strings.EqualFold(k, service.EdgeUsageHeader) {
+			continue
+		}
+		for _, v := range vv {
+			h.Add(k, v)
+		}
+	}
+	c.Writer.WriteHeader(resp.StatusCode)
+	_, _ = c.Writer.Write(body)
+	if f, ok := c.Writer.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // streamCellResponse 回写 cell 响应头+状态码,再逐块流式回传(SSE 每块 flush)。
 // 一旦调用即已选定某个 cell,不再失败转移(见 EdgeForward 循环内注释)。
 //
 // #86b:顺带取出 cell 带回的权威用量给中央做消费者计费:
 //   - 非流式:X-Sub2api-Usage 响应头(不透传给客户端);
 //   - 流式:末尾的 `event: sub2api_usage` 事件——**剥掉不透传**,只捕获它的 data。
+//
 // 返回捕获到的 envelope(没有则 nil)。
 func streamCellResponse(c *gin.Context, resp *http.Response) *service.EdgeUsageEnvelope {
 	defer resp.Body.Close()

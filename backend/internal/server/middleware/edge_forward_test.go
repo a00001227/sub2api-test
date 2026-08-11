@@ -230,6 +230,92 @@ func TestEdgeForward_DoesNotLeakConsumerKey(t *testing.T) {
 	}
 }
 
+// 用注入的多-cell resolver + 确定性 rng(=0 → 候选顺序=池顺序)构造引擎,
+// 便于测跨 cell 失败转移。
+func newEdgeForwardEngineWithResolver(resolver cellResolver, groupSlug, key string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, key, func() float64 { return 0 }, nil)
+	e.POST("/v1/messages",
+		func(c *gin.Context) {
+			if groupSlug != "" {
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: groupSlug}})
+			}
+			c.Next()
+		},
+		h,
+		func(c *gin.Context) { c.String(http.StatusOK, "local-ok") },
+	)
+	return e
+}
+
+// cell 返回 503「no available accounts」(选号前失败,没调上游)→ 中央应视同该
+// 候选不可用、顺位转移到下一个 cell,而不是把 503 透传给客户端。
+func TestEdgeForward_FailoverOnNoAvailableAccounts503(t *testing.T) {
+	var bHit bool
+	cellA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"No available accounts: no available accounts","type":"api_error"},"type":"error"}`))
+	}))
+	defer cellA.Close()
+	cellB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bHit = true
+		w.Header().Set("X-Handled-By", "cellB")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("cell-b-ok"))
+	}))
+	defer cellB.Close()
+
+	resolver := &dynamicResolver{cached: []cellCandidate{
+		{url: mustURL(cellA.URL), reputation: 50},
+		{url: mustURL(cellB.URL), reputation: 50},
+	}}
+	e := newEdgeForwardEngineWithResolver(resolver, "claude", "k")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if w.Code != http.StatusOK || w.Body.String() != "cell-b-ok" {
+		t.Fatalf("cellA 无可用账号应转移到 cellB; got code=%d body=%q", w.Code, w.Body.String())
+	}
+	if !bHit {
+		t.Fatalf("cellB 应作为转移候选被调用")
+	}
+}
+
+// 非「no available」的 503(cell/上游真实错误)必须原样透传、绝不转移
+// (可能已触上游,重放有双执行风险)。
+func TestEdgeForward_OtherError503NotFailedOver(t *testing.T) {
+	var bHit bool
+	cellA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream overloaded","type":"overloaded_error"}}`))
+	}))
+	defer cellA.Close()
+	cellB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer cellB.Close()
+
+	resolver := &dynamicResolver{cached: []cellCandidate{
+		{url: mustURL(cellA.URL), reputation: 50},
+		{url: mustURL(cellB.URL), reputation: 50},
+	}}
+	e := newEdgeForwardEngineWithResolver(resolver, "claude", "k")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("非 no-available 的 503 应原样透传; got code=%d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "upstream overloaded") {
+		t.Fatalf("应透传原始 503 body; got %q", w.Body.String())
+	}
+	if bHit {
+		t.Fatalf("非 no-available 的 503 不应转移到 cellB")
+	}
+}
+
 // 命中组但 cell 不可达:客户端应拿到干净的 502 upstream_error,
 // 且绝不回落到中央本地执行(避免"转发失败悄悄用了中央的号")。
 func TestEdgeForward_CellUnreachableReturns502(t *testing.T) {
