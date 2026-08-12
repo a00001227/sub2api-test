@@ -936,9 +936,14 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 }
 
 func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
+	// Recovery must restore schedulability too. SetError set schedulable=false;
+	// clearing the error without re-enabling it would leave the account
+	// "active but unschedulable" — status=active (Portal shows 正常) yet never
+	// selected (the scheduler requires status=active AND schedulable=true).
 	_, err := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
 		SetStatus(service.StatusActive).
+		SetSchedulable(true).
 		SetErrorMessage("").
 		Save(ctx)
 	if err != nil {
