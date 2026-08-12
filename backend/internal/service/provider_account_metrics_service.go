@@ -118,7 +118,7 @@ type PacingScore struct {
 	// 构成透明（各分项已按权重折算，加总 = Total）：
 	FiveHourPart float64 `json:"five_hour_part"` // 5h 余量 ×40
 	SevenDayPart float64 `json:"seven_day_part"` // 7d 余量 ×30
-	SuccessPart  float64 `json:"success_part"`   // 成功率 ×20（无数据按满）
+	SuccessPart  float64 `json:"success_part"`   // 存活期累计成功率 ×20
 	RatePart     float64 `json:"rate_part"`      // RPM 余量 ×10
 }
 
@@ -307,8 +307,16 @@ func (s *ProviderAccountMetricsService) Metrics(
 
 // computePacingScore 合成 0-100 评分（纯展示，不参与调度）：
 // 5h 余量 ×40 + 7d 余量 ×30 + 成功率 ×20 + RPM 余量 ×10。
-// 无数据的分项按满分处理（缺数据不该把账号显示成低分）。
+// 余量类分项无数据按满分（空闲=有余量，合理）。但**从没服务过的号**
+// （无任何请求样本 → SuccessRate==nil）不给分：返回 nil，前端显示"无评分"
+// 而非误导性的满分——否则一个卡住/从未调度的号会排在真正在扛量的号之上
+// （正是 bjmukohyee 100 vs 在服务的号 66 的现象）。
 func computePacingScore(m *ProviderAccountMetrics) *PacingScore {
+	// 无存活期成功率样本 = 该号从未成功处理过任何请求，未证明能服务。
+	if m.SuccessRate == nil {
+		return nil
+	}
+
 	part := func(remaining float64, weight float64) float64 {
 		if remaining < 0 {
 			remaining = 0
@@ -327,8 +335,9 @@ func computePacingScore(m *ProviderAccountMetrics) *PacingScore {
 	if m.SevenDay != nil {
 		sevenDay = 1 - m.SevenDay.Utilization/100.0
 	}
-	// 成功率：现有指标面没有失败计数，无数据按满分；后续接入错误率后细化。
-	success := 1.0
+	// 成功率：用存活期累计真实成功率（此前写死 1.0，忽略了已算出的 SuccessRate，
+	// 成功率项永远满分 —— 已修）。
+	success := *m.SuccessRate
 	rate := 1.0
 	if m.RPMLimit > 0 {
 		rate = 1 - float64(m.RPMUsed)/float64(m.RPMLimit)
