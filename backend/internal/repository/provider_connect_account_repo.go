@@ -85,13 +85,15 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 		}
 	}
 
-	// Phase 21I: provider 账号默认启用 DeRouter 五档 pacing，默认档 = humanized
-	// （拟人，封号风险最低）。RPM/RPH/并发由档位容量表权威决定，不再写入
-	// base_rpm/base_rph/window_cost_limit（预算刹车已删除）。max_sessions 仍按
-	// 订阅等级分级（会话限制与档位正交）。admin 建的账号不受影响（无 pacing_mode）。
+	// Phase 21I: provider 账号默认启用 DeRouter 五档 pacing，默认档 = standard
+	// （与拟人同容量，但不遵守活跃-冷却/每日休息——新号即刻可全时段调度，避免
+	// 单/少号时因休息窗出现"活号却 0 流量"的空档；需要拟人节奏可在账号页手动切）。
+	// RPM/RPH/并发由档位容量表权威决定，不再写入 base_rpm/base_rph/window_cost_limit
+	// （预算刹车已删除）。max_sessions 仍按订阅等级分级（会话限制与档位正交）。
+	// admin 建的账号不受影响（无 pacing_mode）。
 	tier, _ := in.Credentials["rate_limit_tier"].(string)
 	profile := service.PacingProfileForTier(tier)
-	defaultMode := service.PacingModeHumanized
+	defaultMode := service.PacingModeStandard
 
 	// 接入即默认配置(#90-A1):在既有 pacing/会话默认之上,叠加平台默认——拦截预热
 	// (省 token)+ 临时不可调度规则(命中即临时绕开坏号,请求侧自愈)。仅 anthropic

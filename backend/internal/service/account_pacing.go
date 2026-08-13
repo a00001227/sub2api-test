@@ -26,7 +26,8 @@ import (
 
 // Pacing modes（DeRouter 五档）。
 const (
-	// PacingModeHumanized 拟人（provider 账号默认）：模拟真人节奏，封号风险最低。
+	// PacingModeHumanized 拟人：模拟真人节奏（活跃-冷却 + 每日休息），封号风险最低。
+	// 可手动切换；新号默认档已改为 standard（见 provider_connect_account_repo）。
 	PacingModeHumanized = "humanized"
 	// PacingModeStandard 标准：与拟人同容量，但不遵守活跃-冷却/每日休息。
 	PacingModeStandard = "standard"
