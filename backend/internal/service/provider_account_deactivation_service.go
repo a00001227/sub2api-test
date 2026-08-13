@@ -27,17 +27,25 @@ type providerDeactivateLocator interface {
 	FindAccountIDByExternalRef(ctx context.Context, externalRef string) (int64, bool, error)
 }
 
+// reasonPortalRollback marks a deactivate call as a rollback of a just-minted
+// account whose Portal row failed to commit. Such an account was never bound to
+// anything, so it is HARD-DELETED rather than left as a disabled/error orphan
+// (which would occupy nothing but be health-probed forever and pollute usage
+// reflow with unknown-ref events). Must match the Portal's rollback reason string.
+const reasonPortalRollback = "portal_rollback"
+
 // providerDeactivateAccountRepo reads and mutates the account row. Satisfied by
-// the concrete account repository (GetByID + SetSchedulable + Update).
+// the concrete account repository (GetByID + SetSchedulable + Update + Delete).
 type providerDeactivateAccountRepo interface {
 	GetByID(ctx context.Context, id int64) (*Account, error)
 	SetSchedulable(ctx context.Context, id int64, schedulable bool) error
 	Update(ctx context.Context, account *Account) error
+	Delete(ctx context.Context, id int64) error
 }
 
 // ProviderAccountDeactivationResult is the outcome returned to the Portal.
 type ProviderAccountDeactivationResult struct {
-	Status string `json:"status"` // "deactivated" | "not_found" | "already_inactive"
+	Status string `json:"status"` // "deactivated" | "deleted" | "not_found" | "already_inactive"
 }
 
 // ProviderAccountDeactivationService deactivates a provider-owned account.
@@ -71,6 +79,20 @@ func (s *ProviderAccountDeactivationService) Deactivate(
 	if !found {
 		// Unknown ref → benign no-op so the Portal can retry / stay in sync.
 		return &ProviderAccountDeactivationResult{Status: "not_found"}, nil
+	}
+
+	// Rollback of a just-minted account (Portal failed to persist its row after
+	// the cell minted the token): hard-delete it. Leaving it disabled/error would
+	// strand an orphan on the cell — no Portal row to ever settle its usage, yet
+	// the scheduled-test-runner keeps probing it (unknown-ref reflow noise) and it
+	// counts against nothing but clutters the pool. Delete cleans the account,
+	// its scheduler snapshot, and test plans in one shot. Idempotent: a repeated
+	// rollback finds no ref (handled above).
+	if strings.TrimSpace(reason) == reasonPortalRollback {
+		if err := s.repo.Delete(ctx, id); err != nil {
+			return nil, err
+		}
+		return &ProviderAccountDeactivationResult{Status: "deleted"}, nil
 	}
 
 	acc, err := s.repo.GetByID(ctx, id)

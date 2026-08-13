@@ -28,6 +28,13 @@ type fakeDeactivateRepo struct {
 	updated        *Account
 	setErr         error
 	updErr         error
+	deletedID      *int64
+	delErr         error
+}
+
+func (f *fakeDeactivateRepo) Delete(_ context.Context, id int64) error {
+	f.deletedID = &id
+	return f.delErr
 }
 
 func (f *fakeDeactivateRepo) GetByID(_ context.Context, _ int64) (*Account, error) {
@@ -57,6 +64,20 @@ func TestDeactivate_ActiveAccountStopsAndDisables(t *testing.T) {
 	require.NotNil(t, repo.updated)
 	require.Equal(t, domain.StatusDisabled, repo.updated.Status)
 	require.Empty(t, repo.updated.ErrorMessage)
+}
+
+func TestDeactivate_PortalRollbackHardDeletes(t *testing.T) {
+	repo := &fakeDeactivateRepo{acc: &Account{ID: 7, Status: domain.StatusActive}}
+	svc := NewProviderAccountDeactivationService(
+		&fakeDeactivateLocator{id: 7, found: true}, repo,
+	)
+	res, err := svc.Deactivate(context.Background(), "pa_abc", "portal_rollback")
+	require.NoError(t, err)
+	require.Equal(t, "deleted", res.Status)
+	require.NotNil(t, repo.deletedID, "rollback must hard-delete the orphan")
+	require.Equal(t, int64(7), *repo.deletedID)
+	require.Nil(t, repo.schedulableSet, "rollback deletes instead of disabling")
+	require.Nil(t, repo.updated)
 }
 
 func TestDeactivate_UnknownRefIsBenignNoOp(t *testing.T) {
