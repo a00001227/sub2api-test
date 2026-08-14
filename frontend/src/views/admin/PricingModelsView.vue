@@ -318,7 +318,8 @@ function savingClass(pct: number) {
 
 function fmtPrice(v: number | null) {
   if (v == null) return '—'
-  return `$${v.toFixed(4)}/MTok`
+  // Stored per token; display per 1M tokens (×1e6).
+  return `$${Number((v * 1_000_000).toFixed(4))}/MTok`
 }
 
 function fmtPercent(v: number) {

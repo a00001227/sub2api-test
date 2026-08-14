@@ -151,24 +151,25 @@ func (s *PricingDisplayService) buildDisplayItem(r *PricingModelRecord) (Pricing
 }
 
 func buildTextDTO(r *PricingModelRecord) *TextPricingDTO {
+	// Token prices are stored per token; the public display quotes per 1M tokens.
 	dto := &TextPricingDTO{}
 	if r.InputPrice != nil {
-		dto.InputPrice = *r.InputPrice
+		dto.InputPrice = *r.InputPrice * 1_000_000
 	}
 	if r.OutputPrice != nil {
-		dto.OutputPrice = *r.OutputPrice
+		dto.OutputPrice = *r.OutputPrice * 1_000_000
 	}
 	if r.CacheReadPrice != nil {
-		dto.CacheReadPrice = *r.CacheReadPrice
+		dto.CacheReadPrice = *r.CacheReadPrice * 1_000_000
 	}
 	if r.CacheWritePrice != nil {
-		dto.CacheWritePrice = *r.CacheWritePrice
+		dto.CacheWritePrice = *r.CacheWritePrice * 1_000_000
 	}
 	if r.OfficialInputPrice != nil {
-		dto.OfficialInputPrice = *r.OfficialInputPrice
+		dto.OfficialInputPrice = *r.OfficialInputPrice * 1_000_000
 	}
 	if r.OfficialOutputPrice != nil {
-		dto.OfficialOutputPrice = *r.OfficialOutputPrice
+		dto.OfficialOutputPrice = *r.OfficialOutputPrice * 1_000_000
 	}
 	dto.SavingPercent = r.SavingPercent
 	return dto
