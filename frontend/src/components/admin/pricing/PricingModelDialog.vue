@@ -239,7 +239,8 @@ const textPreview = computed(() => {
 
 function fmtTokenPrice(v: number) {
   if (!v) return '$0/MTok'
-  return `$${v.toFixed(4)}/MTok`
+  // v is USD per token; display as USD per 1M tokens (×1e6).
+  return `$${Number((v * 1_000_000).toFixed(4))}/MTok`
 }
 
 function addResolution() {

@@ -39,7 +39,8 @@ const displayValue = computed(() => {
 
 const perMTok = computed(() => {
   if (props.modelValue == null || !isFinite(props.modelValue)) return '—'
-  return props.modelValue.toFixed(4)
+  // Stored value is USD per token; display as USD per 1M tokens (×1e6).
+  return String(Number((props.modelValue * 1_000_000).toFixed(4)))
 })
 
 function onInput(e: Event) {
