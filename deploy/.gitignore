@@ -17,3 +17,5 @@ redis_data/
 # Temporary files
 *.tmp
 *.log
+ADD_CELL.md
+PROD_DEPLOY.md

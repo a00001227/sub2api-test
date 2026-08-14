@@ -697,6 +697,11 @@ func registerPricingModelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		{
 			models.GET("", h.Admin.PricingModel.List)
 			models.POST("", h.Admin.PricingModel.Create)
+			// Official-catalog flow ("select models from official catalog").
+			// Declared before /:id so "catalog" isn't parsed as an id.
+			models.GET("/catalog", h.Admin.PricingModel.Catalog)
+			models.POST("/catalog/sync", h.Admin.PricingModel.SyncCatalog)
+			models.POST("/from-catalog", h.Admin.PricingModel.CreateFromCatalog)
 			models.GET("/:id", h.Admin.PricingModel.GetByID)
 			models.PUT("/:id", h.Admin.PricingModel.Update)
 			models.DELETE("/:id", h.Admin.PricingModel.Delete)

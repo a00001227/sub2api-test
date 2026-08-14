@@ -13,7 +13,7 @@
           <button @click="loadModels" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh', 'Refresh')">
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
-          <button @click="openCreate" class="btn btn-primary">
+          <button @click="openCatalog" class="btn btn-primary">
             <Icon name="plus" size="md" class="mr-2" />
             {{ t('admin.pricingDisplay.addModel') }}
           </button>
@@ -113,6 +113,14 @@
       </div>
     </div>
 
+    <!-- Official catalog picker (default "add model" flow) -->
+    <CatalogPickerModal
+      v-if="catalogOpen"
+      @close="catalogOpen = false"
+      @added="onCatalogAdded"
+      @manual-create="onManualCreate"
+    />
+
     <!-- Create / Edit Dialog -->
     <PricingModelDialog
       v-if="dialogOpen"
@@ -149,6 +157,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PricingModelDialog from '@/components/admin/pricing/PricingModelDialog.vue'
+import CatalogPickerModal from '@/components/admin/pricing/CatalogPickerModal.vue'
 import { pricingApi, type PricingModelRecord } from '@/api/admin/pricing'
 import { useAppStore } from '@/stores/app'
 
@@ -161,6 +170,7 @@ const filterType = ref('')
 const filterUserType = ref('')
 const filterEnabled = ref('')
 const dialogOpen = ref(false)
+const catalogOpen = ref(false)
 const editingRecord = ref<PricingModelRecord | null>(null)
 const deleteTarget = ref<PricingModelRecord | null>(null)
 const deleteLoading = ref(false)
@@ -188,7 +198,18 @@ async function loadModels() {
   }
 }
 
-function openCreate() {
+function openCatalog() {
+  catalogOpen.value = true
+}
+
+function onCatalogAdded() {
+  catalogOpen.value = false
+  loadModels()
+}
+
+// "手动创建" fallback inside the catalog picker → open the manual dialog.
+function onManualCreate() {
+  catalogOpen.value = false
   editingRecord.value = null
   dialogOpen.value = true
 }

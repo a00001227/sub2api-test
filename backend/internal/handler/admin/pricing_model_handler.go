@@ -21,6 +21,50 @@ func NewPricingModelHandler(svc *service.PricingDisplayService) *PricingModelHan
 	return &PricingModelHandler{svc: svc}
 }
 
+// ---- Official catalog flow ("select models from official catalog") ----
+
+type createFromCatalogRequest struct {
+	Models []string `json:"models" binding:"required"`
+}
+
+// Catalog returns the official-catalog pick-list with an `added` flag per model.
+// GET /api/v1/admin/pricing/models/catalog?platform=
+func (h *PricingModelHandler) Catalog(c *gin.Context) {
+	entries, err := h.svc.ListCatalog(c.Request.Context(), c.Query("platform"))
+	if err != nil {
+		response.InternalError(c, "failed to list model catalog")
+		return
+	}
+	response.Success(c, gin.H{"models": entries, "count": len(entries)})
+}
+
+// SyncCatalog refreshes the official prices from the remote source.
+// POST /api/v1/admin/pricing/models/catalog/sync
+func (h *PricingModelHandler) SyncCatalog(c *gin.Context) {
+	result, err := h.svc.SyncCatalog(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "failed to sync model catalog")
+		return
+	}
+	response.Success(c, result)
+}
+
+// CreateFromCatalog batch-creates pricing_models rows (待启用) from picked models.
+// POST /api/v1/admin/pricing/models/from-catalog
+func (h *PricingModelHandler) CreateFromCatalog(c *gin.Context) {
+	var req createFromCatalogRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.svc.CreateFromCatalog(c.Request.Context(), req.Models)
+	if err != nil {
+		response.InternalError(c, "failed to create from catalog")
+		return
+	}
+	response.Success(c, result)
+}
+
 // ---- Request types ----
 
 type createPricingModelRequest struct {

@@ -14,6 +14,11 @@ import (
 type PricingDisplayService struct {
 	repo PricingModelRepository
 
+	// pricing is the official LiteLLM catalog source used by the "select from
+	// official catalog" admin flow (ListCatalog / SyncCatalog / CreateFromCatalog).
+	// May be nil in tests that don't exercise the catalog path.
+	pricing *PricingService
+
 	// publicCache caches the result of GetPublicPricingDisplay. Pricing data
 	// changes very rarely (a handful of admin edits over months) but the public
 	// endpoint is hit by every portal visitor, so we serve it from memory and
@@ -24,8 +29,8 @@ type PricingDisplayService struct {
 }
 
 // NewPricingDisplayService constructs PricingDisplayService.
-func NewPricingDisplayService(repo PricingModelRepository) *PricingDisplayService {
-	return &PricingDisplayService{repo: repo}
+func NewPricingDisplayService(repo PricingModelRepository, pricing *PricingService) *PricingDisplayService {
+	return &PricingDisplayService{repo: repo, pricing: pricing}
 }
 
 // invalidatePublicCache drops the cached public pricing display. Called after
