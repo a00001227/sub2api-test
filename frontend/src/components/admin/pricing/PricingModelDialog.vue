@@ -61,14 +61,8 @@
               <PriceField v-model="form.output_price" :label="t('admin.pricingDisplay.labelOutputPrice')" />
               <p v-if="discountOutput" class="mt-0.5 text-xs" :class="discountOutput.cls">{{ discountOutput.text }}</p>
             </div>
-            <div>
-              <PriceField v-model="form.cache_read_price" :label="t('admin.pricingDisplay.labelCacheReadPrice')" />
-              <p v-if="discountCacheRead" class="mt-0.5 text-xs" :class="discountCacheRead.cls">{{ discountCacheRead.text }}</p>
-            </div>
-            <div>
-              <PriceField v-model="form.cache_write_price" :label="t('admin.pricingDisplay.labelCacheWritePrice')" />
-              <p v-if="discountCacheWrite" class="mt-0.5 text-xs" :class="discountCacheWrite.cls">{{ discountCacheWrite.text }}</p>
-            </div>
+            <PriceField v-model="form.cache_read_price" :label="t('admin.pricingDisplay.labelCacheReadPrice')" />
+            <PriceField v-model="form.cache_write_price" :label="t('admin.pricingDisplay.labelCacheWritePrice')" />
           </div>
 
           <div class="mt-4">
@@ -76,8 +70,6 @@
             <div class="grid grid-cols-2 gap-4">
               <PriceField v-model="form.official_input_price" :label="t('admin.pricingDisplay.labelOfficialInput')" />
               <PriceField v-model="form.official_output_price" :label="t('admin.pricingDisplay.labelOfficialOutput')" />
-              <PriceField v-model="form.official_cache_read_price" :label="t('admin.pricingDisplay.labelOfficialCacheRead')" />
-              <PriceField v-model="form.official_cache_write_price" :label="t('admin.pricingDisplay.labelOfficialCacheWrite')" />
             </div>
           </div>
         </div>
@@ -248,8 +240,6 @@ function fieldDiscount(
 
 const discountInput = computed(() => fieldDiscount(form.value.input_price, form.value.official_input_price))
 const discountOutput = computed(() => fieldDiscount(form.value.output_price, form.value.official_output_price))
-const discountCacheRead = computed(() => fieldDiscount(form.value.cache_read_price, form.value.official_cache_read_price))
-const discountCacheWrite = computed(() => fieldDiscount(form.value.cache_write_price, form.value.official_cache_write_price))
 
 function addResolution() {
   imageResolutions.value.push({ key: '', price: 0 })
