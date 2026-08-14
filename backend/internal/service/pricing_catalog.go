@@ -214,6 +214,8 @@ func (s *PricingDisplayService) CreateFromCatalog(ctx context.Context, models []
 			rec.CacheWritePrice = floatPtr(p.CacheCreationInputTokenCost)
 			rec.OfficialInputPrice = floatPtr(p.InputCostPerToken)
 			rec.OfficialOutputPrice = floatPtr(p.OutputCostPerToken)
+			rec.OfficialCacheReadPrice = floatPtr(p.CacheReadInputTokenCost)
+			rec.OfficialCacheWritePrice = floatPtr(p.CacheCreationInputTokenCost)
 		}
 
 		if _, err := s.CreatePricingModel(ctx, rec); err != nil {

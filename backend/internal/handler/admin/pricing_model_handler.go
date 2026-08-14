@@ -74,12 +74,14 @@ type createPricingModelRequest struct {
 	Enabled   *bool            `json:"enabled"`
 
 	// Text fields
-	InputPrice          *float64 `json:"input_price"`
-	OutputPrice         *float64 `json:"output_price"`
-	CacheReadPrice      *float64 `json:"cache_read_price"`
-	CacheWritePrice     *float64 `json:"cache_write_price"`
-	OfficialInputPrice  *float64 `json:"official_input_price"`
-	OfficialOutputPrice *float64 `json:"official_output_price"`
+	InputPrice              *float64 `json:"input_price"`
+	OutputPrice             *float64 `json:"output_price"`
+	CacheReadPrice          *float64 `json:"cache_read_price"`
+	CacheWritePrice         *float64 `json:"cache_write_price"`
+	OfficialInputPrice      *float64 `json:"official_input_price"`
+	OfficialOutputPrice     *float64 `json:"official_output_price"`
+	OfficialCacheReadPrice  *float64 `json:"official_cache_read_price"`
+	OfficialCacheWritePrice *float64 `json:"official_cache_write_price"`
 
 	// Image field: map of resolution -> price
 	ImageResolutions map[string]float64 `json:"image_resolutions"`
@@ -95,12 +97,14 @@ type updatePricingModelRequest struct {
 	Enabled   *bool             `json:"enabled"`
 
 	// Text fields
-	InputPrice          *float64 `json:"input_price"`
-	OutputPrice         *float64 `json:"output_price"`
-	CacheReadPrice      *float64 `json:"cache_read_price"`
-	CacheWritePrice     *float64 `json:"cache_write_price"`
-	OfficialInputPrice  *float64 `json:"official_input_price"`
-	OfficialOutputPrice *float64 `json:"official_output_price"`
+	InputPrice              *float64 `json:"input_price"`
+	OutputPrice             *float64 `json:"output_price"`
+	CacheReadPrice          *float64 `json:"cache_read_price"`
+	CacheWritePrice         *float64 `json:"cache_write_price"`
+	OfficialInputPrice      *float64 `json:"official_input_price"`
+	OfficialOutputPrice     *float64 `json:"official_output_price"`
+	OfficialCacheReadPrice  *float64 `json:"official_cache_read_price"`
+	OfficialCacheWritePrice *float64 `json:"official_cache_write_price"`
 
 	// Image field
 	ImageResolutions map[string]float64 `json:"image_resolutions"`
@@ -138,8 +142,10 @@ func (h *PricingModelHandler) Create(c *gin.Context) {
 		OutputPrice:         req.OutputPrice,
 		CacheReadPrice:      req.CacheReadPrice,
 		CacheWritePrice:     req.CacheWritePrice,
-		OfficialInputPrice:  req.OfficialInputPrice,
-		OfficialOutputPrice: req.OfficialOutputPrice,
+		OfficialInputPrice:      req.OfficialInputPrice,
+		OfficialOutputPrice:     req.OfficialOutputPrice,
+		OfficialCacheReadPrice:  req.OfficialCacheReadPrice,
+		OfficialCacheWritePrice: req.OfficialCacheWritePrice,
 	}
 	if req.Enabled != nil {
 		rec.Enabled = *req.Enabled
@@ -249,6 +255,12 @@ func (h *PricingModelHandler) Update(c *gin.Context) {
 	}
 	if req.OfficialOutputPrice != nil {
 		existing.OfficialOutputPrice = req.OfficialOutputPrice
+	}
+	if req.OfficialCacheReadPrice != nil {
+		existing.OfficialCacheReadPrice = req.OfficialCacheReadPrice
+	}
+	if req.OfficialCacheWritePrice != nil {
+		existing.OfficialCacheWritePrice = req.OfficialCacheWritePrice
 	}
 
 	// Image resolutions

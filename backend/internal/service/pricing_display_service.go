@@ -191,8 +191,10 @@ type PricingModelAdminDTO struct {
 	OutputPrice         *float64 `json:"output_price,omitempty"`
 	CacheReadPrice      *float64 `json:"cache_read_price,omitempty"`
 	CacheWritePrice     *float64 `json:"cache_write_price,omitempty"`
-	OfficialInputPrice  *float64 `json:"official_input_price,omitempty"`
-	OfficialOutputPrice *float64 `json:"official_output_price,omitempty"`
+	OfficialInputPrice      *float64 `json:"official_input_price,omitempty"`
+	OfficialOutputPrice     *float64 `json:"official_output_price,omitempty"`
+	OfficialCacheReadPrice  *float64 `json:"official_cache_read_price,omitempty"`
+	OfficialCacheWritePrice *float64 `json:"official_cache_write_price,omitempty"`
 
 	// Image field
 	ImageResolutions map[string]float64 `json:"image_resolutions,omitempty"`
@@ -214,9 +216,11 @@ func ToAdminDTO(r *PricingModelRecord) PricingModelAdminDTO {
 		OutputPrice:         r.OutputPrice,
 		CacheReadPrice:      r.CacheReadPrice,
 		CacheWritePrice:     r.CacheWritePrice,
-		OfficialInputPrice:  r.OfficialInputPrice,
-		OfficialOutputPrice: r.OfficialOutputPrice,
-		SavingPercent:       r.SavingPercent,
+		OfficialInputPrice:      r.OfficialInputPrice,
+		OfficialOutputPrice:     r.OfficialOutputPrice,
+		OfficialCacheReadPrice:  r.OfficialCacheReadPrice,
+		OfficialCacheWritePrice: r.OfficialCacheWritePrice,
+		SavingPercent:           r.SavingPercent,
 		UpdatedAt:           r.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 	if r.ImagePricingJSON != nil && *r.ImagePricingJSON != "" {

@@ -36,8 +36,10 @@ type PricingModelRecord struct {
 	OutputPrice         *float64
 	CacheReadPrice      *float64
 	CacheWritePrice     *float64
-	OfficialInputPrice  *float64
-	OfficialOutputPrice *float64
+	OfficialInputPrice      *float64
+	OfficialOutputPrice     *float64
+	OfficialCacheReadPrice  *float64
+	OfficialCacheWritePrice *float64
 
 	// Image field: raw JSON string e.g. `{"1k":0.005,"2k":0.01}`
 	ImagePricingJSON *string

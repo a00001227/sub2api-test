@@ -22,6 +22,8 @@ export interface PricingModelRecord {
   cache_write_price: number | null
   official_input_price: number | null
   official_output_price: number | null
+  official_cache_read_price: number | null
+  official_cache_write_price: number | null
 
   // Image model field
   image_resolutions: Record<string, number> | null
@@ -43,6 +45,8 @@ export interface CreatePricingModelPayload {
   cache_write_price?: number | null
   official_input_price?: number | null
   official_output_price?: number | null
+  official_cache_read_price?: number | null
+  official_cache_write_price?: number | null
 
   image_resolutions?: Record<string, number>
   saving_percent?: number

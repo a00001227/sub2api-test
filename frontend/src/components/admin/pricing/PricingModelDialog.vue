@@ -53,10 +53,22 @@
           <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('admin.pricingDisplay.textPricingHint') }}</p>
 
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-2">
-            <PriceField v-model="form.input_price" :label="t('admin.pricingDisplay.labelInputPrice')" />
-            <PriceField v-model="form.output_price" :label="t('admin.pricingDisplay.labelOutputPrice')" />
-            <PriceField v-model="form.cache_read_price" :label="t('admin.pricingDisplay.labelCacheReadPrice')" />
-            <PriceField v-model="form.cache_write_price" :label="t('admin.pricingDisplay.labelCacheWritePrice')" />
+            <div>
+              <PriceField v-model="form.input_price" :label="t('admin.pricingDisplay.labelInputPrice')" />
+              <p v-if="discountInput" class="mt-0.5 text-xs" :class="discountInput.cls">{{ discountInput.text }}</p>
+            </div>
+            <div>
+              <PriceField v-model="form.output_price" :label="t('admin.pricingDisplay.labelOutputPrice')" />
+              <p v-if="discountOutput" class="mt-0.5 text-xs" :class="discountOutput.cls">{{ discountOutput.text }}</p>
+            </div>
+            <div>
+              <PriceField v-model="form.cache_read_price" :label="t('admin.pricingDisplay.labelCacheReadPrice')" />
+              <p v-if="discountCacheRead" class="mt-0.5 text-xs" :class="discountCacheRead.cls">{{ discountCacheRead.text }}</p>
+            </div>
+            <div>
+              <PriceField v-model="form.cache_write_price" :label="t('admin.pricingDisplay.labelCacheWritePrice')" />
+              <p v-if="discountCacheWrite" class="mt-0.5 text-xs" :class="discountCacheWrite.cls">{{ discountCacheWrite.text }}</p>
+            </div>
           </div>
 
           <div class="mt-4">
@@ -64,21 +76,8 @@
             <div class="grid grid-cols-2 gap-4">
               <PriceField v-model="form.official_input_price" :label="t('admin.pricingDisplay.labelOfficialInput')" />
               <PriceField v-model="form.official_output_price" :label="t('admin.pricingDisplay.labelOfficialOutput')" />
-            </div>
-          </div>
-
-          <!-- Real-time preview -->
-          <div v-if="textPreview" class="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
-            <h4 class="mb-2 text-sm font-semibold text-green-700 dark:text-green-300">{{ t('admin.pricingDisplay.savingsPreview') }}</h4>
-            <div class="grid grid-cols-2 gap-2 text-xs font-mono">
-              <div class="text-gray-600 dark:text-gray-400">{{ t('admin.pricingDisplay.previewRealCost') }}</div>
-              <div class="text-right font-semibold text-gray-900 dark:text-white">{{ textPreview.realCost }}</div>
-              <div class="text-gray-600 dark:text-gray-400">{{ t('admin.pricingDisplay.previewOfficialCost') }}</div>
-              <div class="text-right text-gray-700 dark:text-gray-300">{{ textPreview.officialCost }}</div>
-              <div class="text-gray-600 dark:text-gray-400">{{ t('admin.pricingDisplay.previewSaving') }}</div>
-              <div class="text-right font-bold" :class="textPreview.savingPct >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600'">
-                {{ textPreview.savingStr }}
-              </div>
+              <PriceField v-model="form.official_cache_read_price" :label="t('admin.pricingDisplay.labelOfficialCacheRead')" />
+              <PriceField v-model="form.official_cache_write_price" :label="t('admin.pricingDisplay.labelOfficialCacheWrite')" />
             </div>
           </div>
         </div>
@@ -190,6 +189,8 @@ const form = ref<CreatePricingModelPayload>({
   cache_write_price: null,
   official_input_price: null,
   official_output_price: null,
+  official_cache_read_price: null,
+  official_cache_write_price: null,
   saving_percent: undefined,
 })
 
@@ -207,6 +208,8 @@ onMounted(() => {
       cache_write_price: r.cache_write_price,
       official_input_price: r.official_input_price,
       official_output_price: r.official_output_price,
+      official_cache_read_price: r.official_cache_read_price,
+      official_cache_write_price: r.official_cache_write_price,
       saving_percent: r.saving_percent ?? undefined,
     }
     // Always load image_resolutions for image models, even if empty
@@ -218,30 +221,35 @@ onMounted(() => {
   }
 })
 
-const textPreview = computed(() => {
-  if (form.value.model_type !== 'text') return null
-  const input = form.value.input_price ?? 0
-  const output = form.value.output_price ?? 0
-  const offInput = form.value.official_input_price ?? 0
-  const offOutput = form.value.official_output_price ?? 0
-
-  const realCost = input + output
-  const officialCost = offInput + offOutput
-  const savingPct = officialCost > 0 ? (officialCost - realCost) / officialCost : 0
-
-  return {
-    realCost: fmtTokenPrice(realCost),
-    officialCost: fmtTokenPrice(officialCost),
-    savingPct,
-    savingStr: officialCost > 0 ? `${(savingPct * 100).toFixed(1)}%` : '—',
-  }
-})
-
-function fmtTokenPrice(v: number) {
-  if (!v) return '$0/MTok'
-  // v is USD per token; display as USD per 1M tokens (×1e6).
-  return `$${Number((v * 1_000_000).toFixed(4))}/MTok`
+// Per-field discount caption: compares a display price against its
+// corresponding official price. Both values are USD-per-token; the official
+// price is shown in $/MTok (×1e6). Returns null when the caption should hide
+// (not a text model, missing values, or official <= 0).
+interface FieldDiscount {
+  text: string
+  cls: string
 }
+
+function fieldDiscount(
+  display: number | null | undefined,
+  official: number | null | undefined,
+): FieldDiscount | null {
+  if (form.value.model_type !== 'text') return null
+  if (display == null || official == null) return null
+  if (!(official > 0)) return null
+  const saving = (official - display) / official
+  const price = `$${Number((official * 1_000_000).toFixed(4))}/MTok`
+  const pct = `${(saving * 100).toFixed(1)}%`
+  return {
+    text: t('admin.pricingDisplay.perFieldDiscount', { price, pct }),
+    cls: saving > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500',
+  }
+}
+
+const discountInput = computed(() => fieldDiscount(form.value.input_price, form.value.official_input_price))
+const discountOutput = computed(() => fieldDiscount(form.value.output_price, form.value.official_output_price))
+const discountCacheRead = computed(() => fieldDiscount(form.value.cache_read_price, form.value.official_cache_read_price))
+const discountCacheWrite = computed(() => fieldDiscount(form.value.cache_write_price, form.value.official_cache_write_price))
 
 function addResolution() {
   imageResolutions.value.push({ key: '', price: 0 })
@@ -272,6 +280,8 @@ async function save() {
       payload.cache_write_price = null
       payload.official_input_price = null
       payload.official_output_price = null
+      payload.official_cache_read_price = null
+      payload.official_cache_write_price = null
       // Sanitize saving_percent: treat NaN/Infinity as absent
       if (payload.saving_percent != null && !isFinite(payload.saving_percent)) {
         payload.saving_percent = undefined

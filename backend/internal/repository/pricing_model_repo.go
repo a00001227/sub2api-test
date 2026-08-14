@@ -24,6 +24,7 @@ const pricingModelSelectCols = `
     id, model, model_type, user_type, enabled,
     input_price, output_price, cache_read_price, cache_write_price,
     official_input_price, official_output_price,
+    official_cache_read_price, official_cache_write_price,
     image_pricing_json,
     saving_percent, created_at, updated_at`
 
@@ -36,6 +37,7 @@ func scanPricingModel(row interface {
 		&r.ID, &r.Model, &modelType, &userType, &r.Enabled,
 		&r.InputPrice, &r.OutputPrice, &r.CacheReadPrice, &r.CacheWritePrice,
 		&r.OfficialInputPrice, &r.OfficialOutputPrice,
+		&r.OfficialCacheReadPrice, &r.OfficialCacheWritePrice,
 		&r.ImagePricingJSON,
 		&r.SavingPercent, &r.CreatedAt, &r.UpdatedAt,
 	)
@@ -53,12 +55,14 @@ func (r *pricingModelRepository) Create(ctx context.Context, rec *service.Pricin
 		    (model, model_type, user_type, enabled,
 		     input_price, output_price, cache_read_price, cache_write_price,
 		     official_input_price, official_output_price,
+		     official_cache_read_price, official_cache_write_price,
 		     image_pricing_json, saving_percent, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
 		RETURNING `+pricingModelSelectCols,
 		rec.Model, string(rec.ModelType), string(rec.UserType), rec.Enabled,
 		rec.InputPrice, rec.OutputPrice, rec.CacheReadPrice, rec.CacheWritePrice,
 		rec.OfficialInputPrice, rec.OfficialOutputPrice,
+		rec.OfficialCacheReadPrice, rec.OfficialCacheWritePrice,
 		rec.ImagePricingJSON, rec.SavingPercent,
 	)
 	result, err := scanPricingModel(row)
@@ -85,14 +89,17 @@ func (r *pricingModelRepository) Update(ctx context.Context, rec *service.Pricin
 		    cache_write_price    = $8,
 		    official_input_price = $9,
 		    official_output_price= $10,
-		    image_pricing_json   = $11,
-		    saving_percent       = $12,
+		    official_cache_read_price  = $11,
+		    official_cache_write_price = $12,
+		    image_pricing_json   = $13,
+		    saving_percent       = $14,
 		    updated_at           = NOW()
-		WHERE id = $13
+		WHERE id = $15
 		RETURNING `+pricingModelSelectCols,
 		rec.Model, string(rec.ModelType), string(rec.UserType), rec.Enabled,
 		rec.InputPrice, rec.OutputPrice, rec.CacheReadPrice, rec.CacheWritePrice,
 		rec.OfficialInputPrice, rec.OfficialOutputPrice,
+		rec.OfficialCacheReadPrice, rec.OfficialCacheWritePrice,
 		rec.ImagePricingJSON, rec.SavingPercent, rec.ID,
 	)
 	result, err := scanPricingModel(row)
