@@ -50,6 +50,9 @@ type PricingDisplayItem struct {
 	ModelType ModelType    `json:"model_type"`
 	UserType  UserType     `json:"user_type"`
 	Pricing   PricingUnion `json:"pricing"`
+	// SortOrder carries the admin-configured display order through to sorting.
+	// Not serialized: clients render in slice order.
+	SortOrder int `json:"-"`
 }
 
 // PricingUnion holds either text or image pricing (one will be nil).
@@ -102,7 +105,14 @@ func (s *PricingDisplayService) GetPublicPricingDisplay(ctx context.Context) ([]
 		items = append(items, item)
 	}
 
-	sort.Slice(items, func(i, j int) bool {
+	// Public display order == admin sort_order (lower first), then model name,
+	// then user_type as a stable tiebreaker. records already arrive ordered by
+	// sort_order ASC from the repo, but re-sort defensively since buildDisplayItem
+	// may skip rows.
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].SortOrder != items[j].SortOrder {
+			return items[i].SortOrder < items[j].SortOrder
+		}
 		if items[i].Model != items[j].Model {
 			return items[i].Model < items[j].Model
 		}
@@ -124,6 +134,7 @@ func (s *PricingDisplayService) buildDisplayItem(r *PricingModelRecord) (Pricing
 		Model:     r.Model,
 		ModelType: r.ModelType,
 		UserType:  r.UserType,
+		SortOrder: r.SortOrder,
 	}
 
 	switch r.ModelType {
@@ -199,6 +210,9 @@ type PricingModelAdminDTO struct {
 	// Image field
 	ImageResolutions map[string]float64 `json:"image_resolutions,omitempty"`
 
+	// Display order (lower = shown first on the public pricing page)
+	SortOrder int `json:"sort_order"`
+
 	// Computed
 	SavingPercent float64 `json:"saving_percent"`
 	UpdatedAt     string  `json:"updated_at"`
@@ -220,6 +234,7 @@ func ToAdminDTO(r *PricingModelRecord) PricingModelAdminDTO {
 		OfficialOutputPrice:     r.OfficialOutputPrice,
 		OfficialCacheReadPrice:  r.OfficialCacheReadPrice,
 		OfficialCacheWritePrice: r.OfficialCacheWritePrice,
+		SortOrder:               r.SortOrder,
 		SavingPercent:           r.SavingPercent,
 		UpdatedAt:           r.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
@@ -261,6 +276,19 @@ func (s *PricingDisplayService) DeletePricingModel(ctx context.Context, id int64
 	}
 	s.invalidatePublicCache()
 	return nil
+}
+
+// ReorderModels sets the display order of pricing models to match the given id
+// order (position 0 = shown first on the public pricing page). Returns the
+// number of rows updated. Invalidates the public cache so the reorder takes
+// effect on the next public read.
+func (s *PricingDisplayService) ReorderModels(ctx context.Context, ids []int64) (int, error) {
+	updated, err := s.repo.Reorder(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
+	s.invalidatePublicCache()
+	return updated, nil
 }
 
 // GetPricingModel retrieves a single record by ID.

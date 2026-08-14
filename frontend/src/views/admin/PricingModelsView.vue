@@ -39,17 +39,24 @@
         </select>
       </div>
 
+      <!-- Drag hint -->
+      <p class="mb-2 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <Icon name="menu" size="sm" />
+        {{ t('admin.pricingDisplay.dragHint') }}
+      </p>
+
       <!-- Table -->
       <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-500">
         <div v-if="loading" class="flex items-center justify-center py-16">
           <Icon name="refresh" size="xl" class="animate-spin text-gray-400" />
         </div>
-        <div v-else-if="filteredModels.length === 0" class="py-16 text-center text-sm text-gray-500 dark:text-gray-400">
+        <div v-else-if="draggableModels.length === 0" class="py-16 text-center text-sm text-gray-500 dark:text-gray-400">
           {{ t('admin.pricingDisplay.noModels') }}
         </div>
         <table v-else class="min-w-full divide-y divide-gray-200 dark:divide-dark-500">
           <thead class="bg-gray-50 dark:bg-dark-700">
             <tr>
+              <th class="w-10 px-2 py-3"></th>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.pricingDisplay.colModel') }}</th>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.pricingDisplay.colType') }}</th>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.pricingDisplay.colUserType') }}</th>
@@ -60,8 +67,20 @@
               <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.pricingDisplay.colActions') }}</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-600 dark:bg-dark-800">
-            <tr v-for="m in filteredModels" :key="m.id" class="hover:bg-gray-50 dark:hover:bg-dark-700">
+          <VueDraggable
+            v-model="draggableModels"
+            tag="tbody"
+            handle=".drag-handle"
+            :animation="200"
+            class="divide-y divide-gray-100 bg-white dark:divide-dark-600 dark:bg-dark-800"
+            @end="onReorder"
+          >
+            <tr v-for="m in draggableModels" :key="m.id" class="hover:bg-gray-50 dark:hover:bg-dark-700">
+              <td class="px-2 py-3 text-center">
+                <span class="drag-handle inline-flex cursor-grab text-gray-400 active:cursor-grabbing" :title="t('admin.pricingDisplay.dragHint')">
+                  <Icon name="menu" size="sm" />
+                </span>
+              </td>
               <td class="px-4 py-3 font-mono text-sm font-medium text-gray-900 dark:text-white">{{ m.model }}</td>
               <td class="px-4 py-3">
                 <span :class="typeBadgeClass(m.model_type)" class="rounded px-2 py-0.5 text-xs font-medium">
@@ -108,7 +127,7 @@
                 </div>
               </td>
             </tr>
-          </tbody>
+          </VueDraggable>
         </table>
       </div>
     </div>
@@ -152,8 +171,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { VueDraggable } from 'vue-draggable-plus'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PricingModelDialog from '@/components/admin/pricing/PricingModelDialog.vue'
@@ -186,6 +206,31 @@ const filteredModels = computed(() => {
     return true
   })
 })
+
+// VueDraggable needs a mutable list bound via v-model. Mirror the (filtered)
+// visible rows into a local ref; the watcher keeps it in sync with loads/filters.
+const draggableModels = ref<PricingModelRecord[]>([])
+watch(filteredModels, (v) => { draggableModels.value = [...v] }, { immediate: true })
+
+const reordering = ref(false)
+
+// Persist the current visible order. If a filter is active, only the visible
+// subset's ids are sent — acceptable per spec.
+async function onReorder() {
+  if (reordering.value) return
+  reordering.value = true
+  try {
+    const ids = draggableModels.value.map((m) => m.id)
+    await pricingApi.reorderModels(ids)
+    appStore.showSuccess(t('admin.pricingDisplay.reorderSuccess'))
+    await loadModels()
+  } catch (e: any) {
+    appStore.showError(e?.message || t('admin.pricingDisplay.reorderFail'))
+    await loadModels()
+  } finally {
+    reordering.value = false
+  }
+}
 
 async function loadModels() {
   loading.value = true

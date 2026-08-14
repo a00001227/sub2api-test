@@ -6927,6 +6927,9 @@ export default {
       saveSuccess: '价格模型已更新',
       createSuccess: '价格模型已创建',
       saveFail: '保存价格模型失败',
+      dragHint: '拖拽调整展示顺序（同步到前台首页）',
+      reorderSuccess: '展示顺序已更新',
+      reorderFail: '更新展示顺序失败',
       catalog: {
         title: '从官方目录选择模型',
         subtitle: '勾选官方模型批量添加，添加后为待启用状态，设好价格再启用。',

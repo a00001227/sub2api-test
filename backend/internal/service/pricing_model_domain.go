@@ -44,6 +44,10 @@ type PricingModelRecord struct {
 	// Image field: raw JSON string e.g. `{"1k":0.005,"2k":0.01}`
 	ImagePricingJSON *string
 
+	// Display order: lower values are shown first on the public pricing page.
+	// New rows append to the end (MAX(sort_order)+1); admins reorder via drag.
+	SortOrder int
+
 	// Computed by service layer
 	SavingPercent float64
 	CreatedAt     time.Time
@@ -70,6 +74,9 @@ type PricingModelRepository interface {
 	GetByID(ctx context.Context, id int64) (*PricingModelRecord, error)
 	List(ctx context.Context) ([]*PricingModelRecord, error)
 	ListEnabled(ctx context.Context) ([]*PricingModelRecord, error)
+	// Reorder sets sort_order = position for each id in the given order,
+	// transactionally. Returns the number of rows updated.
+	Reorder(ctx context.Context, ids []int64) (int, error)
 }
 
 // ---- Sentinel errors ----

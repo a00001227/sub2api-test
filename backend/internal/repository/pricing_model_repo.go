@@ -25,7 +25,7 @@ const pricingModelSelectCols = `
     input_price, output_price, cache_read_price, cache_write_price,
     official_input_price, official_output_price,
     official_cache_read_price, official_cache_write_price,
-    image_pricing_json,
+    image_pricing_json, sort_order,
     saving_percent, created_at, updated_at`
 
 func scanPricingModel(row interface {
@@ -38,7 +38,7 @@ func scanPricingModel(row interface {
 		&r.InputPrice, &r.OutputPrice, &r.CacheReadPrice, &r.CacheWritePrice,
 		&r.OfficialInputPrice, &r.OfficialOutputPrice,
 		&r.OfficialCacheReadPrice, &r.OfficialCacheWritePrice,
-		&r.ImagePricingJSON,
+		&r.ImagePricingJSON, &r.SortOrder,
 		&r.SavingPercent, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -56,8 +56,10 @@ func (r *pricingModelRepository) Create(ctx context.Context, rec *service.Pricin
 		     input_price, output_price, cache_read_price, cache_write_price,
 		     official_input_price, official_output_price,
 		     official_cache_read_price, official_cache_write_price,
-		     image_pricing_json, saving_percent, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+		     image_pricing_json, sort_order, saving_percent, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+		        (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM pricing_models),
+		        $14, NOW(), NOW())
 		RETURNING `+pricingModelSelectCols,
 		rec.Model, string(rec.ModelType), string(rec.UserType), rec.Enabled,
 		rec.InputPrice, rec.OutputPrice, rec.CacheReadPrice, rec.CacheWritePrice,
@@ -143,12 +145,40 @@ func (r *pricingModelRepository) GetByID(ctx context.Context, id int64) (*servic
 
 func (r *pricingModelRepository) List(ctx context.Context) ([]*service.PricingModelRecord, error) {
 	return r.query(ctx, `SELECT `+pricingModelSelectCols+`
-		FROM pricing_models ORDER BY model ASC, user_type ASC`)
+		FROM pricing_models ORDER BY sort_order ASC, model ASC`)
 }
 
 func (r *pricingModelRepository) ListEnabled(ctx context.Context) ([]*service.PricingModelRecord, error) {
 	return r.query(ctx, `SELECT `+pricingModelSelectCols+`
-		FROM pricing_models WHERE enabled = TRUE ORDER BY model ASC, user_type ASC`)
+		FROM pricing_models WHERE enabled = TRUE ORDER BY sort_order ASC, model ASC`)
+}
+
+// Reorder assigns sort_order = position (0-based index) for each id in the
+// provided order within a single transaction. Ids not present in the table are
+// silently skipped; the returned count reflects rows actually updated.
+func (r *pricingModelRepository) Reorder(ctx context.Context, ids []int64) (int, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin reorder tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	updated := 0
+	for i, id := range ids {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE pricing_models SET sort_order = $1, updated_at = NOW() WHERE id = $2`,
+			i, id)
+		if err != nil {
+			return 0, fmt.Errorf("update sort_order: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		updated += int(n)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit reorder tx: %w", err)
+	}
+	return updated, nil
 }
 
 func (r *pricingModelRepository) query(ctx context.Context, q string, args ...any) ([]*service.PricingModelRecord, error) {

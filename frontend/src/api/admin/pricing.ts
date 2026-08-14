@@ -28,6 +28,9 @@ export interface PricingModelRecord {
   // Image model field
   image_resolutions: Record<string, number> | null
 
+  // Display order (lower = shown first on the public pricing page)
+  sort_order: number
+
   // Computed by backend
   saving_percent: number
   updated_at: string
@@ -107,6 +110,15 @@ export const pricingApi = {
 
   async deleteModel(id: number): Promise<void> {
     await apiClient.delete(`/admin/pricing/models/${id}`)
+  },
+
+  /** Persist a new display order. `ids` is the full visible list in the new order. */
+  async reorderModels(ids: number[]): Promise<{ updated: number }> {
+    const { data } = await apiClient.post<{ updated: number }>(
+      '/admin/pricing/models/reorder',
+      { ids },
+    )
+    return data
   },
 
   // ---- Official catalog flow ----

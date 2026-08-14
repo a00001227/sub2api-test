@@ -6773,6 +6773,9 @@ export default {
       saveSuccess: 'Pricing model updated',
       createSuccess: 'Pricing model created',
       saveFail: 'Failed to save pricing model',
+      dragHint: 'Drag to adjust display order (synced to the public homepage)',
+      reorderSuccess: 'Display order updated',
+      reorderFail: 'Failed to update display order',
       catalog: {
         title: 'Select from Official Catalog',
         subtitle: 'Pick official models to add in bulk. Added models start disabled — set the price, then enable.',

@@ -322,6 +322,27 @@ func (h *PricingModelHandler) Delete(c *gin.Context) {
 	response.Success(c, gin.H{"deleted": true})
 }
 
+type reorderPricingModelsRequest struct {
+	IDs []int64 `json:"ids" binding:"required"`
+}
+
+// Reorder updates the display order of pricing models to match the given id
+// order. Position 0 is shown first on the public pricing page.
+// POST /api/v1/admin/pricing/models/reorder
+func (h *PricingModelHandler) Reorder(c *gin.Context) {
+	var req reorderPricingModelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, err := h.svc.ReorderModels(c.Request.Context(), req.IDs)
+	if err != nil {
+		response.InternalError(c, "failed to reorder pricing models")
+		return
+	}
+	response.Success(c, gin.H{"updated": updated})
+}
+
 func parseID(c *gin.Context) (int64, error) {
 	return strconv.ParseInt(c.Param("id"), 10, 64)
 }

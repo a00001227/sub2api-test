@@ -702,6 +702,8 @@ func registerPricingModelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			models.GET("/catalog", h.Admin.PricingModel.Catalog)
 			models.POST("/catalog/sync", h.Admin.PricingModel.SyncCatalog)
 			models.POST("/from-catalog", h.Admin.PricingModel.CreateFromCatalog)
+			// Drag-reorder: declared before /:id so "reorder" isn't parsed as an id.
+			models.POST("/reorder", h.Admin.PricingModel.Reorder)
 			models.GET("/:id", h.Admin.PricingModel.GetByID)
 			models.PUT("/:id", h.Admin.PricingModel.Update)
 			models.DELETE("/:id", h.Admin.PricingModel.Delete)
