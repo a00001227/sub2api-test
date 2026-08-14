@@ -6743,7 +6743,7 @@ export default {
       labelUserType: 'User Type',
       labelEnabled: 'Enabled',
       sectionTextPricing: 'Text Pricing (per token)',
-      textPricingHint: 'Enter prices in USD per token. Example: $3/MTok = 0.000003',
+      textPricingHint: 'Enter prices in USD per 1M tokens ($/MTok), e.g. input 3, output 15. Stored per-token automatically.',
       labelInputPrice: 'Input Price',
       labelOutputPrice: 'Output Price',
       labelCacheReadPrice: 'Cache Read Price',

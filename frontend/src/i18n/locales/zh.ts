@@ -6897,7 +6897,7 @@ export default {
       labelUserType: '用户类型',
       labelEnabled: '启用',
       sectionTextPricing: '文本定价（每 Token）',
-      textPricingHint: '输入每 Token 的 USD 价格，例如 $3/MTok = 0.000003',
+      textPricingHint: '按每百万 tokens 的 USD 价格填写（$/MTok），例如输入 3、输出 15；系统自动换算为每 token 存储。',
       labelInputPrice: '输入价格',
       labelOutputPrice: '输出价格',
       labelCacheReadPrice: '缓存读取价格',
