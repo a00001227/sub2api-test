@@ -1,6 +1,7 @@
 import { apiClient } from '../client'
 
 export type ModerationMode = 'off' | 'observe' | 'pre_block'
+export type ModerationProvider = 'openai' | 'aliyun' | 'tencent'
 export type KeywordBlockingMode = 'keyword_only' | 'keyword_and_api' | 'api_only'
 export type ContentModerationModelFilterType = 'all' | 'include' | 'exclude'
 
@@ -12,8 +13,19 @@ export interface ContentModerationModelFilter {
 export interface ContentModerationConfig {
   enabled: boolean
   mode: ModerationMode
+  provider: ModerationProvider
   base_url: string
   model: string
+  // 阿里云 / 腾讯云凭据只回掩码 + configured + 非密 region/endpoint。
+  aliyun_configured: boolean
+  aliyun_access_key_id_masked: string
+  aliyun_region: string
+  aliyun_endpoint: string
+  aliyun_service: string
+  tencent_configured: boolean
+  tencent_secret_id_masked: string
+  tencent_region: string
+  tencent_biz_type: string
   api_key_configured: boolean
   api_key_masked: string
   api_key_count: number
@@ -88,8 +100,19 @@ export interface ContentModerationTestAuditResult {
 export interface UpdateContentModerationConfig {
   enabled?: boolean
   mode?: ModerationMode
+  provider?: ModerationProvider
   base_url?: string
   model?: string
+  // 阿里云 / 腾讯云凭据（省略=不改；空串=清空）。
+  aliyun_access_key_id?: string
+  aliyun_access_key_secret?: string
+  aliyun_region?: string
+  aliyun_endpoint?: string
+  aliyun_service?: string
+  tencent_secret_id?: string
+  tencent_secret_key?: string
+  tencent_region?: string
+  tencent_biz_type?: string
   api_key?: string
   api_keys?: string[]
   api_keys_mode?: 'append' | 'replace'
@@ -245,6 +268,17 @@ export async function getStatus(): Promise<ContentModerationRuntimeStatus> {
   return data
 }
 
+export interface ImportSeedKeywordsResponse {
+  added: number
+  total: number
+  config: ContentModerationConfig
+}
+
+export async function importKeywords(): Promise<ImportSeedKeywordsResponse> {
+  const { data } = await apiClient.post<ImportSeedKeywordsResponse>('/admin/risk-control/keywords/import')
+  return data
+}
+
 export async function testAPIKeys(
   payload: TestContentModerationAPIKeysPayload = {}
 ): Promise<TestContentModerationAPIKeysResponse> {
@@ -284,6 +318,7 @@ export const riskControlAPI = {
   getConfig,
   updateConfig,
   getStatus,
+  importKeywords,
   testAPIKeys,
   listLogs,
   unbanUser,

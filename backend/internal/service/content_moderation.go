@@ -39,6 +39,11 @@ const (
 	ContentModerationActionError        = "error"
 	ContentModerationActionCyberPolicy  = "cyber_policy" // cyber_policy 硬阻断的风控日志 action（封号计数排除按此值过滤）
 
+	// 云审厂商（provider）：openai 兼容（默认，走 /v1/moderations）/ 阿里云内容安全 / 腾讯云文本审核。
+	ContentModerationProviderOpenAI  = "openai"
+	ContentModerationProviderAliyun  = "aliyun"
+	ContentModerationProviderTencent = "tencent"
+
 	contentModerationKeywordCategory = "keyword"
 
 	ContentModerationKeywordModeKeywordOnly   = "keyword_only"
@@ -107,7 +112,24 @@ var contentModerationCategoryOrder = []string{
 	"sexual/minors",
 	"violence",
 	"violence/graphic",
+	// 合规分类（阿里云/腾讯云等云审映射到此，OpenAI 结果不填这些键→不误报）。
+	ContentModerationCategoryPolitical,
+	ContentModerationCategoryPorn,
+	ContentModerationCategoryTerror,
+	ContentModerationCategoryAbuse,
+	ContentModerationCategoryContraband,
+	ContentModerationCategoryAd,
 }
+
+// 合规分类键（云审厂商标签统一归一到这些）。
+const (
+	ContentModerationCategoryPolitical  = "political"
+	ContentModerationCategoryPorn       = "porn"
+	ContentModerationCategoryTerror     = "terror"
+	ContentModerationCategoryAbuse      = "abuse"
+	ContentModerationCategoryContraband = "contraband"
+	ContentModerationCategoryAd         = "ad"
+)
 
 func ContentModerationDefaultThresholds() map[string]float64 {
 	return map[string]float64{
@@ -124,6 +146,13 @@ func ContentModerationDefaultThresholds() map[string]float64 {
 		"sexual/minors":          0.65,
 		"violence":               0.95,
 		"violence/graphic":       0.95,
+		// 合规分类默认阈值（政治/涉黄/暴恐/违禁从严；广告默认近乎关闭）。
+		ContentModerationCategoryPolitical:  0.60,
+		ContentModerationCategoryPorn:       0.60,
+		ContentModerationCategoryTerror:     0.60,
+		ContentModerationCategoryAbuse:      0.80,
+		ContentModerationCategoryContraband: 0.60,
+		ContentModerationCategoryAd:         0.99,
 	}
 }
 
@@ -136,10 +165,23 @@ func ContentModerationCategories() []string {
 type ContentModerationConfig struct {
 	Enabled              bool                         `json:"enabled"`
 	Mode                 string                       `json:"mode"`
+	// Provider 云审厂商：openai（默认）/ aliyun / tencent。
+	Provider             string                       `json:"provider,omitempty"`
 	BaseURL              string                       `json:"base_url"`
 	Model                string                       `json:"model"`
 	APIKey               string                       `json:"api_key,omitempty"`
 	APIKeys              []string                     `json:"api_keys,omitempty"`
+	// 阿里云内容安全凭据（provider=aliyun 时使用；与 OpenAI key 一样明文存于 settings JSON）。
+	AliyunAccessKeyID     string `json:"aliyun_access_key_id,omitempty"`
+	AliyunAccessKeySecret string `json:"aliyun_access_key_secret,omitempty"`
+	AliyunRegion          string `json:"aliyun_region,omitempty"`
+	AliyunEndpoint        string `json:"aliyun_endpoint,omitempty"`
+	AliyunService         string `json:"aliyun_service,omitempty"`
+	// 腾讯云文本审核凭据（provider=tencent 时使用）。
+	TencentSecretID  string `json:"tencent_secret_id,omitempty"`
+	TencentSecretKey string `json:"tencent_secret_key,omitempty"`
+	TencentRegion    string `json:"tencent_region,omitempty"`
+	TencentBizType   string `json:"tencent_biz_type,omitempty"`
 	TimeoutMS            int                          `json:"timeout_ms"`
 	SampleRate           int                          `json:"sample_rate"`
 	AllGroups            bool                         `json:"all_groups"`
@@ -170,8 +212,19 @@ type ContentModerationConfig struct {
 type ContentModerationConfigView struct {
 	Enabled                        bool                            `json:"enabled"`
 	Mode                           string                          `json:"mode"`
+	Provider                       string                          `json:"provider"`
 	BaseURL                        string                          `json:"base_url"`
 	Model                          string                          `json:"model"`
+	// 阿里云/腾讯云凭据只回掩码 + configured 布尔 + 非密的 region/endpoint。
+	AliyunConfigured        bool   `json:"aliyun_configured"`
+	AliyunAccessKeyIDMasked string `json:"aliyun_access_key_id_masked"`
+	AliyunRegion            string `json:"aliyun_region"`
+	AliyunEndpoint          string `json:"aliyun_endpoint"`
+	AliyunService           string `json:"aliyun_service"`
+	TencentConfigured       bool   `json:"tencent_configured"`
+	TencentSecretIDMasked   string `json:"tencent_secret_id_masked"`
+	TencentRegion           string `json:"tencent_region"`
+	TencentBizType          string `json:"tencent_biz_type"`
 	APIKeyConfigured               bool                            `json:"api_key_configured"`
 	APIKeyMasked                   string                          `json:"api_key_masked"`
 	APIKeyCount                    int                             `json:"api_key_count"`
@@ -258,8 +311,19 @@ type ContentModerationTestAuditResult struct {
 type UpdateContentModerationConfigInput struct {
 	Enabled                        *bool                         `json:"enabled"`
 	Mode                           *string                       `json:"mode"`
+	Provider                       *string                       `json:"provider"`
 	BaseURL                        *string                       `json:"base_url"`
 	Model                          *string                       `json:"model"`
+	// 阿里云/腾讯云凭据更新（nil=不改；空串=清空）。
+	AliyunAccessKeyID     *string `json:"aliyun_access_key_id"`
+	AliyunAccessKeySecret *string `json:"aliyun_access_key_secret"`
+	AliyunRegion          *string `json:"aliyun_region"`
+	AliyunEndpoint        *string `json:"aliyun_endpoint"`
+	AliyunService         *string `json:"aliyun_service"`
+	TencentSecretID       *string `json:"tencent_secret_id"`
+	TencentSecretKey      *string `json:"tencent_secret_key"`
+	TencentRegion         *string `json:"tencent_region"`
+	TencentBizType        *string `json:"tencent_biz_type"`
 	APIKey                         *string                       `json:"api_key"`
 	APIKeys                        *[]string                     `json:"api_keys"`
 	APIKeysMode                    string                        `json:"api_keys_mode"`
@@ -592,6 +656,38 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	if input.Mode != nil {
 		cfg.Mode = strings.TrimSpace(*input.Mode)
+	}
+	if input.Provider != nil {
+		cfg.Provider = strings.ToLower(strings.TrimSpace(*input.Provider))
+	}
+	// 阿里云凭据（nil 不改；提供即覆盖，空串=清空）。
+	if input.AliyunAccessKeyID != nil {
+		cfg.AliyunAccessKeyID = strings.TrimSpace(*input.AliyunAccessKeyID)
+	}
+	if input.AliyunAccessKeySecret != nil {
+		cfg.AliyunAccessKeySecret = strings.TrimSpace(*input.AliyunAccessKeySecret)
+	}
+	if input.AliyunRegion != nil {
+		cfg.AliyunRegion = strings.TrimSpace(*input.AliyunRegion)
+	}
+	if input.AliyunEndpoint != nil {
+		cfg.AliyunEndpoint = strings.TrimSpace(*input.AliyunEndpoint)
+	}
+	if input.AliyunService != nil {
+		cfg.AliyunService = strings.TrimSpace(*input.AliyunService)
+	}
+	// 腾讯云凭据。
+	if input.TencentSecretID != nil {
+		cfg.TencentSecretID = strings.TrimSpace(*input.TencentSecretID)
+	}
+	if input.TencentSecretKey != nil {
+		cfg.TencentSecretKey = strings.TrimSpace(*input.TencentSecretKey)
+	}
+	if input.TencentRegion != nil {
+		cfg.TencentRegion = strings.TrimSpace(*input.TencentRegion)
+	}
+	if input.TencentBizType != nil {
+		cfg.TencentBizType = strings.TrimSpace(*input.TencentBizType)
 	}
 	if input.BaseURL != nil {
 		cfg.BaseURL = strings.TrimSpace(*input.BaseURL)
@@ -967,7 +1063,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"sample_rate", cfg.SampleRate)
 		return allow, nil
 	}
-	if len(cfg.apiKeys()) == 0 {
+	if !cfg.cloudConfigured() {
 		if cfg.Mode == ContentModerationModePreBlock {
 			s.recordPreBlockSyncMetric(0, ContentModerationActionError)
 		}
@@ -1493,6 +1589,13 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 }
 
 func (s *ContentModerationService) callModeration(ctx context.Context, cfg *ContentModerationConfig, input any, trackKeyLoad ...bool) (*moderationAPIResult, error) {
+	// 云审厂商分派：阿里云/腾讯云走各自 SDK（不经 OpenAI key 机制）；openai 走下方原逻辑。
+	switch cfg.moderationProvider() {
+	case ContentModerationProviderAliyun:
+		return s.callAliyunModeration(ctx, cfg, moderationInputText(input))
+	case ContentModerationProviderTencent:
+		return s.callTencentModeration(ctx, cfg, moderationInputText(input))
+	}
 	attempts := cfg.RetryCount + 1
 	if attempts <= 0 {
 		attempts = 1
@@ -1879,6 +1982,22 @@ func (cfg *ContentModerationConfig) normalize() {
 	if cfg.Mode == "" {
 		cfg.Mode = ContentModerationModePreBlock
 	}
+	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
+	switch cfg.Provider {
+	case ContentModerationProviderAliyun, ContentModerationProviderTencent:
+		// keep
+	default:
+		cfg.Provider = ContentModerationProviderOpenAI
+	}
+	cfg.AliyunAccessKeyID = strings.TrimSpace(cfg.AliyunAccessKeyID)
+	cfg.AliyunAccessKeySecret = strings.TrimSpace(cfg.AliyunAccessKeySecret)
+	cfg.AliyunRegion = strings.TrimSpace(cfg.AliyunRegion)
+	cfg.AliyunEndpoint = strings.TrimSpace(cfg.AliyunEndpoint)
+	cfg.AliyunService = strings.TrimSpace(cfg.AliyunService)
+	cfg.TencentSecretID = strings.TrimSpace(cfg.TencentSecretID)
+	cfg.TencentSecretKey = strings.TrimSpace(cfg.TencentSecretKey)
+	cfg.TencentRegion = strings.TrimSpace(cfg.TencentRegion)
+	cfg.TencentBizType = strings.TrimSpace(cfg.TencentBizType)
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = defaultContentModerationBaseURL
 	}
@@ -2148,8 +2267,18 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 	return &ContentModerationConfigView{
 		Enabled:                        cfg.Enabled,
 		Mode:                           cfg.Mode,
+		Provider:                       cfg.Provider,
 		BaseURL:                        cfg.BaseURL,
 		Model:                          cfg.Model,
+		AliyunConfigured:               cfg.AliyunAccessKeyID != "" && cfg.AliyunAccessKeySecret != "",
+		AliyunAccessKeyIDMasked:        maskSecretTail(cfg.AliyunAccessKeyID),
+		AliyunRegion:                   cfg.AliyunRegion,
+		AliyunEndpoint:                 cfg.AliyunEndpoint,
+		AliyunService:                  cfg.AliyunService,
+		TencentConfigured:              cfg.TencentSecretID != "" && cfg.TencentSecretKey != "",
+		TencentSecretIDMasked:          maskSecretTail(cfg.TencentSecretID),
+		TencentRegion:                  cfg.TencentRegion,
+		TencentBizType:                 cfg.TencentBizType,
 		APIKeyConfigured:               len(keys) > 0,
 		APIKeyMasked:                   apiKeyMasked,
 		APIKeyCount:                    len(keys),

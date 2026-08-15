@@ -22,8 +22,19 @@ func NewContentModerationHandler(svc *service.ContentModerationService) *Content
 type contentModerationConfigRequest struct {
 	Enabled              *bool               `json:"enabled"`
 	Mode                 *string             `json:"mode"`
+	Provider             *string             `json:"provider"`
 	BaseURL              *string             `json:"base_url"`
 	Model                *string             `json:"model"`
+	// 阿里云 / 腾讯云云审凭据（provider=aliyun/tencent 时使用）。
+	AliyunAccessKeyID     *string `json:"aliyun_access_key_id"`
+	AliyunAccessKeySecret *string `json:"aliyun_access_key_secret"`
+	AliyunRegion          *string `json:"aliyun_region"`
+	AliyunEndpoint        *string `json:"aliyun_endpoint"`
+	AliyunService         *string `json:"aliyun_service"`
+	TencentSecretID       *string `json:"tencent_secret_id"`
+	TencentSecretKey      *string `json:"tencent_secret_key"`
+	TencentRegion         *string `json:"tencent_region"`
+	TencentBizType        *string `json:"tencent_biz_type"`
 	APIKey               *string             `json:"api_key"`
 	APIKeys              *[]string           `json:"api_keys"`
 	APIKeysMode          string              `json:"api_keys_mode"`
@@ -86,8 +97,18 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
 		Enabled:                        req.Enabled,
 		Mode:                           req.Mode,
+		Provider:                       req.Provider,
 		BaseURL:                        req.BaseURL,
 		Model:                          req.Model,
+		AliyunAccessKeyID:              req.AliyunAccessKeyID,
+		AliyunAccessKeySecret:          req.AliyunAccessKeySecret,
+		AliyunRegion:                   req.AliyunRegion,
+		AliyunEndpoint:                 req.AliyunEndpoint,
+		AliyunService:                  req.AliyunService,
+		TencentSecretID:                req.TencentSecretID,
+		TencentSecretKey:               req.TencentSecretKey,
+		TencentRegion:                  req.TencentRegion,
+		TencentBizType:                 req.TencentBizType,
 		APIKey:                         req.APIKey,
 		APIKeys:                        req.APIKeys,
 		APIKeysMode:                    req.APIKeysMode,
@@ -121,6 +142,16 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 	response.Success(c, cfg)
+}
+
+// ImportKeywords 一键把内置基础词库合并进 blocked_keywords（追加去重）。
+func (h *ContentModerationHandler) ImportKeywords(c *gin.Context) {
+	result, err := h.service.ImportSeedKeywords(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {

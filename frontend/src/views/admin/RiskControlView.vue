@@ -399,13 +399,69 @@
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ modeDescription(configForm.mode) }}</p>
               </div>
               <div>
-                <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
-                <input v-model.trim="configForm.base_url" type="url" class="input" placeholder="https://api.openai.com" />
+                <label class="input-label">{{ t('admin.riskControl.provider') }}</label>
+                <Select v-model="configForm.provider" :options="providerOptions" />
+                <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.providerHint') }}</p>
               </div>
-              <div>
-                <label class="input-label">{{ t('admin.riskControl.model') }}</label>
-                <input v-model.trim="configForm.model" type="text" class="input" placeholder="omni-moderation-latest" />
-              </div>
+              <!-- OpenAI 兼容审核 -->
+              <template v-if="configForm.provider === 'openai'">
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
+                  <input v-model.trim="configForm.base_url" type="url" class="input" placeholder="https://api.openai.com" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.model') }}</label>
+                  <input v-model.trim="configForm.model" type="text" class="input" placeholder="omni-moderation-latest" />
+                </div>
+              </template>
+              <!-- 阿里云内容安全 -->
+              <template v-else-if="configForm.provider === 'aliyun'">
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.aliyunAccessKeyId') }}</label>
+                  <input v-model.trim="configForm.aliyun_access_key_id_input" type="text" class="input" autocomplete="off"
+                    :placeholder="configForm.aliyun_configured ? (configForm.aliyun_access_key_id_masked || t('admin.riskControl.credConfigured')) : t('admin.riskControl.credEnter')" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.aliyunAccessKeySecret') }}</label>
+                  <input v-model.trim="configForm.aliyun_access_key_secret_input" type="password" class="input" autocomplete="new-password"
+                    :placeholder="configForm.aliyun_configured ? t('admin.riskControl.credConfiguredKeep') : t('admin.riskControl.credEnter')" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.aliyunRegion') }}</label>
+                  <input v-model.trim="configForm.aliyun_region" type="text" class="input" placeholder="cn-shanghai" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.aliyunEndpoint') }}</label>
+                  <input v-model.trim="configForm.aliyun_endpoint" type="text" class="input" placeholder="green-cip.cn-shanghai.aliyuncs.com" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.aliyunService') }}</label>
+                  <input v-model.trim="configForm.aliyun_service" type="text" class="input" placeholder="chat_detection" />
+                </div>
+                <p class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.vendorCredHint') }}</p>
+              </template>
+              <!-- 腾讯云文本审核 -->
+              <template v-else-if="configForm.provider === 'tencent'">
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.tencentSecretId') }}</label>
+                  <input v-model.trim="configForm.tencent_secret_id_input" type="text" class="input" autocomplete="off"
+                    :placeholder="configForm.tencent_configured ? (configForm.tencent_secret_id_masked || t('admin.riskControl.credConfigured')) : t('admin.riskControl.credEnter')" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.tencentSecretKey') }}</label>
+                  <input v-model.trim="configForm.tencent_secret_key_input" type="password" class="input" autocomplete="new-password"
+                    :placeholder="configForm.tencent_configured ? t('admin.riskControl.credConfiguredKeep') : t('admin.riskControl.credEnter')" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.tencentRegion') }}</label>
+                  <input v-model.trim="configForm.tencent_region" type="text" class="input" placeholder="ap-guangzhou" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.tencentBizType') }}</label>
+                  <input v-model.trim="configForm.tencent_biz_type" type="text" class="input" :placeholder="t('admin.riskControl.tencentBizTypePlaceholder')" />
+                </div>
+                <p class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.vendorCredHint') }}</p>
+              </template>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.timeoutMs') }}</label>
                 <input v-model.number="configForm.timeout_ms" type="number" min="500" max="30000" class="input" />
@@ -423,7 +479,7 @@
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
+            <div v-if="configForm.provider === 'openai'" class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
               <div class="flex flex-col gap-4 border-b border-gray-100 bg-gray-50 px-4 py-4 dark:border-dark-700 dark:bg-dark-800/60 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex items-start gap-3">
                   <span class="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
@@ -1002,11 +1058,22 @@
             </div>
 
             <div>
-              <div class="mb-2 flex items-center justify-between">
+              <div class="mb-2 flex items-center justify-between gap-2">
                 <label class="input-label mb-0">{{ t('admin.riskControl.blockedKeywords') }}</label>
-                <span class="inline-flex rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300">
-                  {{ t('admin.riskControl.blockedKeywordCount', { count: blockedKeywordCount }) }}
-                </span>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700"
+                    :disabled="importingKeywords"
+                    @click="importSeedKeywords"
+                  >
+                    <Icon name="download" size="sm" :class="importingKeywords ? 'animate-pulse' : ''" />
+                    {{ importingKeywords ? t('admin.riskControl.importingKeywords') : t('admin.riskControl.importSeedKeywords') }}
+                  </button>
+                  <span class="inline-flex rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300">
+                    {{ t('admin.riskControl.blockedKeywordCount', { count: blockedKeywordCount }) }}
+                  </span>
+                </div>
               </div>
               <textarea
                 v-model="configForm.blocked_keywords_text"
@@ -1128,6 +1195,7 @@ import type {
   ContentModerationTestAuditResult,
   KeywordBlockingMode,
   ModerationMode,
+  ModerationProvider,
   UpdateContentModerationConfig,
 } from '@/api/admin/riskControl'
 import type { AdminGroup, SelectOption } from '@/types'
@@ -1190,6 +1258,7 @@ const saving = ref(false)
 const logsLoading = ref(false)
 const statusLoading = ref(false)
 const apiKeyTesting = ref(false)
+const importingKeywords = ref(false)
 const hashActionLoading = ref(false)
 const unbanningUserID = ref<number | null>(null)
 const settingsOpen = ref(false)
@@ -1211,6 +1280,21 @@ let statusTimer: number | null = null
 const configForm = reactive({
   enabled: false,
   mode: 'pre_block' as ModerationMode,
+  provider: 'openai' as ModerationProvider,
+  // 阿里云 / 腾讯云:region/endpoint/service/biz_type 回填明文;id/secret 输入框留空,占位显示是否已配置。
+  aliyun_configured: false,
+  aliyun_access_key_id_masked: '',
+  aliyun_access_key_id_input: '',
+  aliyun_access_key_secret_input: '',
+  aliyun_region: '',
+  aliyun_endpoint: '',
+  aliyun_service: '',
+  tencent_configured: false,
+  tencent_secret_id_masked: '',
+  tencent_secret_id_input: '',
+  tencent_secret_key_input: '',
+  tencent_region: '',
+  tencent_biz_type: '',
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
   api_keys_text: '',
@@ -1276,6 +1360,12 @@ const modeOptions = computed<SelectOption[]>(() => [
   { value: 'pre_block', label: t('admin.riskControl.modePreBlock') },
   { value: 'observe', label: t('admin.riskControl.modeObserve') },
   { value: 'off', label: t('admin.riskControl.modeOff') },
+])
+
+const providerOptions = computed<SelectOption[]>(() => [
+  { value: 'openai', label: t('admin.riskControl.providerOpenAI') },
+  { value: 'aliyun', label: t('admin.riskControl.providerAliyun') },
+  { value: 'tencent', label: t('admin.riskControl.providerTencent') },
 ])
 
 const keywordBlockingModeOptions = computed<Array<{ value: KeywordBlockingMode; label: string; description: string }>>(() => [
@@ -1685,6 +1775,20 @@ const runtimeBadgeClass = computed(() => {
 function applyConfig(config: ContentModerationConfig) {
   configForm.enabled = config.enabled
   configForm.mode = config.mode
+  configForm.provider = config.provider || 'openai'
+  configForm.aliyun_configured = config.aliyun_configured
+  configForm.aliyun_access_key_id_masked = config.aliyun_access_key_id_masked || ''
+  configForm.aliyun_access_key_id_input = ''
+  configForm.aliyun_access_key_secret_input = ''
+  configForm.aliyun_region = config.aliyun_region || ''
+  configForm.aliyun_endpoint = config.aliyun_endpoint || ''
+  configForm.aliyun_service = config.aliyun_service || ''
+  configForm.tencent_configured = config.tencent_configured
+  configForm.tencent_secret_id_masked = config.tencent_secret_id_masked || ''
+  configForm.tencent_secret_id_input = ''
+  configForm.tencent_secret_key_input = ''
+  configForm.tencent_region = config.tencent_region || ''
+  configForm.tencent_biz_type = config.tencent_biz_type || ''
   configForm.base_url = config.base_url || 'https://api.openai.com'
   configForm.model = config.model || 'omni-moderation-latest'
   configForm.api_keys_text = ''
@@ -1765,6 +1869,33 @@ async function loadStatus(silent = true) {
   }
 }
 
+async function importSeedKeywords() {
+  if (importingKeywords.value) return
+  importingKeywords.value = true
+  try {
+    const res = await adminAPI.riskControl.importKeywords()
+    // 合并:服务端已保存的完整词表 + 文本框里未保存的手动词(去重,大小写不敏感)
+    const seen = new Set<string>()
+    const merged: string[] = []
+    const push = (kw: string) => {
+      const term = kw.trim()
+      if (!term) return
+      const key = term.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      merged.push(term)
+    }
+    ;(res.config.blocked_keywords || []).forEach(push)
+    configForm.blocked_keywords_text.split('\n').forEach(push)
+    configForm.blocked_keywords_text = merged.join('\n')
+    appStore.showSuccess(t('admin.riskControl.importKeywordsResult', { added: res.added, total: res.total }))
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.importKeywordsFailed')))
+  } finally {
+    importingKeywords.value = false
+  }
+}
+
 async function saveConfig() {
   saving.value = true
   try {
@@ -1776,8 +1907,15 @@ async function saveConfig() {
     const payload: UpdateContentModerationConfig = {
       enabled: configForm.enabled,
       mode: configForm.mode,
+      provider: configForm.provider,
       base_url: configForm.base_url,
       model: configForm.model,
+      // 非密的区域/端点/服务/业务号始终回传;id/secret 仅在用户新填时回传(留空=不改)。
+      aliyun_region: configForm.aliyun_region.trim(),
+      aliyun_endpoint: configForm.aliyun_endpoint.trim(),
+      aliyun_service: configForm.aliyun_service.trim(),
+      tencent_region: configForm.tencent_region.trim(),
+      tencent_biz_type: configForm.tencent_biz_type.trim(),
       timeout_ms: Number(configForm.timeout_ms) || 3000,
       retry_count: Number(configForm.retry_count) || 0,
       sample_rate: Number(configForm.sample_rate) || 0,
@@ -1801,6 +1939,19 @@ async function saveConfig() {
       blocked_keywords: blockedKeywordList.value,
       keyword_blocking_mode: configForm.keyword_blocking_mode,
       model_filter: modelFilterPayload,
+    }
+    // 厂商 id/secret 仅在用户新输入时下发(留空表示保持不变)。
+    if (configForm.aliyun_access_key_id_input.trim()) {
+      payload.aliyun_access_key_id = configForm.aliyun_access_key_id_input.trim()
+    }
+    if (configForm.aliyun_access_key_secret_input.trim()) {
+      payload.aliyun_access_key_secret = configForm.aliyun_access_key_secret_input.trim()
+    }
+    if (configForm.tencent_secret_id_input.trim()) {
+      payload.tencent_secret_id = configForm.tencent_secret_id_input.trim()
+    }
+    if (configForm.tencent_secret_key_input.trim()) {
+      payload.tencent_secret_key = configForm.tencent_secret_key_input.trim()
     }
     const keys = parseApiKeys(configForm.api_keys_text)
     if (!payload.clear_api_key && configForm.api_keys_mode === 'replace' && keys.length === 0) {
