@@ -127,23 +127,23 @@ type Config struct {
 // mode 默认 "observe"：即便未来实现 enforce，Phase 0 也永不据此执行任何动作。
 type RiskConfig struct {
 	// Mode 运行模式："observe"（默认，仅观测）/ "enforce"（未来）。Phase 0 从不据此拦截。
-	Mode string `mapstructure:"mode" yaml:"mode"`
+	Mode string `mapstructure:"mode" yaml:"mode" json:"mode"`
 	// ScoringIntervalSeconds 评分 worker 运行间隔（秒）。默认 300（5 分钟）。
-	ScoringIntervalSeconds int `mapstructure:"scoring_interval_seconds" yaml:"scoring_interval_seconds"`
+	ScoringIntervalSeconds int `mapstructure:"scoring_interval_seconds" yaml:"scoring_interval_seconds" json:"scoring_interval_seconds"`
 	// VolumeFloor 24h 请求量下限：低于此量不判定 high（AND-gate 前置条件）。
-	VolumeFloor int `mapstructure:"volume_floor" yaml:"volume_floor"`
+	VolumeFloor int `mapstructure:"volume_floor" yaml:"volume_floor" json:"volume_floor"`
 	// AndGateK high tier 要求 f1..f5 中至少 K 个超阈值。默认 3。
-	AndGateK int `mapstructure:"and_gate_k" yaml:"and_gate_k"`
+	AndGateK int `mapstructure:"and_gate_k" yaml:"and_gate_k" json:"and_gate_k"`
 	// DailyBudgetMicros / WeeklyBudgetMicros 经济消耗预算（USDC micros），仅用于计算 budget_pct（观测）。
-	DailyBudgetMicros  int64 `mapstructure:"daily_budget_micros" yaml:"daily_budget_micros"`
-	WeeklyBudgetMicros int64 `mapstructure:"weekly_budget_micros" yaml:"weekly_budget_micros"`
+	DailyBudgetMicros  int64 `mapstructure:"daily_budget_micros" yaml:"daily_budget_micros" json:"daily_budget_micros"`
+	WeeklyBudgetMicros int64 `mapstructure:"weekly_budget_micros" yaml:"weekly_budget_micros" json:"weekly_budget_micros"`
 	// Weights 7 个特征 f1..f7 的权重（键：f1..f7）。加权和归一到 0..100。
-	Weights map[string]float64 `mapstructure:"weights" yaml:"weights"`
+	Weights map[string]float64 `mapstructure:"weights" yaml:"weights" json:"weights"`
 	// Thresholds 各特征触发阈值（键：f1..f7）。用于 AND-gate 计数与 tier 上限。
-	Thresholds map[string]float64 `mapstructure:"thresholds" yaml:"thresholds"`
+	Thresholds map[string]float64 `mapstructure:"thresholds" yaml:"thresholds" json:"thresholds"`
 	// MediumScore / HighScore tier 分数阈值：>=HighScore 且过 AND-gate → high；>=MediumScore → medium。
-	MediumScore int `mapstructure:"medium_score" yaml:"medium_score"`
-	HighScore   int `mapstructure:"high_score" yaml:"high_score"`
+	MediumScore int `mapstructure:"medium_score" yaml:"medium_score" json:"medium_score"`
+	HighScore   int `mapstructure:"high_score" yaml:"high_score" json:"high_score"`
 }
 
 // EdgeForwardConfig：中央把命中组的 /v1 请求转发给边缘 cell。

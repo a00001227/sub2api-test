@@ -316,6 +316,8 @@ import {
   type RiskTier,
   type RiskWouldDoAction,
   type UpdateRiskConfigPayload,
+  type RiskFeatureWeights,
+  type RiskFeatureThresholds,
 } from '@/api/admin/risk'
 
 const { t } = useI18n()
@@ -432,8 +434,19 @@ async function loadUsers() {
 async function loadConfig() {
   try {
     const cfg = await riskAPI.getConfig()
-    config.value = cfg
-    draft.value = JSON.parse(JSON.stringify(cfg)) as RiskConfig
+    // Harden: guarantee weights/thresholds are full {f1..f7} objects so the
+    // config editor can never crash on an unexpected/empty shape.
+    const norm: RiskConfig = {
+      ...cfg,
+      weights: { ...((cfg.weights ?? {}) as RiskFeatureWeights) },
+      thresholds: { ...((cfg.thresholds ?? {}) as RiskFeatureThresholds) },
+    }
+    for (const k of featureKeys) {
+      if (typeof norm.weights[k] !== 'number') norm.weights[k] = 0
+      if (typeof norm.thresholds[k] !== 'number') norm.thresholds[k] = 0
+    }
+    config.value = norm
+    draft.value = JSON.parse(JSON.stringify(norm)) as RiskConfig
   } catch (e: any) {
     appStore.showError(e?.message || t('admin.risk.configLoadFail'))
   }
