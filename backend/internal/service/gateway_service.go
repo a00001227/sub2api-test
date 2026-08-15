@@ -653,6 +653,10 @@ type GatewayService struct {
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 
+	// riskSketchCache 反蒸馏 Phase 0（仅观测）：响应后异步更新的每用户 Redis 特征草图。
+	// 可选（nil 时不更新草图，评分 worker 仍可回退到 usage_logs 聚合）。绝不进入请求热路径。
+	riskSketchCache RiskSketchCache
+
 	// #86b 中央「执行→转发」消费者计费:占位 account(懒建 + 缓存)。转发请求在中央
 	// 没有本地 account,用它满足 usage_log 的 account FK;它 external ref 为空 → provider
 	// outbox 天然跳过(不重复发),schedulable=false → 永不被选号。
@@ -739,6 +743,14 @@ func NewGatewayService(
 		svc.initDebugGatewayBodyFile(path)
 	}
 	return svc
+}
+
+// SetRiskSketchCache 注入反蒸馏 Phase 0（仅观测）的每用户 Redis 特征草图缓存。
+// 可选依赖：不注入时记录路径不更新草图，评分 worker 回退到 usage_logs 聚合。
+func (s *GatewayService) SetRiskSketchCache(cache RiskSketchCache) {
+	if s != nil {
+		s.riskSketchCache = cache
+	}
 }
 
 // GenerateSessionHash 从预解析请求计算粘性会话 hash
@@ -8967,7 +8979,21 @@ type RecordUsageInput struct {
 	// 计费(那是中央的职责),仍发 provider 用量(按账号)。handler 从 IsEdgeTrusted 取。
 	SkipConsumerBilling bool
 
+	// RiskFeatures 反蒸馏 Phase 0（仅观测）请求特征。由 handler 在 parsedReq 仍在
+	// 作用域时填充；simhash 在响应后记录路径异步计算，绝不进入请求热路径。
+	RiskFeatures RiskUsageFeatures
+
 	ChannelUsageFields // 渠道映射信息（由 handler 在 Forward 前解析）
+}
+
+// RiskUsageFeatures 承载响应后采集的请求特征（Risk Phase 0，仅观测）。
+// 隐私：仅计数 + 消息 raw（用于异步计算 64 位 simhash），绝不落库原文。
+type RiskUsageFeatures struct {
+	MessageCount int      // 请求消息条数
+	MaxTokens    int      // 请求 max_tokens（0=未设置）
+	Temperature  *float64 // 请求 temperature（nil=未显式传入）
+	// MessagesRaw 消息 raw JSON（用于异步计算 simhash；仅在记录路径内使用，不落库、不日志）。
+	MessagesRaw []byte
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -9488,6 +9514,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		APIKeyService:       input.APIKeyService,
 		QuotaPlatform:       input.QuotaPlatform,
 		SkipConsumerBilling: input.SkipConsumerBilling,
+		RiskFeatures:        input.RiskFeatures,
 		ChannelUsageFields:  input.ChannelUsageFields,
 	}, &recordUsageOpts{})
 }
@@ -9510,6 +9537,8 @@ type RecordUsageLongContextInput struct {
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
 	QuotaPlatform         string             // user×platform 配额计量平台：handler 在请求 ctx 内经 QuotaPlatform() 算定后传入（后扣运行在 worker 池 background ctx 上，取不到 ForcePlatform）
 
+	RiskFeatures RiskUsageFeatures // 反蒸馏 Phase 0（仅观测）请求特征
+
 	ChannelUsageFields // 渠道映射信息（由 handler 在 Forward 前解析）
 }
 
@@ -9529,6 +9558,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		ForceCacheBilling:  input.ForceCacheBilling,
 		APIKeyService:      input.APIKeyService,
 		QuotaPlatform:      input.QuotaPlatform,
+		RiskFeatures:       input.RiskFeatures,
 		ChannelUsageFields: input.ChannelUsageFields,
 	}, &recordUsageOpts{
 		LongContextThreshold:  input.LongContextThreshold,
@@ -9552,6 +9582,7 @@ type recordUsageCoreInput struct {
 	APIKeyService       APIKeyQuotaUpdater
 	QuotaPlatform       string
 	SkipConsumerBilling bool // 方案 B:EDGE 可信转发 → 跳过消费者计费,仍发 provider 用量
+	RiskFeatures        RiskUsageFeatures // 反蒸馏 Phase 0（仅观测）请求特征
 	ChannelUsageFields
 }
 
@@ -9622,6 +9653,10 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
+
+	// Risk Phase 0（仅观测）：响应后更新每用户 Redis 特征草图（异步、best-effort，
+	// 绝不进入请求热路径）。simhash 已在 buildRecordUsageLog 计算并挂在 usageLog 上。
+	s.updateRiskSketchAsync(usageLog, input.RiskFeatures)
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
@@ -9882,7 +9917,42 @@ func (s *GatewayService) buildRecordUsageLog(
 		usageLog.ActualCost = cost.ActualCost
 	}
 
+	// Risk Phase 0（仅观测）：填充请求特征列。simhash 在响应后记录路径异步计算，
+	// 绝不进入请求热路径；此处只是把已算好的值搬到 UsageLog。隐私：无原文。
+	applyRiskUsageFeatures(usageLog, input.RiskFeatures)
+
 	return usageLog
+}
+
+// applyRiskUsageFeatures 把响应后采集/计算好的请求特征写入 UsageLog 列（Risk Phase 0）。
+// message_count/max_tokens/temperature 直接取；prompt_simhash 由 MessagesRaw 计算。
+// 全部为可选（nil 表示未采集）。
+func applyRiskUsageFeatures(log *UsageLog, feat RiskUsageFeatures) {
+	if log == nil {
+		return
+	}
+	if feat.MessageCount > 0 {
+		mc := int16(feat.MessageCount)
+		if feat.MessageCount > int(^uint16(0)>>1) {
+			mc = int16(^uint16(0) >> 1) // clamp 到 SMALLINT 上限，避免溢出
+		}
+		log.MessageCount = &mc
+	}
+	if feat.MaxTokens > 0 {
+		mt := feat.MaxTokens
+		log.MaxTokensReq = &mt
+	}
+	if feat.Temperature != nil {
+		t := *feat.Temperature
+		log.Temperature = &t
+	}
+	if len(feat.MessagesRaw) > 0 {
+		if h := ComputeMessagesSimhash(feat.MessagesRaw); h != 0 {
+			// simhash 是 uint64，以 int64 存入 BIGINT（位模式保持，符号无意义）。
+			sh := int64(h)
+			log.PromptSimhash = &sh
+		}
+	}
 }
 
 // resolveBillingMode 根据计费结果和请求类型确定计费模式。

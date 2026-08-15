@@ -764,6 +764,37 @@ idempotency:
   cleanup_batch_size: 500
 
 # =============================================================================
+# Risk / Anti-Distillation Scoring (Phase 0 — OBSERVE ONLY / 影子模式)
+# 反蒸馏/账号保护评分。Phase 0 仅采集信号 + 打分 + 提供管理 API，绝不据此拦截任何请求。
+# 隐私：仅记录计数与 64 位 simhash，绝不存储 prompt/message 文本。
+# =============================================================================
+risk:
+  mode: observe                    # observe（默认，仅观测）/ enforce（未来，Phase 0 不生效）
+  scoring_interval_seconds: 300    # 评分 worker 间隔（秒），默认 5 分钟
+  volume_floor: 200                # 24h 请求量下限，低于此量不判定 high
+  and_gate_k: 3                    # high 要求 f1..f5 中至少 K 个超阈值
+  daily_budget_micros: 50000000    # 50 USDC/日（仅用于计算 budget_pct 观测）
+  weekly_budget_micros: 300000000  # 300 USDC/周
+  medium_score: 40
+  high_score: 70
+  weights:
+    f1: 0.20
+    f2: 0.15
+    f3: 0.20
+    f4: 0.15
+    f5: 0.15
+    f6: 0.10
+    f7: 0.05
+  thresholds:
+    f1: 0.85
+    f2: 0.80
+    f3: 0.70
+    f4: 0.70
+    f5: 0.80
+    f6: 0.70
+    f7: 0.60
+
+# =============================================================================
 # Concurrency Wait Configuration
 # 并发等待配置
 # =============================================================================

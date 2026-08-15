@@ -40,6 +40,7 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	PricingModel           *admin.PricingModelHandler
 	Feedback               *admin.FeedbackHandler
+	UserRisk               *admin.UserRiskHandler
 }
 
 // Handlers contains all HTTP handlers

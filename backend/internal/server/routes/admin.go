@@ -109,6 +109,24 @@ func RegisterAdminRoutes(
 
 		// Pricing Display System 管理
 		registerPricingModelRoutes(admin, h)
+
+		// 反蒸馏/账号保护风险评分（Phase 0 仅观测/影子模式）
+		registerRiskRoutes(admin, h)
+	}
+}
+
+// registerRiskRoutes 注册反蒸馏 Phase 0（仅观测）的 admin 路由。
+// 前缀 /admin/risk（与 /admin/risk-control 独立）。绝不触发任何请求拦截。
+func registerRiskRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	risk := admin.Group("/risk")
+	{
+		// config 先注册，避免与 /users/:id 冲突（本组内路径段不同，仍显式先注册）。
+		risk.GET("/config", h.Admin.UserRisk.GetConfig)
+		risk.PATCH("/config", h.Admin.UserRisk.PatchConfig)
+		risk.GET("/users", h.Admin.UserRisk.ListUsers)
+		risk.GET("/users/:id", h.Admin.UserRisk.GetUser)
+		risk.POST("/users/:id/allowlist", h.Admin.UserRisk.SetAllowlist)
+		risk.POST("/users/:id/manual-tier", h.Admin.UserRisk.SetManualTier)
 	}
 }
 

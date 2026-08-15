@@ -117,6 +117,7 @@ func clearGatewayRequestDerivedState(parsed *ParsedRequest) {
 	parsed.ThinkingEnabled = false
 	parsed.OutputEffort = ""
 	parsed.MaxTokens = 0
+	parsed.Temperature = nil
 	parsed.systemRange = missingJSONRange()
 	parsed.messagesRange = missingJSONRange()
 	parsed.inputRange = missingJSONRange()
@@ -208,6 +209,16 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 		}
 	}
 
+	// Risk Phase 0：解析 temperature（可选数值，仅用于响应后特征采集/确定性打分，
+	// 不参与转发或计费判定）。非数值/NaN/Inf 忽略。
+	temperatureResult := gjson.Get(jsonStr, "temperature")
+	if temperatureResult.Exists() && temperatureResult.Type == gjson.Number {
+		t := temperatureResult.Float()
+		if !math.IsNaN(t) && !math.IsInf(t, 0) {
+			parsed.Temperature = &t
+		}
+	}
+
 	setGatewayRequestRanges(parsed, protocol, jsonStr)
 	return nil
 }
@@ -237,6 +248,7 @@ type ParsedRequest struct {
 	ThinkingEnabled bool            // 是否开启 thinking（部分平台会影响最终模型名）
 	OutputEffort    string          // output_config.effort（Claude API 的推理强度控制）
 	MaxTokens       int             // max_tokens 值（用于探测请求拦截）
+	Temperature     *float64        // temperature（可选；Risk Phase 0 响应后特征采集用，nil=未显式传入）
 	SessionContext  *SessionContext // 可选：请求上下文区分因子（nil 时行为不变）
 
 	protocol      string    // 当前 Body 的协议格式，用于 Body 替换后刷新 raw range
@@ -327,6 +339,23 @@ func (p *ParsedRequest) MessagesRaw() []byte {
 
 func (p *ParsedRequest) InputRaw() []byte {
 	return p.raw(p.inputRange)
+}
+
+// MessageCount 返回请求消息条数（messages/contents 数组长度；Responses API 回退到 input）。
+// 仅用于 Risk Phase 0 响应后特征采集，解析失败或缺失返回 0。零拷贝、不解码内容。
+func (p *ParsedRequest) MessageCount() int {
+	raw := p.MessagesRaw()
+	if len(raw) == 0 {
+		raw = p.InputRaw()
+	}
+	if len(raw) == 0 {
+		return 0
+	}
+	res := gjson.ParseBytes(raw)
+	if !res.IsArray() {
+		return 0
+	}
+	return len(res.Array())
 }
 
 func (p *ParsedRequest) DecodeSystem(dst any) error {

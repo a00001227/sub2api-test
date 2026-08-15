@@ -119,6 +119,31 @@ type Config struct {
 	Gemini       GeminiConfig       `mapstructure:"gemini"`
 	Update       UpdateConfig       `mapstructure:"update"`
 	Idempotency  IdempotencyConfig  `mapstructure:"idempotency"`
+	// Risk 反蒸馏/账号保护评分（Phase 0 仅观测/影子模式，绝不据此拦截）。
+	Risk RiskConfig `mapstructure:"risk" yaml:"risk"`
+}
+
+// RiskConfig 反蒸馏/账号保护评分配置（Phase 0 观测/影子模式）。
+// mode 默认 "observe"：即便未来实现 enforce，Phase 0 也永不据此执行任何动作。
+type RiskConfig struct {
+	// Mode 运行模式："observe"（默认，仅观测）/ "enforce"（未来）。Phase 0 从不据此拦截。
+	Mode string `mapstructure:"mode" yaml:"mode"`
+	// ScoringIntervalSeconds 评分 worker 运行间隔（秒）。默认 300（5 分钟）。
+	ScoringIntervalSeconds int `mapstructure:"scoring_interval_seconds" yaml:"scoring_interval_seconds"`
+	// VolumeFloor 24h 请求量下限：低于此量不判定 high（AND-gate 前置条件）。
+	VolumeFloor int `mapstructure:"volume_floor" yaml:"volume_floor"`
+	// AndGateK high tier 要求 f1..f5 中至少 K 个超阈值。默认 3。
+	AndGateK int `mapstructure:"and_gate_k" yaml:"and_gate_k"`
+	// DailyBudgetMicros / WeeklyBudgetMicros 经济消耗预算（USDC micros），仅用于计算 budget_pct（观测）。
+	DailyBudgetMicros  int64 `mapstructure:"daily_budget_micros" yaml:"daily_budget_micros"`
+	WeeklyBudgetMicros int64 `mapstructure:"weekly_budget_micros" yaml:"weekly_budget_micros"`
+	// Weights 7 个特征 f1..f7 的权重（键：f1..f7）。加权和归一到 0..100。
+	Weights map[string]float64 `mapstructure:"weights" yaml:"weights"`
+	// Thresholds 各特征触发阈值（键：f1..f7）。用于 AND-gate 计数与 tier 上限。
+	Thresholds map[string]float64 `mapstructure:"thresholds" yaml:"thresholds"`
+	// MediumScore / HighScore tier 分数阈值：>=HighScore 且过 AND-gate → high；>=MediumScore → medium。
+	MediumScore int `mapstructure:"medium_score" yaml:"medium_score"`
+	HighScore   int `mapstructure:"high_score" yaml:"high_score"`
 }
 
 // EdgeForwardConfig：中央把命中组的 /v1 请求转发给边缘 cell。
@@ -136,10 +161,10 @@ type EdgeForwardConfig struct {
 
 // CellRegistryConfig：边缘 cell 自注册/心跳到 Portal。
 type CellRegistryConfig struct {
-	URL             string `mapstructure:"url" yaml:"url"`                         // Portal 注册端点,如 https://portal-api/internal/cells/register
-	AdvertiseAddr   string `mapstructure:"advertise_addr" yaml:"advertise_addr"`   // 本 cell 对外可达地址(Portal 据此访问),如 http://10.8.0.5:8091
-	Region          string `mapstructure:"region" yaml:"region"`                   // 本 cell 的地区码,如 sgp
-	Node            string `mapstructure:"node" yaml:"node"`                       // 所属主机标注(可选)
+	URL             string `mapstructure:"url" yaml:"url"`                           // Portal 注册端点,如 https://portal-api/internal/cells/register
+	AdvertiseAddr   string `mapstructure:"advertise_addr" yaml:"advertise_addr"`     // 本 cell 对外可达地址(Portal 据此访问),如 http://10.8.0.5:8091
+	Region          string `mapstructure:"region" yaml:"region"`                     // 本 cell 的地区码,如 sgp
+	Node            string `mapstructure:"node" yaml:"node"`                         // 所属主机标注(可选)
 	IntervalSeconds int    `mapstructure:"interval_seconds" yaml:"interval_seconds"` // 心跳间隔,默认 30s
 }
 
@@ -1966,6 +1991,36 @@ func setDefaults() {
 	viper.SetDefault("idempotency.max_stored_response_len", 64*1024)
 	viper.SetDefault("idempotency.cleanup_interval_seconds", 60)
 	viper.SetDefault("idempotency.cleanup_batch_size", 500)
+
+	// Risk 反蒸馏/账号保护评分（Phase 0 仅观测/影子模式）。
+	viper.SetDefault("risk.mode", "observe")
+	viper.SetDefault("risk.scoring_interval_seconds", 300)
+	viper.SetDefault("risk.volume_floor", 200)
+	viper.SetDefault("risk.and_gate_k", 3)
+	viper.SetDefault("risk.daily_budget_micros", int64(50*1_000_000))   // 50 USDC/日（观测基准）
+	viper.SetDefault("risk.weekly_budget_micros", int64(300*1_000_000)) // 300 USDC/周（观测基准）
+	viper.SetDefault("risk.medium_score", 40)
+	viper.SetDefault("risk.high_score", 70)
+	// 特征权重（f1..f7），加权和归一到 0..100（权重和=1.0）。
+	viper.SetDefault("risk.weights", map[string]float64{
+		"f1": 0.20, // diversity_collapse 模板坍缩
+		"f2": 0.15, // single_turn_ratio 单轮占比
+		"f3": 0.20, // output_harvest 产出收割
+		"f4": 0.15, // machine_cadence 机器节奏
+		"f5": 0.15, // teacher_concentration 教师模型集中
+		"f6": 0.10, // determinism 确定性
+		"f7": 0.05, // fanout_novelty 扇出/新账号
+	})
+	// 特征触发阈值（f1..f7），归一化特征 >= 阈值视为“触发”。
+	viper.SetDefault("risk.thresholds", map[string]float64{
+		"f1": 0.85,
+		"f2": 0.80,
+		"f3": 0.70,
+		"f4": 0.70,
+		"f5": 0.80,
+		"f6": 0.70,
+		"f7": 0.60,
+	})
 
 	// Gateway
 	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久

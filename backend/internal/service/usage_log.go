@@ -166,6 +166,13 @@ type UsageLog struct {
 	// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
 	CacheTTLOverridden bool
 
+	// Risk Phase 0（仅观测）请求特征。隐私：绝不存储 prompt/message 原文，
+	// 仅计数 + 64 位 simhash。全部 nil 表示未采集（历史数据/未启用路径）。
+	MessageCount  *int16   // 请求消息条数
+	MaxTokensReq  *int     // 请求 max_tokens（列名 max_tokens）
+	Temperature   *float64 // 请求 temperature
+	PromptSimhash *int64   // 消息归一化 64 位 simhash（以 int64 存储 BIGINT）
+
 	// 图片生成字段
 	ImageCount         int
 	ImageSize          *string

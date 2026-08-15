@@ -82,6 +82,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // quotaFlusher
 		nil, // providerUsageOutboxWorker
 		nil, // cellSelfHealSeeder
+		nil, // riskScoringService
 	)
 
 	require.NotPanics(t, func() {

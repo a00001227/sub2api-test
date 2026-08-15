@@ -521,6 +521,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			// 方案 B:在 c 仍有效时取出 edge-trusted,捕获进后台任务(勿在闭包里碰 c)。
 			edgeTrusted := middleware2.IsEdgeTrusted(c)
+			// Risk Phase 0（仅观测）：在 parsedReq 仍有效时提取请求特征并拍成独立副本，
+			// 捕获进响应后闭包（simhash 在记录路径异步计算，绝不进入热路径）。
+			riskFeatures := buildRiskUsageFeatures(parsedReq)
 			// #86b:edge-trusted 流式请求,在流末尾吐权威用量事件,供中央剥出来给消费者计费。
 			h.emitEdgeUsageSentinel(c, result, edgeTrusted, reqStream)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
@@ -539,6 +542,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					ForceCacheBilling:   forceCacheBilling,
 					APIKeyService:       h.apiKeyService,
 					SkipConsumerBilling: edgeTrusted,
+					RiskFeatures:        riskFeatures,
 					ChannelUsageFields:  channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
@@ -953,6 +957,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
 			// 方案 B:在 c 仍有效时取出 edge-trusted,捕获进后台任务(勿在闭包里碰 c)。
 			edgeTrusted := middleware2.IsEdgeTrusted(c)
+			// Risk Phase 0（仅观测）：在 attemptParsedReq 仍有效时提取请求特征并拍成独立副本。
+			riskFeatures := buildRiskUsageFeatures(attemptParsedReq)
 			// #86b:edge-trusted 流式请求,在流末尾吐权威用量事件,供中央剥出来给消费者计费。
 			h.emitEdgeUsageSentinel(c, result, edgeTrusted, reqStream)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
@@ -971,6 +977,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					ForceCacheBilling:   forceCacheBilling,
 					APIKeyService:       h.apiKeyService,
 					SkipConsumerBilling: edgeTrusted,
+					RiskFeatures:        riskFeatures,
 					ChannelUsageFields:  channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
