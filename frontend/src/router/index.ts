@@ -599,6 +599,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/risk',
+    name: 'AdminRiskMonitor',
+    component: () => import('@/views/admin/RiskView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Risk Monitor',
+      titleKey: 'admin.risk.title',
+      descriptionKey: 'admin.risk.description',
+    }
+  },
+  {
     path: '/admin/usage',
     name: 'AdminUsage',
     component: () => import('@/views/admin/UsageView.vue'),
