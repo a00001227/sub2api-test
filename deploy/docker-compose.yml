@@ -53,6 +53,7 @@ services:
       - EDGE_FORWARD_REGISTRY_URL=${EDGE_FORWARD_REGISTRY_URL:-}
       - EDGE_FORWARD_REGISTRY_TOKEN=${EDGE_FORWARD_REGISTRY_TOKEN:-}
       - EDGE_FORWARD_REFRESH_SECONDS=${EDGE_FORWARD_REFRESH_SECONDS:-}
+      - EDGE_FORWARD_MODEL_WHITELIST=${EDGE_FORWARD_MODEL_WHITELIST:-}
 
       # =======================================================================
       # Server Configuration
