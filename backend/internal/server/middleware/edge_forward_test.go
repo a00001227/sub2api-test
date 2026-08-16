@@ -28,7 +28,7 @@ func newEdgeForwardEngine(cfg config.EdgeForwardConfig, groupSlug string) *gin.E
 			}
 			c.Next()
 		},
-		EdgeForward(cfg, nil),
+		EdgeForward(cfg, nil, nil),
 		func(c *gin.Context) {
 			c.Header("X-Handled-By", "local")
 			c.String(http.StatusOK, "local-ok")
@@ -120,7 +120,7 @@ func TestEdgeForward_WebSocketForwards(t *testing.T) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
 			c.Next()
 		},
-		EdgeForward(cfg, nil),
+		EdgeForward(cfg, nil, nil),
 		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
 	)
 	central := httptest.NewServer(e)
@@ -175,7 +175,7 @@ func TestEdgeForward_SSEStreamsChunked(t *testing.T) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
 			c.Next()
 		},
-		EdgeForward(cfg, nil),
+		EdgeForward(cfg, nil, nil),
 		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
 	)
 	central := httptest.NewServer(e)
@@ -235,7 +235,7 @@ func TestEdgeForward_DoesNotLeakConsumerKey(t *testing.T) {
 func newEdgeForwardEngineWithResolver(resolver cellResolver, groupSlug, key string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, key, func() float64 { return 0 }, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, key, func() float64 { return 0 }, nil, nil)
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			if groupSlug != "" {
@@ -267,8 +267,8 @@ func TestEdgeForward_FailoverOnNoAvailableAccounts503(t *testing.T) {
 	defer cellB.Close()
 
 	resolver := &dynamicResolver{cached: []cellCandidate{
-		{url: mustURL(cellA.URL), reputation: 50},
-		{url: mustURL(cellB.URL), reputation: 50},
+		{url: mustURL(t, cellA.URL), reputation: 50},
+		{url: mustURL(t, cellB.URL), reputation: 50},
 	}}
 	e := newEdgeForwardEngineWithResolver(resolver, "claude", "k")
 	w := httptest.NewRecorder()
@@ -298,8 +298,8 @@ func TestEdgeForward_OtherError503NotFailedOver(t *testing.T) {
 	defer cellB.Close()
 
 	resolver := &dynamicResolver{cached: []cellCandidate{
-		{url: mustURL(cellA.URL), reputation: 50},
-		{url: mustURL(cellB.URL), reputation: 50},
+		{url: mustURL(t, cellA.URL), reputation: 50},
+		{url: mustURL(t, cellB.URL), reputation: 50},
 	}}
 	e := newEdgeForwardEngineWithResolver(resolver, "claude", "k")
 	w := httptest.NewRecorder()
@@ -336,5 +336,52 @@ func TestEdgeForward_CellUnreachableReturns502(t *testing.T) {
 	}
 	if w.Header().Get("X-Handled-By") == "local" || strings.Contains(w.Body.String(), "local-ok") {
 		t.Fatalf("cell 不可达绝不应回落到本地执行; body=%q", w.Body.String())
+	}
+}
+
+// 转发模型白名单:不在白名单的 model 直接 403、不转发 cell;在白名单的正常转发。
+func TestEdgeForward_ModelWhitelist(t *testing.T) {
+	var cellHit bool
+	cell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		cellHit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("cell-ok"))
+	}))
+	defer cell.Close()
+
+	resolver := &staticResolver{target: mustURL(t, cell.URL)}
+	allow := func(_ context.Context, model string) bool { return strings.EqualFold(model, "allowed-model") }
+
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, "k", func() float64 { return 0 }, nil, allow)
+	e.POST("/v1/messages",
+		func(c *gin.Context) {
+			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
+			c.Next()
+		},
+		h,
+		func(c *gin.Context) { c.String(http.StatusOK, "local-ok") },
+	)
+
+	// 1) 不在白名单 → 403,且不应打到 cell。
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"blocked-model"}`)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("白名单外模型应 403; got code=%d body=%q", w.Code, w.Body.String())
+	}
+	if cellHit {
+		t.Fatalf("白名单外模型不应转发到 cell")
+	}
+	if !strings.Contains(w.Body.String(), "model not allowed") {
+		t.Fatalf("应返回 model not allowed; got %q", w.Body.String())
+	}
+
+	// 2) 在白名单 → 正常转发到 cell。
+	cellHit = false
+	w = httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"allowed-model"}`)))
+	if w.Code != http.StatusOK || !cellHit {
+		t.Fatalf("白名单内模型应转发到 cell; code=%d hit=%v", w.Code, cellHit)
 	}
 }

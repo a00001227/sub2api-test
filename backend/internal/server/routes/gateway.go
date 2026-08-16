@@ -40,7 +40,7 @@ func RegisterGatewayRoutes(
 		} else {
 			h.Gateway.RecordForwardedConsumerUsage(c, env)
 		}
-	})
+	}, h.PricingDisplay.IsModelEnabled)
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")

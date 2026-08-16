@@ -157,6 +157,9 @@ type EdgeForwardConfig struct {
 	RegistryURL    string `mapstructure:"registry_url" yaml:"registry_url"`       // Portal routable 端点,如 https://portal-api/internal/cells/routable
 	RegistryToken  string `mapstructure:"registry_token" yaml:"registry_token"`   // 内部 token;为空则回退 provider_connect.internal_token
 	RefreshSeconds int    `mapstructure:"refresh_seconds" yaml:"refresh_seconds"` // 拉取间隔秒,默认 15
+	// ModelWhitelist:开启后,转发前校验请求 model 是否在"价格展示(pricing_models)启用模型"集合内,
+	// 不在则直接 403,不转发 cell。默认 false(不校验,行为不变)。env: EDGE_FORWARD_MODEL_WHITELIST。
+	ModelWhitelist bool `mapstructure:"model_whitelist" yaml:"model_whitelist"`
 }
 
 // CellRegistryConfig：边缘 cell 自注册/心跳到 Portal。
@@ -1523,6 +1526,9 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	// EDGE_FORWARD_* 环境变量兜底（中央“执行→转发”开关与目标 cell）。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_ENABLED"))); v == "1" || v == "true" || v == "on" {
 		cfg.EdgeForward.Enabled = true
+	}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_MODEL_WHITELIST"))); v == "1" || v == "true" || v == "on" {
+		cfg.EdgeForward.ModelWhitelist = true
 	}
 	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_CELL_URL")); v != "" {
 		cfg.EdgeForward.CellURL = v

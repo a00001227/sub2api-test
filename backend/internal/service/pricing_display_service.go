@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -26,6 +28,12 @@ type PricingDisplayService struct {
 	cacheMu     sync.RWMutex
 	publicCache []PricingDisplayItem
 	cacheValid  bool
+
+	// enabledModels caches the set of ENABLED pricing_models model names
+	// (lowercased) for the edge-forward model whitelist. Shares the same
+	// invalidation as publicCache (rebuilt after any admin mutation).
+	enabledModels      map[string]struct{}
+	enabledModelsValid bool
 }
 
 // NewPricingDisplayService constructs PricingDisplayService.
@@ -39,7 +47,48 @@ func (s *PricingDisplayService) invalidatePublicCache() {
 	s.cacheMu.Lock()
 	s.publicCache = nil
 	s.cacheValid = false
+	s.enabledModels = nil
+	s.enabledModelsValid = false
 	s.cacheMu.Unlock()
+}
+
+// IsModelEnabled reports whether `model` is an ENABLED entry in pricing_models
+// (case-insensitive). Backs the edge-forward model whitelist. Served from an
+// in-memory set that is rebuilt lazily and invalidated on any pricing mutation,
+// so the hot forward path never hits the DB. Fail-open: on a repo error it
+// returns true (don't block traffic because pricing lookup failed).
+func (s *PricingDisplayService) IsModelEnabled(ctx context.Context, model string) bool {
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key == "" {
+		return false
+	}
+	s.cacheMu.RLock()
+	if s.enabledModelsValid {
+		_, ok := s.enabledModels[key]
+		s.cacheMu.RUnlock()
+		return ok
+	}
+	s.cacheMu.RUnlock()
+
+	records, err := s.repo.ListEnabled(ctx)
+	if err != nil {
+		slog.Warn("pricing_display: list enabled models failed; whitelist fail-open", "error", err)
+		return true
+	}
+	set := make(map[string]struct{}, len(records))
+	for _, r := range records {
+		if r == nil {
+			continue
+		}
+		set[strings.ToLower(strings.TrimSpace(r.Model))] = struct{}{}
+	}
+	s.cacheMu.Lock()
+	s.enabledModels = set
+	s.enabledModelsValid = true
+	s.cacheMu.Unlock()
+
+	_, ok := set[key]
+	return ok
 }
 
 // ---- Public API (portal-ui) DTOs ----

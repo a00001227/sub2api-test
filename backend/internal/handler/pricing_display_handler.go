@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -15,6 +17,11 @@ type PricingDisplayHandler struct {
 // NewPricingDisplayHandler creates a PricingDisplayHandler.
 func NewPricingDisplayHandler(svc *service.PricingDisplayService) *PricingDisplayHandler {
 	return &PricingDisplayHandler{svc: svc}
+}
+
+// IsModelEnabled 供 edge_forward 转发模型白名单调用:model 是否为"价格展示"里启用的模型。
+func (h *PricingDisplayHandler) IsModelEnabled(ctx context.Context, model string) bool {
+	return h.svc.IsModelEnabled(ctx, model)
 }
 
 // GetPricingDisplay handles GET /api/v1/public/pricing-display.
