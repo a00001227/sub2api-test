@@ -124,8 +124,15 @@ func (s *RiskV2AdminService) ListAssessments(ctx context.Context, filter RiskV2L
 	if freshOnly != nil {
 		boundary := now.Add(-s.staleAfter).Unix()
 		if *freshOnly {
+			// fresh 下界：assessed_at >= now-staleAfter。
 			if filter.AssessedFromUnix == 0 || boundary > filter.AssessedFromUnix {
 				filter.AssessedFromUnix = boundary
+			}
+			// §5.1 §一.1：fresh 上界 = now+futureTolerance，排除未来时间异常记录（DTO 中它们 fresh=false/time_anomaly=true），
+			// 保证 SQL 命中集与 DTO fresh 语义一致——未来异常记录绝不被 freshness=fresh 命中。
+			futureBound := now.Unix() + riskV2ClockToleranceSeconds
+			if filter.AssessedToUnix == 0 || futureBound < filter.AssessedToUnix {
+				filter.AssessedToUnix = futureBound
 			}
 		} else {
 			// stale：assessed_at < boundary。用 AssessedToUnix = boundary-1（闭区间）。

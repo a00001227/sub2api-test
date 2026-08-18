@@ -14,6 +14,9 @@
         </div>
       </div>
 
+      <!-- Legacy / Risk V2 Shadow switcher (navigation shell only) -->
+      <RiskModeTabs active="legacy" />
+
       <!-- Shadow-mode banner (unmistakable) -->
       <div
         v-if="config"
@@ -308,6 +311,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import RiskModeTabs from '@/components/admin/RiskModeTabs.vue'
 import { useAppStore } from '@/stores/app'
 import {
   riskAPI,

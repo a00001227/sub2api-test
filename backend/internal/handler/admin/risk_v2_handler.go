@@ -348,12 +348,16 @@ func (h *RiskV2Handler) GetWindows(c *gin.Context) {
 	riskV2OK(c, mapWindows(uid, lw))
 }
 
-// riskV2AdminKey 取当前管理员身份作为限流 key（无身份则回落 client IP）。
+// riskV2AdminKey 取「已认证管理员 user ID」作为限流 key（§5.1 §一.2）。
+// 路由在 admin 鉴权之后，AuthSubject 恒存在；若异常缺失，回落到「进程级全局」单键（而非可伪造的
+// X-Forwarded-For/client IP）——绝不把 XFF 当作已认证管理员身份。
+//
+// 注意：本 limiter 的全局桶是 **per-process**，不是 cluster-global；多实例部署下总量上限按实例计。
 func riskV2AdminKey(c *gin.Context) string {
 	if subj, ok := middleware.GetAuthSubjectFromContext(c); ok && subj.UserID > 0 {
 		return "admin:" + strconv.FormatInt(subj.UserID, 10)
 	}
-	return "ip:" + c.ClientIP()
+	return "__no_subject_global__"
 }
 
 func (h *RiskV2Handler) writeServiceErr(c *gin.Context, err error) {

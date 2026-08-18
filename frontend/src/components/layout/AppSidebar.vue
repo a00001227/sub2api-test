@@ -753,6 +753,9 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/regions', label: t('nav.regions'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
+    // Risk V2 Shadow has no separate sidebar entry on purpose: it is reached via
+    // the in-page Legacy / V2 tabs under "Risk Monitoring" so the sidebar never
+    // has two competing highlighted items for the same risk area.
     { path: '/admin/risk', label: t('nav.riskMonitor'), icon: ShieldIcon, hideInSimpleMode: true },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },

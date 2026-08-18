@@ -449,3 +449,15 @@ func TestRiskV2API_LiveRateLimited(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, rateLimited, 1, "excess live-window requests must be rate-limited (429 RATE_LIMITED)")
 }
+
+// §5.1 §一.1：freshness=fresh 同时下推上界（now+tolerance），未来异常记录不被命中；与 DTO fresh 语义一致。
+func TestRiskV2API_FreshnessExcludesFuture(t *testing.T) {
+	repo := &fakeV2Repo{}
+	e, _ := newV2Engine(t, repo, &fakeV2Users{}, &fakeV2Live{}, &fakeV2Status{}, http.StatusOK)
+	// fixed now = 2026-07-01 12:00:00 UTC；staleAfter=1h；tolerance=120s。
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC).Unix()
+	w := do(e, "/admin/risk/v2/users?freshness=fresh")
+	require.Equal(t, 200, w.Code)
+	require.Equal(t, now-3600, repo.lastFilter.AssessedFromUnix, "fresh lower bound = now-staleAfter")
+	require.Equal(t, now+120, repo.lastFilter.AssessedToUnix, "fresh upper bound = now+tolerance excludes future anomalies")
+}
