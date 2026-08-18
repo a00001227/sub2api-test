@@ -83,6 +83,9 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // providerUsageOutboxWorker
 		nil, // cellSelfHealSeeder
 		nil, // riskScoringService
+		nil, // riskV2Dispatcher (Risk V2 Shadow; nil-safe Stop)
+		nil, // riskV2ScoringWorker (切片 4.1; nil-safe Stop)
+		nil, // riskV2HealthLoop (切片 4.1; nil-safe Stop)
 	)
 
 	require.NotPanics(t, func() {

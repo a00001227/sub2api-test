@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -144,6 +145,313 @@ type RiskConfig struct {
 	// MediumScore / HighScore tier 分数阈值：>=HighScore 且过 AND-gate → high；>=MediumScore → medium。
 	MediumScore int `mapstructure:"medium_score" yaml:"medium_score" json:"medium_score"`
 	HighScore   int `mapstructure:"high_score" yaml:"high_score" json:"high_score"`
+
+	// V2 Model Extraction Risk V2 Shadow（P1A：风险观测采集基础）。默认关闭；
+	// 开启后仅额外做“请求分段 + 指纹 + 有界异步采集”，绝不据此执行任何拦截/限速/规避。
+	V2 RiskV2Config `mapstructure:"v2" yaml:"v2" json:"v2"`
+}
+
+// RiskV2 边界常量（P1A.1）。
+const (
+	RiskV2QueueSizeMin     = 64
+	RiskV2QueueSizeMax     = 1 << 16 // 65536
+	RiskV2QueueSizeDefault = 4096
+
+	RiskV2MaxTextBytesMin     = 512
+	RiskV2MaxTextBytesMax     = 1 << 20 // 1 MiB 硬上限
+	RiskV2MaxTextBytesDefault = 16 * 1024
+
+	// RiskV2HMACKeyMinLen 是启用 V2 时 HMAC 密钥的最低长度（强度校验）。
+	RiskV2HMACKeyMinLen = 32
+)
+
+// riskV2KeyVersionPattern 约束 FingerprintKeyVersion 只含安全字符,便于随指纹落记与轮换。
+var riskV2KeyVersionPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+
+// SecretString 承载敏感字符串（如 HMAC 密钥）。它对 fmt / JSON / YAML / text 序列化一律脱敏,
+// 只有显式 Reveal() 才返回明文——防止密钥进入日志、错误文本、config API 或 fmt 输出。
+type SecretString string
+
+const secretRedacted = "[REDACTED]"
+
+func (s SecretString) String() string                    { return secretRedacted }
+func (s SecretString) GoString() string                  { return secretRedacted }
+func (s SecretString) MarshalJSON() ([]byte, error)      { return []byte(`"` + secretRedacted + `"`), nil }
+func (s SecretString) MarshalText() ([]byte, error)      { return []byte(secretRedacted), nil }
+func (s SecretString) MarshalYAML() (interface{}, error) { return secretRedacted, nil }
+
+// Reveal 返回明文——只应在 HMAC 计算等必要处调用,绝不用于日志/错误/序列化。
+func (s SecretString) Reveal() string { return string(s) }
+func (s SecretString) Len() int       { return len(string(s)) }
+func (s SecretString) Empty() bool    { return string(s) == "" }
+
+// RiskV2Config 是 Model Extraction Risk V2 Shadow 的配置。
+type RiskV2Config struct {
+	// Enabled 总开关（master flag）。默认 false → V2 全链路不启用,行为与现状一致。
+	Enabled bool `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	// AggregationEnabled 开启 Redis 多窗口聚合（切片 1）。默认 false。
+	AggregationEnabled bool `mapstructure:"aggregation_enabled" yaml:"aggregation_enabled" json:"aggregation_enabled"`
+	// ScoringEnabled 开启 V2 评分（切片 2+）。默认 false;切片 1 必须保持 false。
+	ScoringEnabled bool `mapstructure:"scoring_enabled" yaml:"scoring_enabled" json:"scoring_enabled"`
+	// ScoringPersistEnabled 开启 Shadow 评分持久化（切片 4）。默认 false。
+	// false=Dry-Run（读+评分+只记指标，不写 user_risk_v2）；true=写 user_risk_v2（EffectiveAction 恒 NONE）。
+	ScoringPersistEnabled bool `mapstructure:"scoring_persist_enabled" yaml:"scoring_persist_enabled" json:"scoring_persist_enabled"`
+	// Worker 是 Shadow Scoring Worker（切片 4）的运行参数（周期/节流/lease/catch-up）。
+	Worker RiskV2WorkerConfig `mapstructure:"worker" yaml:"worker" json:"worker"`
+	// FingerprintHMACKey 指纹 keyed HMAC-SHA256 的密钥（独立密钥,绝不复用 JWT/Webhook/Session/OAuth）。
+	// 由 env RISK_FINGERPRINT_HMAC_KEY 注入。SecretString 保证不进日志/错误/配置 API/fmt。
+	FingerprintHMACKey SecretString `mapstructure:"fingerprint_hmac_key" yaml:"fingerprint_hmac_key" json:"-"`
+	// FingerprintKeyVersion 密钥版本（env RISK_FINGERPRINT_KEY_VERSION,默认 "v1"）,随指纹一同记录以便轮换。
+	FingerprintKeyVersion string `mapstructure:"fingerprint_key_version" yaml:"fingerprint_key_version" json:"fingerprint_key_version"`
+	// QueueSize 有界异步采集队列容量。默认 4096（越界会被夹到 [min,max]）;队满丢弃并计数,绝不阻塞主请求。
+	QueueSize int `mapstructure:"queue_size" yaml:"queue_size" json:"queue_size"`
+	// MaxTextBytes 单次风险文本处理（正则/JSON/拼接/SimHash/HMAC 之前）的最大输入字节数。
+	// 超长走确定性 head/middle/tail 采样,只降低特征完整度,不影响主请求。
+	MaxTextBytes int `mapstructure:"max_text_bytes" yaml:"max_text_bytes" json:"max_text_bytes"`
+}
+
+// RiskV2WorkerConfig 是 Shadow Scoring Worker（切片 4）的运行参数。全部保守 Shadow 未校准默认。
+// 这些不是生产容量承诺，只是 localhost/未校准的起点。
+type RiskV2WorkerConfig struct {
+	// 周期对齐
+	IntervalSeconds   int `mapstructure:"interval_seconds" yaml:"interval_seconds" json:"interval_seconds"`                // 评分周期，默认 300s
+	GraceDelaySeconds int `mapstructure:"grace_delay_seconds" yaml:"grace_delay_seconds" json:"grace_delay_seconds"`       // cycle_end=floor(now-grace,interval)，默认 20s
+	CycleTimeoutSecs  int `mapstructure:"cycle_timeout_seconds" yaml:"cycle_timeout_seconds" json:"cycle_timeout_seconds"` // 单周期硬超时，默认 240s
+
+	// 节流（Token Bucket）
+	BatchSize        int `mapstructure:"batch_size" yaml:"batch_size" json:"batch_size"`                               // 默认 100
+	BatchConcurrency int `mapstructure:"batch_concurrency" yaml:"batch_concurrency" json:"batch_concurrency"`          // 默认 4
+	MaxUsersPerSec   int `mapstructure:"max_users_per_second" yaml:"max_users_per_second" json:"max_users_per_second"` // 默认 50
+	MaxUsersPerCycle int `mapstructure:"max_users_per_cycle" yaml:"max_users_per_cycle" json:"max_users_per_cycle"`    // 默认 10000
+
+	// 熔断阈值（超过则中止当前周期，标记 incomplete）
+	MaxReadErrorRatio float64 `mapstructure:"max_read_error_ratio" yaml:"max_read_error_ratio" json:"max_read_error_ratio"` // 默认 0.5
+	MaxDBErrorRatio   float64 `mapstructure:"max_db_error_ratio" yaml:"max_db_error_ratio" json:"max_db_error_ratio"`       // 默认 0.5
+
+	// Leader Lease
+	LeaseTTLSeconds      int `mapstructure:"lease_ttl_seconds" yaml:"lease_ttl_seconds" json:"lease_ttl_seconds"`                   // 默认 30s
+	LeaseRenewIntervalMS int `mapstructure:"lease_renew_interval_ms" yaml:"lease_renew_interval_ms" json:"lease_renew_interval_ms"` // 默认 10000ms
+
+	// Catch-up
+	MaxCatchupCycles int `mapstructure:"max_catchup_cycles" yaml:"max_catchup_cycles" json:"max_catchup_cycles"` // 默认 3
+	// MaxRetryCycles 失败用户最多重试的周期数（决定 retry 集 TTL 覆盖范围）。默认 3。
+	MaxRetryCycles int `mapstructure:"max_retry_cycles" yaml:"max_retry_cycles" json:"max_retry_cycles"`
+
+	// Assessment 新鲜度（本阶段仅计算/预留，不建 Admin API）
+	AssessmentStaleAfterSeconds int `mapstructure:"assessment_stale_after_seconds" yaml:"assessment_stale_after_seconds" json:"assessment_stale_after_seconds"` // 默认 3600s
+}
+
+// RiskV2Worker 默认值（保守 Shadow，未校准）。
+const (
+	RiskV2WorkerIntervalDefault      = 300
+	RiskV2WorkerGraceDefault         = 20
+	RiskV2WorkerCycleTimeoutDefault  = 240
+	RiskV2WorkerBatchSizeDefault     = 100
+	RiskV2WorkerBatchConcDefault     = 4
+	RiskV2WorkerMaxUPSDefault        = 50
+	RiskV2WorkerMaxUsersCycleDefault = 10000
+	RiskV2WorkerReadErrRatioDefault  = 0.5
+	RiskV2WorkerDBErrRatioDefault    = 0.5
+	RiskV2WorkerLeaseTTLDefault      = 30
+	RiskV2WorkerLeaseRenewMSDefault  = 10000
+	RiskV2WorkerMaxCatchupDefault    = 3
+	RiskV2WorkerMaxRetryDefault      = 3
+	RiskV2WorkerStaleAfterDefault    = 3600
+)
+
+// Normalized 返回填充默认值后的副本（0/越界回落默认；不做上下限强夹除下面 Validate 的硬约束）。
+func (w RiskV2WorkerConfig) Normalized() RiskV2WorkerConfig {
+	n := w
+	if n.IntervalSeconds <= 0 {
+		n.IntervalSeconds = RiskV2WorkerIntervalDefault
+	}
+	if n.GraceDelaySeconds < 0 {
+		n.GraceDelaySeconds = RiskV2WorkerGraceDefault
+	} else if n.GraceDelaySeconds == 0 && w.GraceDelaySeconds == 0 {
+		n.GraceDelaySeconds = RiskV2WorkerGraceDefault
+	}
+	if n.CycleTimeoutSecs <= 0 {
+		n.CycleTimeoutSecs = RiskV2WorkerCycleTimeoutDefault
+	}
+	if n.BatchSize <= 0 {
+		n.BatchSize = RiskV2WorkerBatchSizeDefault
+	}
+	if n.BatchConcurrency <= 0 {
+		n.BatchConcurrency = RiskV2WorkerBatchConcDefault
+	}
+	if n.MaxUsersPerSec <= 0 {
+		n.MaxUsersPerSec = RiskV2WorkerMaxUPSDefault
+	}
+	if n.MaxUsersPerCycle <= 0 {
+		n.MaxUsersPerCycle = RiskV2WorkerMaxUsersCycleDefault
+	}
+	if n.MaxReadErrorRatio <= 0 {
+		n.MaxReadErrorRatio = RiskV2WorkerReadErrRatioDefault
+	}
+	if n.MaxDBErrorRatio <= 0 {
+		n.MaxDBErrorRatio = RiskV2WorkerDBErrRatioDefault
+	}
+	if n.LeaseTTLSeconds <= 0 {
+		n.LeaseTTLSeconds = RiskV2WorkerLeaseTTLDefault
+	}
+	if n.LeaseRenewIntervalMS <= 0 {
+		n.LeaseRenewIntervalMS = RiskV2WorkerLeaseRenewMSDefault
+	}
+	if n.MaxCatchupCycles <= 0 {
+		n.MaxCatchupCycles = RiskV2WorkerMaxCatchupDefault
+	}
+	if n.MaxRetryCycles <= 0 {
+		n.MaxRetryCycles = RiskV2WorkerMaxRetryDefault
+	}
+	if n.AssessmentStaleAfterSeconds <= 0 {
+		n.AssessmentStaleAfterSeconds = RiskV2WorkerStaleAfterDefault
+	}
+	return n
+}
+
+// RiskV2WorkerBatchConcurrencyMax 是批内并发硬上限。
+const RiskV2WorkerBatchConcurrencyMax = 64
+
+// Validate 校验 Worker 配置（归一化后）。不可能在 timeout 内完成的配置必须拒绝启动，绝不每周期固定超时。
+func (w RiskV2WorkerConfig) Validate() error {
+	n := w.Normalized()
+	if n.MaxUsersPerSec <= 0 {
+		return fmt.Errorf("risk.v2.worker.max_users_per_second must be > 0")
+	}
+	if n.MaxUsersPerCycle <= 0 {
+		return fmt.Errorf("risk.v2.worker.max_users_per_cycle must be > 0")
+	}
+	if n.BatchSize <= 0 {
+		return fmt.Errorf("risk.v2.worker.batch_size must be > 0")
+	}
+	if n.BatchConcurrency > RiskV2WorkerBatchConcurrencyMax {
+		return fmt.Errorf("risk.v2.worker.batch_concurrency (%d) exceeds hard cap %d", n.BatchConcurrency, RiskV2WorkerBatchConcurrencyMax)
+	}
+	if n.BatchSize > n.MaxUsersPerCycle {
+		return fmt.Errorf("risk.v2.worker.batch_size (%d) must be <= max_users_per_cycle (%d)", n.BatchSize, n.MaxUsersPerCycle)
+	}
+	if n.GraceDelaySeconds >= n.IntervalSeconds {
+		return fmt.Errorf("risk.v2.worker.grace_delay_seconds (%d) must be < interval_seconds (%d)", n.GraceDelaySeconds, n.IntervalSeconds)
+	}
+	if n.CycleTimeoutSecs >= n.IntervalSeconds {
+		return fmt.Errorf("risk.v2.worker.cycle_timeout_seconds (%d) must be < interval_seconds (%d)", n.CycleTimeoutSecs, n.IntervalSeconds)
+	}
+	if n.LeaseRenewIntervalMS >= n.LeaseTTLSeconds*1000/2 {
+		return fmt.Errorf("risk.v2.worker.lease_renew_interval_ms (%d) must be < lease_ttl_seconds/2 (%d ms)", n.LeaseRenewIntervalMS, n.LeaseTTLSeconds*1000/2)
+	}
+	// 理论节流耗时必须能在 cycle_timeout 内完成，否则每周期必然固定超时 → 拒绝启动。
+	theoreticalPacingSec := float64(n.MaxUsersPerCycle) / float64(n.MaxUsersPerSec)
+	if theoreticalPacingSec >= float64(n.CycleTimeoutSecs) {
+		return fmt.Errorf("risk.v2.worker: theoretical pacing %.0fs (max_users_per_cycle/max_users_per_second) must be < cycle_timeout_seconds (%d)", theoreticalPacingSec, n.CycleTimeoutSecs)
+	}
+	if n.MaxReadErrorRatio > 1 || n.MaxDBErrorRatio > 1 {
+		return fmt.Errorf("risk.v2.worker error ratios must be in (0,1]")
+	}
+	if n.MaxCatchupCycles > 64 {
+		return fmt.Errorf("risk.v2.worker.max_catchup_cycles (%d) exceeds hard cap 64", n.MaxCatchupCycles)
+	}
+	if n.MaxRetryCycles > 64 {
+		return fmt.Errorf("risk.v2.worker.max_retry_cycles (%d) exceeds hard cap 64", n.MaxRetryCycles)
+	}
+	// 周期状态 TTL 必须足以覆盖 catch-up 且 >= cycle_timeout（实际公式恒满足，此处做显式硬校验）。
+	cycleTTL := w.CycleStateTTL()
+	if cycleTTL < time.Duration(n.CycleTimeoutSecs)*time.Second {
+		return fmt.Errorf("risk.v2.worker: cycle_state_ttl (%s) must be >= cycle_timeout (%ds)", cycleTTL, n.CycleTimeoutSecs)
+	}
+	if cycleTTL < time.Duration(n.IntervalSeconds*(n.MaxCatchupCycles+1))*time.Second {
+		return fmt.Errorf("risk.v2.worker: cycle_state_ttl (%s) must cover max_catchup_cycles", cycleTTL)
+	}
+	if w.RetryTTL() < time.Duration(n.IntervalSeconds*(n.MaxRetryCycles+1))*time.Second {
+		return fmt.Errorf("risk.v2.worker: retry_ttl (%s) must cover max_retry_cycles", w.RetryTTL())
+	}
+	return nil
+}
+
+// CycleStateTTL 周期状态键 TTL = max( 2h, (max_catchup+2)×interval, 2×cycle_timeout )。
+// 三项取最大，确保既覆盖 catch-up 又 >= cycle_timeout（长 interval / 大 cycle_timeout 亦成立）。
+func (w RiskV2WorkerConfig) CycleStateTTL() time.Duration {
+	n := w.Normalized()
+	ttl := 2 * time.Hour
+	if catchup := time.Duration(n.IntervalSeconds*(n.MaxCatchupCycles+2)) * time.Second; catchup > ttl {
+		ttl = catchup
+	}
+	if twiceTimeout := time.Duration(2*n.CycleTimeoutSecs) * time.Second; twiceTimeout > ttl {
+		ttl = twiceTimeout
+	}
+	return ttl
+}
+
+// RetryTTL 失败重试集 TTL = max( 2h, (max_retry_cycles+2)×interval )。
+func (w RiskV2WorkerConfig) RetryTTL() time.Duration {
+	n := w.Normalized()
+	ttl := 2 * time.Hour
+	if retry := time.Duration(n.IntervalSeconds*(n.MaxRetryCycles+2)) * time.Second; retry > ttl {
+		ttl = retry
+	}
+	return ttl
+}
+
+// Validate 校验 V2 配置。仅在 Enabled=true 时有意义;返回的错误只含配置键名,绝不含密钥值。
+func (c RiskV2Config) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if c.FingerprintHMACKey.Len() < RiskV2HMACKeyMinLen {
+		return fmt.Errorf("risk.v2.fingerprint_hmac_key: missing or too short (min %d chars)", RiskV2HMACKeyMinLen)
+	}
+	if !riskV2KeyVersionPattern.MatchString(c.FingerprintKeyVersion) {
+		return fmt.Errorf("risk.v2.fingerprint_key_version: invalid (must match %s)", riskV2KeyVersionPattern.String())
+	}
+	if err := c.Worker.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// EffectiveEnabled 表示 V2 是否真正生效:开关开且配置有效。配置无效时返回 false（DEGRADED,不生效）。
+func (c RiskV2Config) EffectiveEnabled() bool {
+	return c.Enabled && c.Validate() == nil
+}
+
+// AggregationActive 表示 Redis 多窗口聚合是否生效（master 有效 + 子开关开）。
+func (c RiskV2Config) AggregationActive() bool { return c.EffectiveEnabled() && c.AggregationEnabled }
+
+// ScoringActive 表示 V2 评分是否生效（master 有效 + 子开关开）。切片 1 恒为 false。
+func (c RiskV2Config) ScoringActive() bool { return c.EffectiveEnabled() && c.ScoringEnabled }
+
+// ScoringPersistActive 表示 Shadow 评分持久化是否生效（评分生效 + 持久化子开关开）。
+func (c RiskV2Config) ScoringPersistActive() bool {
+	return c.ScoringActive() && c.ScoringPersistEnabled
+}
+
+// QueueSizeNormalized 把 QueueSize 夹到 [min,max]（0/越界回落默认或边界）。
+func (c RiskV2Config) QueueSizeNormalized() int {
+	q := c.QueueSize
+	if q <= 0 {
+		q = RiskV2QueueSizeDefault
+	}
+	if q < RiskV2QueueSizeMin {
+		return RiskV2QueueSizeMin
+	}
+	if q > RiskV2QueueSizeMax {
+		return RiskV2QueueSizeMax
+	}
+	return q
+}
+
+// MaxTextBytesNormalized 把 MaxTextBytes 夹到 [min,max]（0/越界回落默认或边界）。
+func (c RiskV2Config) MaxTextBytesNormalized() int {
+	m := c.MaxTextBytes
+	if m <= 0 {
+		m = RiskV2MaxTextBytesDefault
+	}
+	if m < RiskV2MaxTextBytesMin {
+		return RiskV2MaxTextBytesMin
+	}
+	if m > RiskV2MaxTextBytesMax {
+		return RiskV2MaxTextBytesMax
+	}
+	return m
 }
 
 // EdgeForwardConfig：中央把命中组的 /v1 请求转发给边缘 cell。
@@ -645,6 +953,37 @@ type ServerConfig struct {
 	TrustedProxies     []string  `mapstructure:"trusted_proxies"`       // 可信代理列表（CIDR/IP）
 	MaxRequestBodySize int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
 	H2C                H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
+
+	// GracefulShutdownTimeoutSeconds 优雅关闭时等待「已进入 Handler 的在途请求」完成的最长时间（秒）。
+	// 大模型流式网关请求较长：应按真实请求完成时长 p99 调整；测试环境可用较短值；
+	// 生产值不得盲目沿用测试的 5s。默认 60s。
+	GracefulShutdownTimeoutSeconds int `mapstructure:"graceful_shutdown_timeout_seconds"`
+	// GracefulForceTimeoutSeconds 优雅超时后执行 Server.Close 强制断连，再等待 Handler 归零的第二段有界超时（秒）。默认 10s。
+	GracefulForceTimeoutSeconds int `mapstructure:"graceful_force_timeout_seconds"`
+}
+
+// 默认优雅关闭超时（秒）。适配长流式请求；不得硬编码 5s。
+const (
+	ServerGracefulShutdownDefaultSeconds = 60
+	ServerGracefulForceDefaultSeconds    = 10
+)
+
+// GracefulShutdownTimeout 返回配置化的优雅关闭超时（<=0 回落默认 60s）。
+func (c ServerConfig) GracefulShutdownTimeout() time.Duration {
+	s := c.GracefulShutdownTimeoutSeconds
+	if s <= 0 {
+		s = ServerGracefulShutdownDefaultSeconds
+	}
+	return time.Duration(s) * time.Second
+}
+
+// GracefulForceTimeout 返回强制断连后等待 Handler 归零的第二段超时（<=0 回落默认 10s）。
+func (c ServerConfig) GracefulForceTimeout() time.Duration {
+	s := c.GracefulForceTimeoutSeconds
+	if s <= 0 {
+		s = ServerGracefulForceDefaultSeconds
+	}
+	return time.Duration(s) * time.Second
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -1523,6 +1862,36 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("CELL_GATEWAY_KEY")); v != "" {
 		cfg.CellGatewayKey = v
 	}
+	// Risk V2 Shadow env 兜底。独立密钥,绝不复用其它 secret。
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("RISK_V2_ENABLED"))); v == "1" || v == "true" || v == "on" {
+		cfg.Risk.V2.Enabled = true
+	}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("RISK_V2_AGGREGATION_ENABLED"))); v == "1" || v == "true" || v == "on" {
+		cfg.Risk.V2.AggregationEnabled = true
+	}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("RISK_V2_SCORING_ENABLED"))); v == "1" || v == "true" || v == "on" {
+		cfg.Risk.V2.ScoringEnabled = true
+	}
+	if v := strings.TrimSpace(os.Getenv("RISK_FINGERPRINT_HMAC_KEY")); v != "" {
+		cfg.Risk.V2.FingerprintHMACKey = SecretString(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("RISK_FINGERPRINT_KEY_VERSION")); v != "" {
+		cfg.Risk.V2.FingerprintKeyVersion = v
+	}
+	if v := strings.TrimSpace(os.Getenv("RISK_V2_QUEUE_SIZE")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Risk.V2.QueueSize = n
+		} else {
+			slog.Warn("RISK_V2_QUEUE_SIZE 非整数,已忽略", "err", err)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("RISK_V2_MAX_TEXT_BYTES")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Risk.V2.MaxTextBytes = n
+		} else {
+			slog.Warn("RISK_V2_MAX_TEXT_BYTES 非整数,已忽略", "err", err)
+		}
+	}
 	// EDGE_FORWARD_* 环境变量兜底（中央“执行→转发”开关与目标 cell）。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_ENABLED"))); v == "1" || v == "true" || v == "on" {
 		cfg.EdgeForward.Enabled = true
@@ -1727,8 +2096,10 @@ func setDefaults() {
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.mode", "release")
 	viper.SetDefault("server.frontend_url", "")
-	viper.SetDefault("server.read_header_timeout", 30) // 30秒读取请求头
-	viper.SetDefault("server.idle_timeout", 120)       // 120秒空闲超时
+	viper.SetDefault("server.read_header_timeout", 30)                                                 // 30秒读取请求头
+	viper.SetDefault("server.idle_timeout", 120)                                                       // 120秒空闲超时
+	viper.SetDefault("server.graceful_shutdown_timeout_seconds", ServerGracefulShutdownDefaultSeconds) // 优雅关闭：适配长流式请求
+	viper.SetDefault("server.graceful_force_timeout_seconds", ServerGracefulForceDefaultSeconds)       // 强制断连后等待 handler 归零
 	viper.SetDefault("server.trusted_proxies", []string{})
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
 	// H2C 默认配置
@@ -2007,6 +2378,29 @@ func setDefaults() {
 	viper.SetDefault("risk.weekly_budget_micros", int64(300*1_000_000)) // 300 USDC/周（观测基准）
 	viper.SetDefault("risk.medium_score", 40)
 	viper.SetDefault("risk.high_score", 70)
+	// Model Extraction Risk V2 Shadow（P1A）。默认关闭。
+	viper.SetDefault("risk.v2.enabled", false)
+	viper.SetDefault("risk.v2.aggregation_enabled", false)
+	viper.SetDefault("risk.v2.scoring_enabled", false)
+	viper.SetDefault("risk.v2.scoring_persist_enabled", false)
+	viper.SetDefault("risk.v2.fingerprint_key_version", "v1")
+	viper.SetDefault("risk.v2.queue_size", 4096)
+	viper.SetDefault("risk.v2.max_text_bytes", 16*1024)
+	// Shadow Scoring Worker（切片 4）保守未校准默认。
+	viper.SetDefault("risk.v2.worker.interval_seconds", RiskV2WorkerIntervalDefault)
+	viper.SetDefault("risk.v2.worker.grace_delay_seconds", RiskV2WorkerGraceDefault)
+	viper.SetDefault("risk.v2.worker.cycle_timeout_seconds", RiskV2WorkerCycleTimeoutDefault)
+	viper.SetDefault("risk.v2.worker.batch_size", RiskV2WorkerBatchSizeDefault)
+	viper.SetDefault("risk.v2.worker.batch_concurrency", RiskV2WorkerBatchConcDefault)
+	viper.SetDefault("risk.v2.worker.max_users_per_second", RiskV2WorkerMaxUPSDefault)
+	viper.SetDefault("risk.v2.worker.max_users_per_cycle", RiskV2WorkerMaxUsersCycleDefault)
+	viper.SetDefault("risk.v2.worker.max_read_error_ratio", RiskV2WorkerReadErrRatioDefault)
+	viper.SetDefault("risk.v2.worker.max_db_error_ratio", RiskV2WorkerDBErrRatioDefault)
+	viper.SetDefault("risk.v2.worker.lease_ttl_seconds", RiskV2WorkerLeaseTTLDefault)
+	viper.SetDefault("risk.v2.worker.lease_renew_interval_ms", RiskV2WorkerLeaseRenewMSDefault)
+	viper.SetDefault("risk.v2.worker.max_catchup_cycles", RiskV2WorkerMaxCatchupDefault)
+	viper.SetDefault("risk.v2.worker.max_retry_cycles", RiskV2WorkerMaxRetryDefault)
+	viper.SetDefault("risk.v2.worker.assessment_stale_after_seconds", RiskV2WorkerStaleAfterDefault)
 	// 特征权重（f1..f7），加权和归一到 0..100（权重和=1.0）。
 	viper.SetDefault("risk.weights", map[string]float64{
 		"f1": 0.20, // diversity_collapse 模板坍缩

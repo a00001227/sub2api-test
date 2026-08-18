@@ -26,6 +26,8 @@ import (
 type Application struct {
 	Server  *http.Server
 	Cleanup func()
+	// 切片 4.2：两段式有序优雅关闭（含 HTTP drain + 强制 Close）。为 nil 时 main 回退到直接 Server.Shutdown。
+	ShutdownRiskV2 func(ctx context.Context) ShutdownResult
 }
 
 func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
@@ -48,6 +50,18 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 
 		// BuildInfo provider
 		provideServiceBuildInfo,
+
+		// Risk V2 Shadow：provider = service.ProvideRiskV2Dispatcher（在 service.ProviderSet 中，
+		// disabled/DEGRADED → nil）。其输出经上面 provideCleanup 接入关闭生命周期做 graceful drain。
+		// 注意：SetRiskV2(gatewayService, dispatcher) 是 setter 注入，Wire 无法表达，
+		// 按本仓库既有维护方式在 wire_gen.go 中人工镜像（见该文件 RiskV2 段）。
+		//
+		// 切片 4.1 运行态接线意图（Wire 自动链路缺失，按既有方式在 wire_gen.go 人工镜像）：
+		//   Providers: RiskV2ScoringReader / RiskV2AdminDetailReader / RiskV2Lease /
+		//              RiskV2IngestionHealthReader / RiskV2HealthReporter / RiskV2CycleStore /
+		//              RiskV2HealthReportLoop / RiskV2ScoringWorker / UserRiskV2Repository。
+		//   复杂构造与生命周期集中在非生成源码 provideRiskV2Runtime(cfg, rdb, db, dispatcher, params)；
+		//   wire_gen.go 仅调用该函数并把 (loop, worker) 接入 provideCleanup 的有序关闭。
 
 		// Cleanup function provider
 		provideCleanup,
@@ -100,6 +114,11 @@ func provideCleanup(
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
+	// Risk V2 Shadow 有界采集器（可为 nil：disabled/DEGRADED）。cleanup 时 graceful drain 停机。
+	riskV2Dispatcher *service.RiskV2Dispatcher,
+	// 切片 4.1：Scoring Worker + Health Reporter Loop（可为 nil）。按 §一.4 有序关闭。
+	riskV2ScoringWorker *service.RiskV2ScoringWorker,
+	riskV2HealthLoop *service.RiskV2HealthReportLoop,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -109,6 +128,11 @@ func provideCleanup(
 			name string
 			fn   func() error
 		}
+
+		// 切片 4.1 §一.4 Risk V2 有序关闭（先于并行步骤）：Worker → Dispatcher drain → Health Reporter flush+注销。
+		riskV2ScoringWorker.Stop()
+		_ = riskV2Dispatcher.Stop(ctx)
+		riskV2HealthLoop.Stop()
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{

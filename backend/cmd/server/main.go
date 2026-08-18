@@ -173,11 +173,19 @@ func runMainServer() {
 
 	log.Println("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := app.Server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	// 切片 4.2：两段式有序关闭（Worker→HTTP drain(可配置超时+强制 Close)→Dispatcher drain→Health flush/deregister/stop）。
+	// 超时/强制 Close 由 ShutdownRiskV2 内部按 server.graceful_* 配置处理；随后 defer app.Cleanup() 关基础设施（Redis/DB 最后）。
+	if app.ShutdownRiskV2 != nil {
+		res := app.ShutdownRiskV2(context.Background())
+		if res.HTTPGracefulTimedOut {
+			log.Printf("Server shutdown: graceful timeout reached, forced Close=%v, incomplete=%v", res.ForceClosed, res.Incomplete)
+		}
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := app.Server.Shutdown(ctx); err != nil {
+			log.Printf("Server forced to shutdown: %v", err)
+		}
 	}
 
 	log.Println("Server exited")

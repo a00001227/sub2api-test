@@ -160,6 +160,20 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	// Risk Phase 0（仅观测）：特征草图缓存 + user_risk 仓储 + 评分 worker + admin 服务。
 	riskSketchCache := repository.NewRiskSketchCache(redisClient)
 	gatewayService.SetRiskSketchCache(riskSketchCache)
+	// Risk V2 Shadow 切片 1：aggregation_enabled 且 Redis 可用 → Redis 多窗口聚合 sink；否则计数 sink。
+	// 切片 4.1：聚合 cache 对齐 Scoring Worker 的 interval/TTL，使写侧周期活跃索引(active:c)与 Worker 一致。
+	var riskV2Sink service.RiskV2Sink = service.NewLogRiskV2Sink()
+	riskV2WorkerParams := service.RiskV2WorkerParamsFromConfig(configConfig.Risk.V2.Worker)
+	if configConfig.Risk.V2.AggregationActive() {
+		if riskV2AggCache := repository.NewRiskV2AggCacheWithCycle(redisClient, service.RiskV2AggSchemaVersion, configConfig.Risk.V2.FingerprintKeyVersion, riskV2WorkerParams.Interval, configConfig.Risk.V2.Worker.CycleStateTTL()); riskV2AggCache != nil {
+			riskV2Sink = service.NewRiskV2AggSink(riskV2AggCache, 0)
+		}
+	}
+	riskV2Dispatcher := service.ProvideRiskV2Dispatcher(configConfig, riskV2Sink)
+	gatewayService.SetRiskV2(configConfig.Risk.V2, riskV2Dispatcher)
+	// 切片 4.1 运行态接线（Health Reporter + Scoring Worker），全部 flags 门控。
+	// 启动顺序：Dispatcher/Aggregation（上方）→ Health Reporter → Scoring Worker。
+	riskV2HealthLoop, riskV2ScoringWorker := provideRiskV2Runtime(configConfig, redisClient, db, riskV2Dispatcher, riskV2WorkerParams)
 	userRiskRepository := repository.NewUserRiskRepository(db)
 	riskScoringService := service.ProvideRiskScoringService(riskSketchCache, userRiskRepository, userRPMCache, configConfig)
 	riskAdminService := service.ProvideRiskAdminService(userRiskRepository, userRPMCache, configConfig)
@@ -317,10 +331,20 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db, configConfig)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskScoringService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskScoringService, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop)
+	// 切片 4.2：in-flight tracker 包裹业务 handler（Server.Close 后据此确认 Handler 真正退出）。
+	riskV2InflightTracker := &inflightTracker{}
+	httpServer.Handler = riskV2InflightTracker.Middleware(httpServer.Handler)
+	riskV2GracefulTimeout := configConfig.Server.GracefulShutdownTimeout()
+	riskV2ForceTimeout := configConfig.Server.GracefulForceTimeout()
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
+		// 切片 4.2：两段式有序优雅关闭（Worker→HTTP drain(含强制 Close)→Dispatcher→Health→基础设施）。
+		ShutdownRiskV2: func(ctx context.Context) ShutdownResult {
+			return gracefulRiskV2Shutdown(ctx, riskV2ScoringWorker, httpServer, riskV2InflightTracker,
+				riskV2GracefulTimeout, riskV2ForceTimeout, riskV2Dispatcher, riskV2HealthLoop, nil, nil)
+		},
 	}
 	return application, nil
 }
@@ -330,6 +354,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 type Application struct {
 	Server  *http.Server
 	Cleanup func()
+	// 切片 4.2：两段式有序优雅关闭（含 HTTP drain + 强制 Close）。为 nil 时 main 回退到直接 Server.Shutdown。
+	ShutdownRiskV2 func(ctx context.Context) ShutdownResult
 }
 
 func providePrivacyClientFactory() service.PrivacyClientFactory {
@@ -377,6 +403,9 @@ func provideCleanup(
 	providerUsageOutboxWorker *service.ProviderUsageOutboxWorker,
 	cellSelfHealSeeder *service.CellSelfHealSeeder,
 	riskScoringService *service.RiskScoringService,
+	riskV2Dispatcher *service.RiskV2Dispatcher,
+	riskV2ScoringWorker *service.RiskV2ScoringWorker,
+	riskV2HealthLoop *service.RiskV2HealthReportLoop,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -386,6 +415,16 @@ func provideCleanup(
 			name string
 			fn   func() error
 		}
+
+		// 切片 4.1 §一.4 Risk V2 关闭顺序（严格有序，先于并行步骤）：
+		//   1) 停 Scoring Worker（停止接受新评分周期）；
+		//   2) 排空 Dispatcher；
+		//   3) Health Reporter 最后 flush + 注销（Stop 内部完成）。
+		// 全部 nil-safe（disabled/DEGRADED → nil）。
+		riskV2ScoringWorker.Stop()     // *RiskV2ScoringWorker.Stop 为 nil-safe
+		_ = riskV2Dispatcher.Stop(ctx) // graceful drain
+		riskV2HealthLoop.Stop()        // 最后 flush + Deregister（nil-safe）
+		log.Printf("[Cleanup] RiskV2 runtime stopped (worker→dispatcher→health)")
 
 		parallelSteps := []cleanupStep{
 			{"RiskScoringService", func() error {

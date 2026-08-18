@@ -696,6 +696,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUserPlatformQuotaUsageFlusher,
 	ProvideRiskScoringService, // Risk Phase 0（仅观测）：评分 worker
 	ProvideRiskAdminService,   // Risk Phase 0（仅观测）：admin 服务
+	ProvideRiskV2Dispatcher,   // Risk V2 Shadow：有界采集器（disabled/DEGRADED → nil）
 )
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。

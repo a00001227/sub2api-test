@@ -115,6 +115,14 @@ func NewGatewayHandler(
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
+	riskV2Start := time.Now()
+	// Risk V2 Shadow：仅在 V2 就绪（enabled+valid+dispatcher）时才生成 server_request_id 并注册终态 defer。
+	// off/DEGRADED 时不生成 UUID、不注册 defer、不提取特征、不 enqueue、不新增 goroutine，绝不影响 legacy。
+	var riskV2ServerID string
+	if h.gatewayService.RiskV2Ready() {
+		riskV2ServerID = newRiskV2ServerRequestID(c)
+		defer h.riskV2TerminalObserve(c, riskV2Start)
+	}
 	// 从context获取apiKey和user（ApiKeyAuth中间件已设置）
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -523,7 +531,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			edgeTrusted := middleware2.IsEdgeTrusted(c)
 			// Risk Phase 0（仅观测）：在 parsedReq 仍有效时提取请求特征并拍成独立副本，
 			// 捕获进响应后闭包（simhash 在记录路径异步计算，绝不进入热路径）。
-			riskFeatures := buildRiskUsageFeatures(parsedReq)
+			riskFeatures := buildRiskUsageFeatures(parsedReq, h.cfg, riskV2Start, riskV2ServerID)
+			markRiskV2Observed(c)
 			// #86b:edge-trusted 流式请求,在流末尾吐权威用量事件,供中央剥出来给消费者计费。
 			h.emitEdgeUsageSentinel(c, result, edgeTrusted, reqStream)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
@@ -958,7 +967,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 方案 B:在 c 仍有效时取出 edge-trusted,捕获进后台任务(勿在闭包里碰 c)。
 			edgeTrusted := middleware2.IsEdgeTrusted(c)
 			// Risk Phase 0（仅观测）：在 attemptParsedReq 仍有效时提取请求特征并拍成独立副本。
-			riskFeatures := buildRiskUsageFeatures(attemptParsedReq)
+			riskFeatures := buildRiskUsageFeatures(attemptParsedReq, h.cfg, riskV2Start, riskV2ServerID)
+			markRiskV2Observed(c)
 			// #86b:edge-trusted 流式请求,在流末尾吐权威用量事件,供中央剥出来给消费者计费。
 			h.emitEdgeUsageSentinel(c, result, edgeTrusted, reqStream)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {

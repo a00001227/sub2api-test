@@ -24,6 +24,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	streamStarted := false
 
 	requestStart := time.Now()
+	// Risk V2 Shadow：仅在 V2 就绪时才生成 server_request_id 并注册终态 defer（off/DEGRADED 完全不触发）。
+	var riskV2ServerID string
+	if h.gatewayService.RiskV2Ready() {
+		riskV2ServerID = newRiskV2ServerRequestID(c)
+		defer h.riskV2TerminalObserve(c, requestStart)
+	}
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -284,7 +290,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		edgeTrusted := middleware2.IsEdgeTrusted(c)
 		// Risk Phase 0（仅观测）：在 parsedReq 仍有效时提取请求特征并拍成独立副本。
-		riskFeatures := buildRiskUsageFeatures(parsedReq)
+		riskFeatures := buildRiskUsageFeatures(parsedReq, h.cfg, requestStart, riskV2ServerID)
+		markRiskV2Observed(c)
 		h.emitEdgeUsageSentinel(c, result, edgeTrusted, result.Stream)
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{

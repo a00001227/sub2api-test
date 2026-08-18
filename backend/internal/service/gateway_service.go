@@ -657,6 +657,11 @@ type GatewayService struct {
 	// 可选（nil 时不更新草图，评分 worker 仍可回退到 usage_logs 聚合）。绝不进入请求热路径。
 	riskSketchCache RiskSketchCache
 
+	// riskV2Cfg / riskV2Dispatcher 是 Model Extraction Risk V2 Shadow（P1A）。
+	// dispatcher 为 nil 或 cfg.Enabled=false 时，V2 采集完全不发生（legacy 行为逐字节不变）。
+	riskV2Cfg        config.RiskV2Config
+	riskV2Dispatcher *RiskV2Dispatcher
+
 	// #86b 中央「执行→转发」消费者计费:占位 account(懒建 + 缓存)。转发请求在中央
 	// 没有本地 account,用它满足 usage_log 的 account FK;它 external ref 为空 → provider
 	// outbox 天然跳过(不重复发),schedulable=false → 永不被选号。
@@ -751,6 +756,111 @@ func (s *GatewayService) SetRiskSketchCache(cache RiskSketchCache) {
 	if s != nil {
 		s.riskSketchCache = cache
 	}
+}
+
+// SetRiskV2 注入 Model Extraction Risk V2 Shadow（P1A）的配置与有界采集器。
+// 仅在 risk.v2.enabled 时由装配处调用；未注入时 V2 采集完全不发生。
+func (s *GatewayService) SetRiskV2(cfg config.RiskV2Config, dispatcher *RiskV2Dispatcher) {
+	if s != nil {
+		s.riskV2Cfg = cfg
+		s.riskV2Dispatcher = dispatcher
+	}
+}
+
+// RiskV2Ready 表示 V2 影子链路是否就绪（配置有效 + dispatcher 已注入且非 DEGRADED）。
+// handler 据此决定是否生成 server_request_id / 注册终态 defer——off/DEGRADED 时一律不触发。
+func (s *GatewayService) RiskV2Ready() bool {
+	return s != nil && s.riskV2Dispatcher != nil && s.riskV2Cfg.EffectiveEnabled()
+}
+
+// riskV2CacheApplicable 判断该 provider/路径是否明确支持并已正确解析缓存 usage。
+// 目前仅 Anthropic（Claude）路径解析 cache_creation/read_input_tokens。
+func riskV2CacheApplicable(platform string) bool {
+	return platform == "anthropic"
+}
+
+// enqueueRiskV2 在响应后（成功路径）组装不可逆观测包并非阻塞入队（有界队列）。
+// 去重键 = server_request_id（每请求唯一，来自 handler 入口生成，不受客户端影响）。
+// 隐私：绝不携带原始 client_request_id / billing_request_id。
+// cache：仅 Applicable 的 provider 才置 Available 与真实 presence（0/value）；否则指针保持 nil。
+func (s *GatewayService) enqueueRiskV2(usageLog *UsageLog, feat RiskUsageFeatures, platform string) {
+	if s == nil || s.riskV2Dispatcher == nil || !s.riskV2Cfg.EffectiveEnabled() || usageLog == nil || feat.V2Request == nil {
+		return
+	}
+	v2 := feat.V2Request
+	env := RiskFeatureEnvelope{
+		ServerRequestID:            feat.ServerRequestID,
+		UserID:                     usageLog.UserID,
+		APIKeyID:                   usageLog.APIKeyID,
+		RequestStartedAt:           feat.RequestStartedAt, // 请求入口捕获，绝不用 completed 近似
+		RequestCompletedAt:         time.Now(),
+		TerminalStatus:             "ok",
+		UsageAvailable:             true,
+		Model:                      usageLog.Model,
+		Streaming:                  usageLog.Stream,
+		MaxTokens:                  feat.MaxTokens,
+		Temperature:                feat.Temperature,
+		TopP:                       v2.TopP,
+		HasSeed:                    v2.HasSeed,
+		ResponseFormatType:         v2.ResponseFormatType,
+		InputTokens:                int64(usageLog.InputTokens),
+		OutputTokens:               int64(usageLog.OutputTokens),
+		TurnAvailable:              v2.TurnAvailable,
+		InputOriginalBytes:         v2.InputOriginalBytes,
+		InputSampledBytes:          v2.InputSampledBytes,
+		InputTruncated:             v2.InputTruncated,
+		ExactFingerprintAvailable:  v2.ExactFingerprintAvailable,
+		ExactHMAC:                  v2.ExactHMAC,
+		ScaffoldHMAC:               v2.ScaffoldHMAC,
+		ScaffoldFingerprintSampled: v2.ScaffoldFingerprintSampled,
+		NearDupSimhash:             v2.NearDupSimhash,
+		HasNearDup:                 v2.HasNearDup,
+		NearFingerprintSampled:     v2.NearFingerprintSampled,
+		KeyVersion:                 v2.KeyVersion,
+		FingerprintVersion:         v2.FingerprintVersion,
+		NormalizationVersion:       v2.NormalizationVersion,
+		SystemPresent:              v2.SystemPresent,
+		ToolsPresent:               v2.ToolsPresent,
+		ToolResultPresent:          v2.ToolResultPresent,
+		HistoryCount:               v2.HistoryCount,
+	}
+	// cache presence：区分 provider-不适用 / 不可用 / 显式 0 / >0。
+	if riskV2CacheApplicable(platform) {
+		env.CacheUsageApplicable = true
+		env.CacheUsageAvailable = true // 成功路径已获得 cache 字段（Anthropic 恒返回，0 为显式 0）
+		cc := int64(usageLog.CacheCreationTokens)
+		cr := int64(usageLog.CacheReadTokens)
+		env.CacheCreationTokens = &cc
+		env.CacheReadTokens = &cr
+	}
+	// 非 Applicable：CacheUsageApplicable=false、Available=false、指针保持 nil（不填 0）。
+	s.riskV2Dispatcher.Enqueue(env)
+}
+
+// EnqueueRiskV2Terminal 在主请求未走到成功记账路径（上游错误/取消/流中断/无 usage）时，
+// 产生一条 usage_available=false 的终态观测。去重键 = serverRequestID（handler 入口生成，每请求唯一）。
+// 绝不含 usage token（cache 保持 nil = unavailable）、绝不含原文、绝不含 client/billing 原始 ID。
+func (s *GatewayService) EnqueueRiskV2Terminal(serverRequestID string, userID, apiKeyID int64, startedAt time.Time, terminalStatus string) {
+	if s == nil || s.riskV2Dispatcher == nil || !s.riskV2Cfg.EffectiveEnabled() {
+		return
+	}
+	if terminalStatus == "" {
+		terminalStatus = "terminal_error"
+	}
+	env := RiskFeatureEnvelope{
+		ServerRequestID:      serverRequestID,
+		UserID:               userID,
+		APIKeyID:             apiKeyID,
+		RequestStartedAt:     startedAt,
+		RequestCompletedAt:   time.Now(),
+		TerminalStatus:       terminalStatus,
+		UsageAvailable:       false, // 无最终 usage
+		CacheUsageApplicable: false, // 未获得 usage → 无法判定
+		CacheUsageAvailable:  false, // cache 字段不可读 → 指针保持 nil
+		FingerprintVersion:   RiskV2FingerprintVersion,
+		NormalizationVersion: RiskV2NormalizationVersion,
+	}
+	s.riskV2Dispatcher.Enqueue(env)
 }
 
 // GenerateSessionHash 从预解析请求计算粘性会话 hash
@@ -8994,6 +9104,13 @@ type RiskUsageFeatures struct {
 	Temperature  *float64 // 请求 temperature（nil=未显式传入）
 	// MessagesRaw 消息 raw JSON（用于异步计算 simhash；仅在记录路径内使用，不落库、不日志）。
 	MessagesRaw []byte
+	// RequestStartedAt 请求入口捕获的起始时刻（V2 生命周期字段；绝不用 completed 近似）。
+	RequestStartedAt time.Time
+	// ServerRequestID 平台在下游请求入口生成的每请求唯一 ID（V2 去重键；不受客户端影响）。
+	ServerRequestID string
+	// V2Request 是 Model Extraction Risk V2 Shadow 的请求侧特征（仅 EffectiveEnabled 时非 nil）。
+	// 全为哈希/标量，绝不含原文；nil 时 V2 采集完全不发生（legacy 行为不变）。
+	V2Request *RiskV2RequestFeatures
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -9500,16 +9617,16 @@ type recordUsageOpts struct {
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
-		Result:             input.Result,
-		APIKey:             input.APIKey,
-		User:               input.User,
-		Account:            input.Account,
-		Subscription:       input.Subscription,
-		InboundEndpoint:    input.InboundEndpoint,
-		UpstreamEndpoint:   input.UpstreamEndpoint,
-		UserAgent:          input.UserAgent,
-		IPAddress:          input.IPAddress,
-		RequestPayloadHash: input.RequestPayloadHash,
+		Result:              input.Result,
+		APIKey:              input.APIKey,
+		User:                input.User,
+		Account:             input.Account,
+		Subscription:        input.Subscription,
+		InboundEndpoint:     input.InboundEndpoint,
+		UpstreamEndpoint:    input.UpstreamEndpoint,
+		UserAgent:           input.UserAgent,
+		IPAddress:           input.IPAddress,
+		RequestPayloadHash:  input.RequestPayloadHash,
 		ForceCacheBilling:   input.ForceCacheBilling,
 		APIKeyService:       input.APIKeyService,
 		QuotaPlatform:       input.QuotaPlatform,
@@ -9568,20 +9685,20 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 
 // recordUsageCoreInput 是 recordUsageCore 的公共输入字段，从两种输入结构体中提取。
 type recordUsageCoreInput struct {
-	Result             *ForwardResult
-	APIKey             *APIKey
-	User               *User
-	Account            *Account
-	Subscription       *UserSubscription
-	InboundEndpoint    string
-	UpstreamEndpoint   string
-	UserAgent          string
-	IPAddress          string
-	RequestPayloadHash string
+	Result              *ForwardResult
+	APIKey              *APIKey
+	User                *User
+	Account             *Account
+	Subscription        *UserSubscription
+	InboundEndpoint     string
+	UpstreamEndpoint    string
+	UserAgent           string
+	IPAddress           string
+	RequestPayloadHash  string
 	ForceCacheBilling   bool
 	APIKeyService       APIKeyQuotaUpdater
 	QuotaPlatform       string
-	SkipConsumerBilling bool // 方案 B:EDGE 可信转发 → 跳过消费者计费,仍发 provider 用量
+	SkipConsumerBilling bool              // 方案 B:EDGE 可信转发 → 跳过消费者计费,仍发 provider 用量
 	RiskFeatures        RiskUsageFeatures // 反蒸馏 Phase 0（仅观测）请求特征
 	ChannelUsageFields
 }
@@ -9657,6 +9774,10 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// Risk Phase 0（仅观测）：响应后更新每用户 Redis 特征草图（异步、best-effort，
 	// 绝不进入请求热路径）。simhash 已在 buildRecordUsageLog 计算并挂在 usageLog 上。
 	s.updateRiskSketchAsync(usageLog, input.RiskFeatures)
+
+	// Model Extraction Risk V2 Shadow（P1A，仅 risk.v2.enabled 时生效）：非阻塞入队
+	// 不可逆观测包。dispatcher/请求侧特征缺失即静默跳过；绝不影响主请求与 legacy 采集。
+	s.enqueueRiskV2(usageLog, input.RiskFeatures, account.Platform)
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
