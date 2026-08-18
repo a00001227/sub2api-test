@@ -65,7 +65,7 @@ func assembleSmokeApp(t *testing.T, rdb *redis.Client, db *sql.DB, cfg *config.C
 		disp.Start()
 	}
 	params := service.RiskV2WorkerParamsFromConfig(cfg.Risk.V2.Worker)
-	loop, worker := provideRiskV2Runtime(cfg, rdb, db, disp, params)
+	loop, worker, _ := provideRiskV2Runtime(cfg, rdb, db, disp, params)
 
 	tracker := &inflightTracker{}
 	srv := &http.Server{Handler: tracker.Middleware(handler)}

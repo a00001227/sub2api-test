@@ -447,3 +447,65 @@ func TestRuntime_NoGoroutineLeak(t *testing.T) {
 }
 
 var _ = config.RiskV2WorkerConfig{}
+
+// 切片 5.1 §七：RuntimeStatus 并发安全 —— worker 持续更新状态 + 多并发读取快照，-race 无竞争。
+func TestRuntimeStatus_ConcurrentRace(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 6, 5, 0, time.UTC)
+	p := defaultWorkerParams()
+	p.MaxUsersPerSecond = 0
+	cyc := baseCycleEnd(now, p)
+	reader := newFakeReader()
+	reader.setCycle(cyc, []int64{1, 2, 3})
+	dispatcher := service.NewRiskV2Dispatcher(16, &countingSinkR{})
+	dispatcher.Start()
+	defer func() { _ = dispatcher.Stop(context.Background()) }()
+	w := service.NewRiskV2ScoringWorker(service.RiskV2ScoringWorkerDeps{
+		Reader: reader, Lease: &fakeLease{}, Health: healthyHealth(), Repo: newFakeRepo(),
+		ScoringConfig: service.DefaultRiskV2ScoringConfig(), FingerprintKeyVersion: "v1",
+		Persist: true, Now: func() time.Time { return now },
+	}, p)
+	require.True(t, w.Ready())
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	// 写方：反复驱动周期（改 currentCycle/cursor/lastCycleStatus/leader）。
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				w.RunDueCycles(context.Background())
+			}
+		}
+	}()
+	// 读方：多并发组装 RuntimeStatus 快照。
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				st := dispatcher.Stats()
+				status := service.BuildRiskV2RuntimeStatus(service.RiskV2RuntimeStatusInputs{
+					Enabled: true, AggregationEnabled: true, ScoringEnabled: true,
+					Worker: w, DispatcherStats: &st, NowUnix: now.Unix(),
+				})
+				// 字段自洽：LastCycleStatus 只能是稳定枚举之一。
+				switch status.LastCycleStatus {
+				case "", service.RiskV2CycleCompleted, service.RiskV2CycleIncomplete, service.RiskV2CycleRunning, service.RiskV2CyclePending:
+				default:
+					t.Errorf("unexpected LastCycleStatus %q", status.LastCycleStatus)
+				}
+			}
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+}
+
+type countingSinkR struct{ n int64 }
+
+func (s *countingSinkR) Consume(env service.RiskFeatureEnvelope) {}

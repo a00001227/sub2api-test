@@ -41,6 +41,7 @@ type AdminHandlers struct {
 	PricingModel           *admin.PricingModelHandler
 	Feedback               *admin.FeedbackHandler
 	UserRisk               *admin.UserRiskHandler
+	RiskV2                 *admin.RiskV2Handler
 }
 
 // Handlers contains all HTTP handlers
@@ -66,7 +67,7 @@ type Handlers struct {
 	Feedback         *FeedbackHandler
 	AccountAPI       *AccountAPIHandler
 	// ProviderConnect Provider Portal 内部接入面（Phase 21E-6C-2B-1）。
-	ProviderConnect  *ProviderConnectHandler
+	ProviderConnect *ProviderConnectHandler
 }
 
 // BuildInfo contains build-time information

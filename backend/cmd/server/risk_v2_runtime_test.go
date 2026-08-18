@@ -50,7 +50,7 @@ func rtCfg(enabled, agg, scoring, persist bool) *config.Config {
 
 // §十一.1：所有 Flag 关闭 → 无 V2 运行态组件。
 func TestRuntime_AllDisabled(t *testing.T) {
-	loop, worker := provideRiskV2Runtime(rtCfg(false, false, false, false), rtRedis(t), nil,
+	loop, worker, _ := provideRiskV2Runtime(rtCfg(false, false, false, false), rtRedis(t), nil,
 		nil, service.RiskV2WorkerParamsFromConfig(config.RiskV2WorkerConfig{}))
 	require.Nil(t, loop)
 	require.Nil(t, worker)
@@ -58,7 +58,7 @@ func TestRuntime_AllDisabled(t *testing.T) {
 
 // enabled 但 aggregation=false → 不启动 Reporter/Worker。
 func TestRuntime_AggregationOff(t *testing.T) {
-	loop, worker := provideRiskV2Runtime(rtCfg(true, false, false, false), rtRedis(t), nil,
+	loop, worker, _ := provideRiskV2Runtime(rtCfg(true, false, false, false), rtRedis(t), nil,
 		nil, service.RiskV2WorkerParamsFromConfig(config.RiskV2WorkerConfig{}))
 	require.Nil(t, loop)
 	require.Nil(t, worker)
@@ -67,7 +67,7 @@ func TestRuntime_AggregationOff(t *testing.T) {
 // §十一.2：只 Aggregation → Reporter 启动、Worker 不启动。
 func TestRuntime_AggregationOnlyStartsReporter(t *testing.T) {
 	cfg := rtCfg(true, true, false, false)
-	loop, worker := provideRiskV2Runtime(cfg, rtRedis(t), nil, nil,
+	loop, worker, _ := provideRiskV2Runtime(cfg, rtRedis(t), nil, nil,
 		service.RiskV2WorkerParamsFromConfig(cfg.Risk.V2.Worker))
 	require.NotNil(t, loop, "health reporter loop must start")
 	require.Nil(t, worker, "scoring worker must NOT start when scoring disabled")
@@ -77,7 +77,7 @@ func TestRuntime_AggregationOnlyStartsReporter(t *testing.T) {
 // §十一.3：Scoring Dry-Run → Worker 启动、persist=false。
 func TestRuntime_ScoringDryRunStartsWorker(t *testing.T) {
 	cfg := rtCfg(true, true, true, false)
-	loop, worker := provideRiskV2Runtime(cfg, rtRedis(t), nil, nil,
+	loop, worker, _ := provideRiskV2Runtime(cfg, rtRedis(t), nil, nil,
 		service.RiskV2WorkerParamsFromConfig(cfg.Risk.V2.Worker))
 	require.NotNil(t, loop)
 	require.NotNil(t, worker, "dry-run worker must start without DB")
@@ -89,7 +89,7 @@ func TestRuntime_ScoringDryRunStartsWorker(t *testing.T) {
 // §十一.5 / §二.6 / §三：persist=true 但 Schema 不可用 → Worker 不启动（DEGRADED），Reporter 仍启动。
 func TestRuntime_PersistSchemaMissingDegraded(t *testing.T) {
 	cfg := rtCfg(true, true, true, true)
-	loop, worker := provideRiskV2Runtime(cfg, rtRedis(t), rtDBNoSchema(t), nil,
+	loop, worker, _ := provideRiskV2Runtime(cfg, rtRedis(t), rtDBNoSchema(t), nil,
 		service.RiskV2WorkerParamsFromConfig(cfg.Risk.V2.Worker))
 	require.NotNil(t, loop, "reporter still starts")
 	require.Nil(t, worker, "persist worker must NOT start when schema not ready")
@@ -99,7 +99,7 @@ func TestRuntime_PersistSchemaMissingDegraded(t *testing.T) {
 // Stop 幂等（多次调用不 panic / 不 send-on-closed）。
 func TestRuntime_StopIdempotent(t *testing.T) {
 	cfg := rtCfg(true, true, true, false)
-	loop, worker := provideRiskV2Runtime(cfg, rtRedis(t), nil, nil,
+	loop, worker, _ := provideRiskV2Runtime(cfg, rtRedis(t), nil, nil,
 		service.RiskV2WorkerParamsFromConfig(cfg.Risk.V2.Worker))
 	require.NotNil(t, worker)
 	worker.Stop()

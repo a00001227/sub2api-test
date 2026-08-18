@@ -69,6 +69,13 @@ type RiskV2AssessmentListItem struct {
 	AssessedAtUnix        int64
 	UpdatedAtUnix         int64
 	FingerprintKeyVersion string
+
+	// 切片 5（Admin 列表用）：额外白名单字段。
+	HealthAvailable bool
+	FeatureVersion  string
+	PolicyVersion   string
+	EffectiveAction string             // 恒 NONE
+	TopReasonCodes  []RiskV2ReasonCode // 按 ConfidenceContribution 降序取前 3
 }
 
 // UserRiskV2Repository 是 user_risk_v2 的数据访问面（raw database/sql）。

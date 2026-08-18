@@ -112,6 +112,24 @@ func RegisterAdminRoutes(
 
 		// 反蒸馏/账号保护风险评分（Phase 0 仅观测/影子模式）
 		registerRiskRoutes(admin, h)
+
+		// Risk V2 Shadow 只读 Admin API（切片 5）。纯只读，绝不触发任何拦截/封禁。
+		registerRiskV2Routes(admin, h)
+	}
+}
+
+// registerRiskV2Routes 注册 Risk V2 只读 Admin 路由（前缀 /admin/risk/v2）。
+// 与 legacy /admin/risk 同组、同鉴权；均为静态段兄弟，无路由冲突。纯只读。
+func registerRiskV2Routes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h.Admin.RiskV2 == nil {
+		return // 未接线（例如极简构建）→ 不注册
+	}
+	v2 := admin.Group("/risk/v2")
+	{
+		v2.GET("/status", h.Admin.RiskV2.GetStatus)
+		v2.GET("/users", h.Admin.RiskV2.ListUsers)
+		v2.GET("/users/:user_id", h.Admin.RiskV2.GetUser)
+		v2.GET("/users/:user_id/windows", h.Admin.RiskV2.GetWindows)
 	}
 }
 

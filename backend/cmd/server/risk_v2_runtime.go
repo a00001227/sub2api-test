@@ -24,35 +24,44 @@ func provideRiskV2Runtime(
 	db *sql.DB,
 	dispatcher *service.RiskV2Dispatcher,
 	params service.RiskV2WorkerParams,
-) (*service.RiskV2HealthReportLoop, *service.RiskV2ScoringWorker) {
+) (*service.RiskV2HealthReportLoop, *service.RiskV2ScoringWorker, service.RiskV2RuntimeStatusProvider) {
+	sp := &riskV2StatusProvider{cfg: cfg, dispatcher: dispatcher, interval: params.Interval}
 	// 前置：master + aggregation 生效，且 Redis 可用（Health Reporter 与 Worker 都依赖 Redis）。
 	if cfg == nil || rdb == nil || !cfg.Risk.V2.AggregationActive() {
-		return nil, nil
+		return nil, nil, sp // 关闭/降级：status 仍如实返回 flags
 	}
 	schema := service.RiskV2AggSchemaVersion
 	fpVer := cfg.Risk.V2.FingerprintKeyVersion
+	sp.health = repository.NewRiskV2IngestionHealthReader(rdb, schema, fpVer, nil)
 
 	// —— Health Reporter（每实例定期上报 dispatcher delta）——
 	instanceID := service.NewRiskV2InstanceID()
 	reporter := repository.NewRiskV2HealthReporter(rdb, schema, fpVer, instanceID, nil)
 	healthLoop := service.NewRiskV2HealthReportLoop(dispatcher, reporter, 30*time.Second, nil)
 	healthLoop.Start()
+	sp.reporterReady = true
+
+	// Schema readiness 探针（供 status 与 persist 判定）。db 可用即探。
+	if db != nil {
+		if err := repository.NewUserRiskV2Repository(db).CheckSchemaReady(context.Background()); err == nil {
+			sp.schemaReady = true
+		}
+	}
 
 	// —— Scoring Worker（仅 scoring 生效时）——
 	if !cfg.Risk.V2.ScoringActive() {
-		return healthLoop, nil
+		return healthLoop, nil, sp
 	}
 
 	persist := cfg.Risk.V2.ScoringPersistActive()
 	var repo service.UserRiskV2Repository
 	if persist {
 		// §三 Schema readiness：persist 前只读探针；不就绪 → Worker 不启动（DEGRADED），主程序继续。
-		r := repository.NewUserRiskV2Repository(db)
-		if err := r.CheckSchemaReady(context.Background()); err != nil {
-			log.Printf("[risk_v2.worker] persist enabled but user_risk_v2 schema not ready → worker NOT started (DEGRADED); main service continues: %v", err)
-			return healthLoop, nil
+		if !sp.schemaReady {
+			log.Printf("[risk_v2.worker] persist enabled but user_risk_v2 schema not ready → worker NOT started (DEGRADED); main service continues")
+			return healthLoop, nil, sp
 		}
-		repo = r
+		repo = repository.NewUserRiskV2Repository(db)
 	}
 
 	deps := service.RiskV2ScoringWorkerDeps{
@@ -69,10 +78,11 @@ func provideRiskV2Runtime(
 		MetricsSink: service.NewRiskV2WorkerLogSink(),
 	}
 	worker := service.NewRiskV2ScoringWorker(deps, params)
+	sp.worker = worker
 	if !worker.Ready() {
 		log.Printf("[risk_v2.worker] preconditions not met → DEGRADED, not started")
-		return healthLoop, nil
+		return healthLoop, nil, sp
 	}
 	worker.Start(context.Background())
-	return healthLoop, worker
+	return healthLoop, worker, sp
 }

@@ -44,6 +44,7 @@ func ProvideAdminHandlers(
 	pricingModelHandler *admin.PricingModelHandler,
 	feedbackHandler *admin.FeedbackHandler,
 	userRiskHandler *admin.UserRiskHandler,
+	riskV2Handler *admin.RiskV2Handler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -81,6 +82,7 @@ func ProvideAdminHandlers(
 		PricingModel:           pricingModelHandler,
 		Feedback:               feedbackHandler,
 		UserRisk:               userRiskHandler,
+		RiskV2:                 riskV2Handler,
 	}
 }
 

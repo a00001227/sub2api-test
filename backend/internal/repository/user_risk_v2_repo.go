@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -384,7 +385,8 @@ func buildRiskV2ListQuery(filter service.RiskV2ListFilter, page service.RiskV2Pa
 	query := `
 		SELECT user_id, risk_index, risk_tier, confidence, data_sufficient, degraded, incomplete,
 		       automation_score, harvest_score, campaign_score, exposure_score,
-		       fingerprint_key_version, assessed_at, updated_at
+		       fingerprint_key_version, assessed_at, updated_at,
+		       health_available, feature_version, policy_version, effective_action, reason_codes
 		FROM user_risk_v2`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -409,17 +411,43 @@ func (r *userRiskV2Repository) ListCurrentAssessments(ctx context.Context, filte
 	for rows.Next() {
 		var it service.RiskV2AssessmentListItem
 		var autoS, harvS, campS, expoS sql.NullFloat64
+		var rcJSON []byte
 		if err := rows.Scan(&it.UserID, &it.RiskIndex, &it.RiskTier, &it.Confidence, &it.DataSufficient, &it.Degraded, &it.Incomplete,
-			&autoS, &harvS, &campS, &expoS, &it.FingerprintKeyVersion, &it.AssessedAtUnix, &it.UpdatedAtUnix); err != nil {
+			&autoS, &harvS, &campS, &expoS, &it.FingerprintKeyVersion, &it.AssessedAtUnix, &it.UpdatedAtUnix,
+			&it.HealthAvailable, &it.FeatureVersion, &it.PolicyVersion, &it.EffectiveAction, &rcJSON); err != nil {
 			return nil, err
 		}
 		it.AutomationScore = nullFPtr(autoS)
 		it.HarvestScore = nullFPtr(harvS)
 		it.CampaignScore = nullFPtr(campS)
 		it.ExposureScore = nullFPtr(expoS)
+		it.TopReasonCodes = topReasonCodes(rcJSON, 3)
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// topReasonCodes 反序列化 reason_codes JSON 并按 ConfidenceContribution 降序取前 n 个（白名单字段）。
+func topReasonCodes(rcJSON []byte, n int) []service.RiskV2ReasonCode {
+	if len(rcJSON) == 0 {
+		return nil
+	}
+	var dto []pReasonCode
+	if err := json.Unmarshal(rcJSON, &dto); err != nil || len(dto) == 0 {
+		return nil
+	}
+	all := make([]service.RiskV2ReasonCode, 0, len(dto))
+	for _, rr := range dto {
+		all = append(all, service.RiskV2ReasonCode{
+			Code: rr.Code, Window: rr.Window, ObservedValue: rr.ObservedValue, Threshold: rr.Threshold,
+			EvidenceFamily: rr.EvidenceFamily, EvidenceGroup: rr.EvidenceGroup, ConfidenceContribution: rr.ConfidenceContribution,
+		})
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].ConfidenceContribution > all[j].ConfidenceContribution })
+	if len(all) > n {
+		all = all[:n]
+	}
+	return all
 }
 
 func (r *userRiskV2Repository) DeleteByUserID(ctx context.Context, userID int64) error {

@@ -383,3 +383,34 @@ func TestPG_ConcurrentNewVsOldCycle(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT assessed_at FROM user_risk_v2 WHERE user_id=9004`).Scan(&assessed))
 	require.EqualValues(t, 2000, assessed, "newest cycle must win; older must never overwrite newer")
 }
+
+// 切片 5 §十八：Admin 列表扩展投影在真实 PG 上正确 scan（effective_action / versions / top reason codes）。
+func TestPG_AdminListProjection(t *testing.T) {
+	db := openPG(t)
+	setupSchema(t, db)
+	repo := NewUserRiskV2Repository(db)
+	a := sampleAssessment()
+	a.AssessedAtUnix = 5000
+	a.EffectiveAction = "NONE"
+	a.ReasonCodes = []service.RiskV2ReasonCode{
+		{Code: "low", ConfidenceContribution: 0.1},
+		{Code: "high", ConfidenceContribution: 0.9},
+		{Code: "mid", ConfidenceContribution: 0.5},
+		{Code: "tiny", ConfidenceContribution: 0.01},
+	}
+	_, err := repo.UpsertCurrentAssessment(context.Background(), 9001, a)
+	require.NoError(t, err)
+
+	items, err := repo.ListCurrentAssessments(context.Background(), service.RiskV2ListFilter{UserID: 9001}, service.RiskV2Pagination{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	it := items[0]
+	require.Equal(t, "NONE", it.EffectiveAction)
+	require.NotEmpty(t, it.FeatureVersion)
+	require.NotEmpty(t, it.PolicyVersion)
+	// top-3 按 ConfidenceContribution 降序。
+	require.Len(t, it.TopReasonCodes, 3)
+	require.Equal(t, "high", it.TopReasonCodes[0].Code)
+	require.Equal(t, "mid", it.TopReasonCodes[1].Code)
+	require.Equal(t, "low", it.TopReasonCodes[2].Code)
+}

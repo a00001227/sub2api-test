@@ -198,6 +198,10 @@ type RiskV2Config struct {
 	ScoringPersistEnabled bool `mapstructure:"scoring_persist_enabled" yaml:"scoring_persist_enabled" json:"scoring_persist_enabled"`
 	// Worker 是 Shadow Scoring Worker（切片 4）的运行参数（周期/节流/lease/catch-up）。
 	Worker RiskV2WorkerConfig `mapstructure:"worker" yaml:"worker" json:"worker"`
+	// AdminLiveRatePerSecond / AdminLiveBurst：Admin Live Window 接口每管理员令牌桶限流（切片 5.1）。
+	// <=0 回落默认（5/s，burst 10）。防止前端高频轮询重量级实时接口。
+	AdminLiveRatePerSecond int `mapstructure:"admin_live_rate_per_second" yaml:"admin_live_rate_per_second" json:"admin_live_rate_per_second"`
+	AdminLiveBurst         int `mapstructure:"admin_live_burst" yaml:"admin_live_burst" json:"admin_live_burst"`
 	// FingerprintHMACKey 指纹 keyed HMAC-SHA256 的密钥（独立密钥,绝不复用 JWT/Webhook/Session/OAuth）。
 	// 由 env RISK_FINGERPRINT_HMAC_KEY 注入。SecretString 保证不进日志/错误/配置 API/fmt。
 	FingerprintHMACKey SecretString `mapstructure:"fingerprint_hmac_key" yaml:"fingerprint_hmac_key" json:"-"`

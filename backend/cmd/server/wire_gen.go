@@ -173,7 +173,16 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	gatewayService.SetRiskV2(configConfig.Risk.V2, riskV2Dispatcher)
 	// 切片 4.1 运行态接线（Health Reporter + Scoring Worker），全部 flags 门控。
 	// 启动顺序：Dispatcher/Aggregation（上方）→ Health Reporter → Scoring Worker。
-	riskV2HealthLoop, riskV2ScoringWorker := provideRiskV2Runtime(configConfig, redisClient, db, riskV2Dispatcher, riskV2WorkerParams)
+	riskV2HealthLoop, riskV2ScoringWorker, riskV2StatusProvider := provideRiskV2Runtime(configConfig, redisClient, db, riskV2Dispatcher, riskV2WorkerParams)
+	// 切片 5：Risk V2 只读 Admin API（服务 + handler）。纯只读。
+	riskV2AdminService := service.NewRiskV2AdminService(
+		repository.NewUserRiskV2Repository(db),
+		repository.NewRiskV2UserSummaryReader(client),
+		repository.NewRiskV2AdminSummaryReader(redisClient, service.RiskV2AggSchemaVersion, configConfig.Risk.V2.FingerprintKeyVersion), // §5.1：轻量读，不展开 per-key
+		riskV2StatusProvider,
+		riskV2WorkerParams.AssessmentStaleAfter, 3*time.Second, nil,
+	)
+	riskV2AdminHandler := admin.NewRiskV2Handler(riskV2AdminService, configConfig.Risk.V2.AdminLiveRatePerSecond, configConfig.Risk.V2.AdminLiveBurst)
 	userRiskRepository := repository.NewUserRiskRepository(db)
 	riskScoringService := service.ProvideRiskScoringService(riskSketchCache, userRiskRepository, userRPMCache, configConfig)
 	riskAdminService := service.ProvideRiskAdminService(userRiskRepository, userRPMCache, configConfig)
@@ -295,7 +304,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	affiliateHandler := admin.NewAffiliateHandler(affiliateService, adminService)
 	complianceHandler := admin.NewComplianceHandler(settingService)
 	pricingModelHandler := admin.NewPricingModelHandler(pricingDisplayService)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, adminRegionHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, pricingModelHandler, adminFeedbackHandler, userRiskHandler)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, adminRegionHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, pricingModelHandler, adminFeedbackHandler, userRiskHandler, riskV2AdminHandler)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
 	userMessageQueueService := service.ProvideUserMessageQueueService(userMsgQueueCache, rpmCache, configConfig)

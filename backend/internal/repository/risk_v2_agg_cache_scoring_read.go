@@ -317,3 +317,13 @@ func NewRiskV2AdminDetailReader(rdb *redis.Client, schema, fpVer string) service
 	}
 	return c
 }
+
+// NewRiskV2AdminSummaryReader 返回 Admin Live Window 专用的**轻量**用户级读取面（切片 5.1 §一）：
+// 只暴露单用户 ReadForScoring（用户级三窗口 + 紧凑 Multi-Key，无 per-key 展开），不含 batch/list/Worker 能力。rdb 为 nil → nil。
+func NewRiskV2AdminSummaryReader(rdb *redis.Client, schema, fpVer string) service.RiskV2AdminSummaryReader {
+	c := newRiskV2AggCacheWithClock(rdb, schema, fpVer, nil)
+	if c == nil {
+		return nil
+	}
+	return c
+}
