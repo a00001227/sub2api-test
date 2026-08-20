@@ -28,7 +28,6 @@
             <li>{{ t('admin.riskV2.shadowNote1') }}</li>
             <li>{{ t('admin.riskV2.shadowNote2') }}</li>
             <li>{{ t('admin.riskV2.shadowNote3') }}</li>
-            <li>{{ t('admin.riskV2.shadowNote4') }}</li>
           </ul>
         </div>
         <span class="whitespace-nowrap rounded-full bg-amber-200 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-800 dark:text-amber-100">

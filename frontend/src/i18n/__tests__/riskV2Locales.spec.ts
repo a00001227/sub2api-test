@@ -93,11 +93,9 @@ describe('risk v2 shadow locale copy', () => {
     expect((zh.nav as any).riskV2Shadow).toBeTruthy()
   })
 
-  it('shadow copy states risk index is not a probability and no enforcement', () => {
+  it('shadow copy states risk index is not a probability', () => {
     expect((en.admin.riskV2 as any).shadowNote1.toLowerCase()).toContain('not a probability')
-    expect((en.admin.riskV2 as any).shadowNote4.toLowerCase()).toContain('no automatic')
     expect((zh.admin.riskV2 as any).shadowNote1).toContain('不是概率')
-    expect((zh.admin.riskV2 as any).shadowNote4).toContain('没有任何自动')
   })
 
   it('dry-run empty copy never claims all users are low risk', () => {

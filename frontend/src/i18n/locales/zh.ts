@@ -7074,7 +7074,7 @@ export default {
     },
     riskV2: {
       title: '蒸馏检测',
-      description: '模型提取风险的只读影子观测。不执行任何处罚。',
+      description: '模型提取风险的只读影子观测。',
       refresh: '刷新',
       tabLegacy: '旧版风险',
       tabV2: '风险 V2 影子',
@@ -7083,7 +7083,6 @@ export default {
       shadowNote1: 'Risk Index 是风险指数，不是概率。',
       shadowNote2: 'HIGH 表示行为高度疑似。',
       shadowNote3: '不代表已经证明该用户进行了模型蒸馏。',
-      shadowNote4: '当前没有任何自动限速、封禁或处罚。',
       statusDisabled: 'Risk V2 已关闭。当前不采集、不评分。',
       statusFail: '加载运行状态失败',
       modeEnabledOnly: '已启用',

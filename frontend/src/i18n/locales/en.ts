@@ -6920,7 +6920,7 @@ export default {
     },
     riskV2: {
       title: 'Distillation Detection',
-      description: 'Read-only shadow observation of model-extraction risk. Nothing is enforced.',
+      description: 'Read-only shadow observation of model-extraction risk.',
       refresh: 'Refresh',
       tabLegacy: 'Legacy Risk',
       tabV2: 'Risk V2 Shadow',
@@ -6929,7 +6929,6 @@ export default {
       shadowNote1: 'Risk Index is a risk score, not a probability.',
       shadowNote2: 'HIGH means highly suspected behavior.',
       shadowNote3: 'It does NOT prove the user performed model distillation.',
-      shadowNote4: 'No automatic rate-limiting, ban or penalty is applied.',
       statusDisabled: 'Risk V2 is disabled. Nothing is being collected or scored.',
       statusFail: 'Failed to load runtime status',
       modeEnabledOnly: 'Enabled',
