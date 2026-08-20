@@ -6977,6 +6977,10 @@ export default {
 
     evidence: {
       section: '请求原文取证',
+      entry: '取证',
+      ariaOpen: '打开 {user} 的请求原文取证',
+      drawerTitle: '请求原文取证',
+      close: '关闭',
       targetLabel: '取证对象',
       targetUser: '整个用户',
       targetKey: '指定 Key',

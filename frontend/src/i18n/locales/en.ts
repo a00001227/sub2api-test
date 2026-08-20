@@ -6823,6 +6823,10 @@ export default {
 
     evidence: {
       section: 'Evidence Capture',
+      entry: 'Evidence',
+      ariaOpen: 'Open evidence capture for {user}',
+      drawerTitle: 'Evidence Capture',
+      close: 'Close',
       targetLabel: 'Target',
       targetUser: 'Whole user',
       targetKey: 'Specific key',

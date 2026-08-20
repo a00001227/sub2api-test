@@ -240,12 +240,20 @@
                   </span>
                 </td>
                 <td class="px-4 py-3 text-center">
-                  <button
-                    data-test="view-detail-btn"
-                    @click="openDetail(it.user_id, $event)"
-                    class="btn btn-secondary btn-xs"
-                    :aria-label="t('admin.riskV2.ariaViewDetail', { user: it.user.email || ('#' + it.user_id) })"
-                  >{{ t('admin.riskV2.viewDetail') }}</button>
+                  <div class="flex justify-center gap-1">
+                    <button
+                      data-test="view-detail-btn"
+                      @click="openDetail(it.user_id, $event)"
+                      class="btn btn-secondary btn-xs"
+                      :aria-label="t('admin.riskV2.ariaViewDetail', { user: it.user.email || ('#' + it.user_id) })"
+                    >{{ t('admin.riskV2.viewDetail') }}</button>
+                    <button
+                      data-test="evidence-btn"
+                      @click="openEvidence(it.user_id, $event)"
+                      class="btn btn-secondary btn-xs text-red-600 dark:text-red-400"
+                      :aria-label="t('admin.evidence.ariaOpen', { user: it.user.email || ('#' + it.user_id) })"
+                    >{{ t('admin.evidence.entry') }}</button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -441,9 +449,27 @@
               <li>{{ t('admin.riskV2.liveNearDupNote') }}</li>
             </ul>
           </div>
+        </div>
+      </div>
+    </div>
 
-          <!-- 疑似蒸馏取证：请求原文捕获（管理员定向） -->
-          <EvidenceCapturePanel :user-id="detailUserId" />
+    <!-- 取证抽屉（与详情平级，独立入口，宽屏看原文） -->
+    <div v-if="evidenceOpen" class="fixed inset-0 z-50 flex justify-end bg-black/40" @click.self="closeEvidence">
+      <div
+        data-test="evidence-drawer"
+        role="dialog"
+        aria-modal="true"
+        class="flex h-full w-full max-w-4xl flex-col overflow-y-auto bg-white shadow-xl dark:bg-dark-800"
+      >
+        <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-dark-500">
+          <div>
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.evidence.drawerTitle') }}</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ evidenceUserEmail || ('#' + evidenceUserId) }}</p>
+          </div>
+          <button data-test="evidence-close" @click="closeEvidence" class="btn btn-secondary btn-xs">{{ t('admin.evidence.close') }}</button>
+        </div>
+        <div class="flex-1 p-5">
+          <EvidenceCapturePanel v-if="evidenceUserId" :user-id="evidenceUserId" />
         </div>
       </div>
     </div>
@@ -511,6 +537,11 @@ const filterError = ref('')
 const detailOpen = ref(false)
 const detailUserId = ref(0)
 const detail = ref<RiskV2AssessmentDetail | null>(null)
+
+// —— 取证抽屉（独立入口，与详情平级）——
+const evidenceOpen = ref(false)
+const evidenceUserId = ref(0)
+const evidenceUserEmail = ref('')
 const detailLoading = ref(false)
 const detailError = ref('')
 const detailNotFound = ref(false)
@@ -853,6 +884,20 @@ function closeDetail() {
   detailNotFound.value = false
   detailUserId.value = 0
   restoreFocus()
+}
+
+// —— 取证抽屉 ——
+function openEvidence(userId: number, ev?: Event) {
+  const row = items.value.find((it) => it.user_id === userId)
+  evidenceUserEmail.value = row?.user.email || ''
+  evidenceUserId.value = userId
+  evidenceOpen.value = true
+  void ev
+}
+function closeEvidence() {
+  evidenceOpen.value = false
+  evidenceUserId.value = 0
+  evidenceUserEmail.value = ''
 }
 
 // —— Live windows: manual load + cooldown ——
