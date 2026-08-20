@@ -183,10 +183,11 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	// 疑似蒸馏取证：请求原文捕获（Redis store + 服务 + admin handler + 转发路径热路径桥接）。
 	evidenceCaptureStore := repository.NewEvidenceCaptureStore(redisClient)
 	evidenceCaptureService := service.NewEvidenceCaptureService(evidenceCaptureStore, service.EvidenceCaptureConfigView{
-		Enabled:       configConfig.EvidenceCapture.Enabled,
-		MaxCountLimit: configConfig.EvidenceCapture.MaxCountLimit,
-		BufferTTL:     time.Duration(configConfig.EvidenceCapture.BufferTTLHours) * time.Hour,
-		MaxBodyBytes:  configConfig.EvidenceCapture.MaxBodyBytes,
+		Enabled:        configConfig.EvidenceCapture.Enabled,
+		MaxTemplates:   configConfig.EvidenceCapture.MaxCountLimit,
+		StoreThreshold: configConfig.EvidenceCapture.StoreThreshold,
+		BufferTTL:      time.Duration(configConfig.EvidenceCapture.BufferTTLHours) * time.Hour,
+		MaxBodyBytes:   configConfig.EvidenceCapture.MaxBodyBytes,
 	})
 	evidenceCaptureHandler := admin.NewEvidenceCaptureHandler(evidenceCaptureService)
 	openAITokenProvider := service.ProvideOpenAITokenProvider(accountRepository, geminiTokenCache, openAIOAuthService, oAuthRefreshAPI)

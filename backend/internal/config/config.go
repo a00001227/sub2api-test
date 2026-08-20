@@ -131,8 +131,10 @@ type Config struct {
 type EvidenceCaptureConfig struct {
 	// Enabled 总开关（master kill switch）。默认 true；但无 flag 时依然不采。
 	Enabled bool `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
-	// MaxCountLimit 单个 target 最多抓多少条（上限，防滥用）。默认 500。
+	// MaxCountLimit 单个 target 最多追踪多少个不同模板（上限，防滥用）。默认 500。
 	MaxCountLimit int `mapstructure:"max_count_limit" yaml:"max_count_limit" json:"max_count_limit"`
+	// StoreThreshold 同一模板重复几次才存代表性原文（<2 回落 2）。默认 2。
+	StoreThreshold int `mapstructure:"store_threshold" yaml:"store_threshold" json:"store_threshold"`
 	// BufferTTLHours 证据缓冲兜底 TTL（小时），防管理员忘删。默认 168（7 天）。
 	BufferTTLHours int `mapstructure:"buffer_ttl_hours" yaml:"buffer_ttl_hours" json:"buffer_ttl_hours"`
 	// MaxBodyBytes 单条请求原文脱敏后最大字节数。默认 16384。
@@ -1902,6 +1904,13 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 			slog.Warn("EVIDENCE_CAPTURE_MAX_COUNT_LIMIT 非整数,已忽略", "err", err)
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("EVIDENCE_CAPTURE_STORE_THRESHOLD")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.EvidenceCapture.StoreThreshold = n
+		} else {
+			slog.Warn("EVIDENCE_CAPTURE_STORE_THRESHOLD 非整数,已忽略", "err", err)
+		}
+	}
 	if v := strings.TrimSpace(os.Getenv("EVIDENCE_CAPTURE_BUFFER_TTL_HOURS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.EvidenceCapture.BufferTTLHours = n
@@ -2420,6 +2429,7 @@ func setDefaults() {
 	// Evidence Capture 疑似蒸馏取证：请求原文捕获（默认无 flag = 不采、零开销）。
 	viper.SetDefault("evidence_capture.enabled", true)
 	viper.SetDefault("evidence_capture.max_count_limit", 500)
+	viper.SetDefault("evidence_capture.store_threshold", 2)
 	viper.SetDefault("evidence_capture.buffer_ttl_hours", 168)
 	viper.SetDefault("evidence_capture.max_body_bytes", 16*1024)
 

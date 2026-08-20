@@ -60,12 +60,12 @@ func evidenceAdminID(c *gin.Context) int64 {
 }
 
 type startCaptureRequest struct {
-	TargetType string `json:"target_type"` // "user" | "key"
-	TargetID   int64  `json:"target_id"`
-	MaxCount   int    `json:"max_count"`
+	TargetType     string `json:"target_type"`     // "user" | "key"
+	TargetID       int64  `json:"target_id"`
+	StoreThreshold int    `json:"store_threshold"` // 同模板重复几次才存原文（<2 回落默认）
 }
 
-// StartCapture POST /admin/evidence/captures —— 标记某 user/key 开始捕获。
+// StartCapture POST /admin/evidence/captures —— 标记某 user/key 开始重复模板取证。
 func (h *EvidenceCaptureHandler) StartCapture(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	var req startCaptureRequest
@@ -73,7 +73,7 @@ func (h *EvidenceCaptureHandler) StartCapture(c *gin.Context) {
 		evidenceErr(c, service.ErrEvidenceBadRequest)
 		return
 	}
-	f, err := h.svc.StartCapture(c.Request.Context(), service.EvidenceTargetType(req.TargetType), req.TargetID, req.MaxCount, evidenceAdminID(c))
+	f, err := h.svc.StartCapture(c.Request.Context(), service.EvidenceTargetType(req.TargetType), req.TargetID, req.StoreThreshold, evidenceAdminID(c))
 	if err != nil {
 		evidenceErr(c, err)
 		return
@@ -87,7 +87,7 @@ func (h *EvidenceCaptureHandler) ListCaptures(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"captures": h.svc.ListActiveCaptures()})
 }
 
-// ListEvidence GET /admin/evidence/captures/:target —— 取该 target 已捕获条目（含脱敏原文，供查看/导出）。
+// ListEvidence GET /admin/evidence/captures/:target —— 取该 target 已聚合的重复模板（含脱敏原文，供查看/导出）。
 func (h *EvidenceCaptureHandler) ListEvidence(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	target := c.Param("target")
@@ -95,12 +95,12 @@ func (h *EvidenceCaptureHandler) ListEvidence(c *gin.Context) {
 		evidenceErr(c, service.ErrEvidenceBadRequest)
 		return
 	}
-	entries, err := h.svc.ListEvidence(c.Request.Context(), target, 0)
+	templates, err := h.svc.ListEvidenceTemplates(c.Request.Context(), target)
 	if err != nil {
 		evidenceErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"target": target, "count": len(entries), "entries": entries})
+	c.JSON(http.StatusOK, gin.H{"target": target, "count": len(templates), "templates": templates})
 }
 
 // PurgeEvidence DELETE /admin/evidence/captures/:target —— 清除证据 + 停止捕获。

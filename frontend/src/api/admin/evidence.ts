@@ -1,9 +1,9 @@
 /**
- * Admin Evidence Capture API — 疑似蒸馏取证：请求原文捕获。
+ * Admin Evidence Capture API — 疑似蒸馏取证：按「重复模板」聚合捕获请求原文。
  *
- * 管理员标记某 user/key → 捕获其后续 N 条请求原文(脱敏) → 查看/导出 → 清除。
- * 后端返回裸 DTO（非 {code,message,data} 信封），apiClient 拦截器原样透传，
- * 故各调用返回 response.data 即为业务负载。
+ * 管理员标记某 user/key → 对其请求算提示词 simhash → 只有同一模板重复≥阈值才存一份
+ * 代表性原文(脱敏) + 重复次数/涉及 Key/时间跨度。正常一次性请求只留 simhash、不存原文。
+ * 后端返回裸 DTO（非信封），apiClient 拦截器原样透传，故各调用返回 response.data 即业务负载。
  */
 
 import { apiClient } from '../client'
@@ -14,48 +14,50 @@ export interface EvidenceFlag {
   target_key: string // "u:<id>" | "k:<id>"
   target_type: string
   target_id: number
-  remaining: number
-  max: number
+  store_threshold: number
+  max_templates: number
   started_at: number
   admin_id: number
 }
 
-export interface EvidenceEntry {
-  ts: number
-  user_id: number
-  api_key_id: number
-  request_id: string // 平台生成的 client_request_id
+// 一个「重复模板」的聚合证据。
+export interface EvidenceTemplate {
+  simhash: string
+  count: number
+  first_seen: number
+  last_seen: number
   model: string
   endpoint: string
-  ip: string
-  body: string // 已脱敏 + 限大小
+  api_key_ids: number[]
+  request_ids: string[]
+  body: string // 达阈值时存的代表性原文(已脱敏 + 限大小)
   truncated: boolean
-  prompt_simhash: string // 归一化 simhash(hex)；相同=模板重复
+  has_body: boolean
 }
 
 export const evidenceAPI = {
-  /** 标记某 user/key 开始捕获后续 maxCount 条请求原文。 */
-  async startCapture(targetType: EvidenceTargetType, targetId: number, maxCount: number): Promise<EvidenceFlag> {
+  /** 标记某 user/key 开始重复模板取证。storeThreshold=同模板重复几次才存原文(<2 回落默认)。 */
+  async startCapture(targetType: EvidenceTargetType, targetId: number, storeThreshold: number): Promise<EvidenceFlag> {
     const { data } = await apiClient.post<{ capture: EvidenceFlag }>('/admin/evidence/captures', {
       target_type: targetType,
       target_id: targetId,
-      max_count: maxCount,
+      store_threshold: storeThreshold,
     })
     return data.capture
   },
 
-  /** 当前活跃捕获名单 + 剩余计数。 */
+  /** 当前活跃捕获名单。 */
   async listCaptures(): Promise<EvidenceFlag[]> {
     const { data } = await apiClient.get<{ captures: EvidenceFlag[] }>('/admin/evidence/captures')
     return data.captures ?? []
   },
 
-  /** 取某 target(u:<id>/k:<id>) 已捕获条目。 */
-  async listEvidence(target: string): Promise<EvidenceEntry[]> {
-    const { data } = await apiClient.get<{ entries: EvidenceEntry[] }>(
+  /** 取某 target(u:<id>/k:<id>) 已聚合的重复模板（按 count 降序）。 */
+  async listTemplates(target: string): Promise<EvidenceTemplate[]> {
+    const { data } = await apiClient.get<{ templates: EvidenceTemplate[] }>(
       `/admin/evidence/captures/${encodeURIComponent(target)}`,
     )
-    return data.entries ?? []
+    return data.templates ?? []
   },
 
   /** 清除某 target 证据 + 停止捕获。 */

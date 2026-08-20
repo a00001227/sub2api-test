@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -10,13 +11,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-// 疑似蒸馏取证：请求原文捕获的 Redis 存储（临时缓冲 + 兜底 TTL，与 riskv2:* 键完全隔离）。
+// 疑似蒸馏取证：按「重复模板」聚合的 Redis 存储（临时缓冲 + 兜底 TTL，与 riskv2:* 键完全隔离）。
 // 键：
-//   evcap:flags           HASH field=target_key(u:<id>/k:<id>) value=JSON(EvidenceFlag)  —— 捕获名单，重启可恢复。
-//   evcap:buf:<target_key> LIST 每条 JSON(EvidenceEntry)，LPUSH+LTRIM 封顶 N、EXPIRE 兜底 TTL。
+//   evcap:flags            HASH field=target_key(u:<id>/k:<id>) value=JSON(EvidenceFlag) —— 捕获名单，重启可恢复。
+//   evcap:tpl:<target_key> HASH field=simhash value=JSON(EvidenceTemplate) —— 每个重复模板一份聚合，整体 EXPIRE 兜底 TTL。
 const (
 	evcapFlagsKey  = "evcap:flags"
-	evcapBufPrefix = "evcap:buf:"
+	evcapTplPrefix = "evcap:tpl:"
 )
 
 type evidenceCaptureStore struct{ rdb *redis.Client }
@@ -29,7 +30,7 @@ func NewEvidenceCaptureStore(rdb *redis.Client) service.EvidenceCaptureStore {
 	return &evidenceCaptureStore{rdb: rdb}
 }
 
-func evcapBufKey(targetKey string) string { return evcapBufPrefix + targetKey }
+func evcapTplKey(targetKey string) string { return evcapTplPrefix + targetKey }
 
 func (s *evidenceCaptureStore) LoadFlags(ctx context.Context) ([]service.EvidenceFlag, error) {
 	m, err := s.rdb.HGetAll(ctx, evcapFlagsKey).Result()
@@ -58,42 +59,57 @@ func (s *evidenceCaptureStore) DeleteFlag(ctx context.Context, targetKey string)
 	return s.rdb.HDel(ctx, evcapFlagsKey, targetKey).Err()
 }
 
-func (s *evidenceCaptureStore) AppendEvidence(ctx context.Context, targetKey string, e service.EvidenceEntry, capN int, ttl time.Duration) error {
-	b, err := json.Marshal(e)
+func (s *evidenceCaptureStore) GetTemplate(ctx context.Context, targetKey, simhash string) (*service.EvidenceTemplate, error) {
+	v, err := s.rdb.HGet(ctx, evcapTplKey(targetKey), simhash).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var t service.EvidenceTemplate
+	if err := json.Unmarshal([]byte(v), &t); err != nil {
+		return nil, nil // 坏数据当不存在
+	}
+	return &t, nil
+}
+
+func (s *evidenceCaptureStore) PutTemplate(ctx context.Context, targetKey string, t service.EvidenceTemplate, ttl time.Duration) error {
+	b, err := json.Marshal(t)
 	if err != nil {
 		return err
 	}
-	key := evcapBufKey(targetKey)
+	key := evcapTplKey(targetKey)
 	pipe := s.rdb.TxPipeline()
-	pipe.LPush(ctx, key, b)
-	if capN > 0 {
-		pipe.LTrim(ctx, key, 0, int64(capN-1)) // 封顶 N 条，超出丢弃最旧
-	}
+	pipe.HSet(ctx, key, t.Simhash, b)
 	if ttl > 0 {
-		pipe.Expire(ctx, key, ttl)
+		pipe.Expire(ctx, key, ttl) // 每次写刷新兜底 TTL
 	}
 	_, err = pipe.Exec(ctx)
 	return err
 }
 
-func (s *evidenceCaptureStore) ListEvidence(ctx context.Context, targetKey string, limit int) ([]service.EvidenceEntry, error) {
-	if limit <= 0 {
-		limit = 1
-	}
-	vals, err := s.rdb.LRange(ctx, evcapBufKey(targetKey), 0, int64(limit-1)).Result()
+func (s *evidenceCaptureStore) TemplateCount(ctx context.Context, targetKey string) (int, error) {
+	n, err := s.rdb.HLen(ctx, evcapTplKey(targetKey)).Result()
+	return int(n), err
+}
+
+func (s *evidenceCaptureStore) ListTemplates(ctx context.Context, targetKey string) ([]service.EvidenceTemplate, error) {
+	m, err := s.rdb.HGetAll(ctx, evcapTplKey(targetKey)).Result()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]service.EvidenceEntry, 0, len(vals))
-	for _, v := range vals {
-		var e service.EvidenceEntry
-		if json.Unmarshal([]byte(v), &e) == nil {
-			out = append(out, e)
+	out := make([]service.EvidenceTemplate, 0, len(m))
+	for _, v := range m {
+		var t service.EvidenceTemplate
+		if json.Unmarshal([]byte(v), &t) == nil {
+			out = append(out, t)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count }) // 重复次数降序
 	return out, nil
 }
 
 func (s *evidenceCaptureStore) PurgeEvidence(ctx context.Context, targetKey string) error {
-	return s.rdb.Del(ctx, evcapBufKey(targetKey)).Err()
+	return s.rdb.Del(ctx, evcapTplKey(targetKey)).Err()
 }
