@@ -180,6 +180,15 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		riskV2WorkerParams.AssessmentStaleAfter, 3*time.Second, nil,
 	)
 	riskV2AdminHandler := admin.NewRiskV2Handler(riskV2AdminService, configConfig.Risk.V2.AdminLiveRatePerSecond, configConfig.Risk.V2.AdminLiveBurst)
+	// 疑似蒸馏取证：请求原文捕获（Redis store + 服务 + admin handler + 转发路径热路径桥接）。
+	evidenceCaptureStore := repository.NewEvidenceCaptureStore(redisClient)
+	evidenceCaptureService := service.NewEvidenceCaptureService(evidenceCaptureStore, service.EvidenceCaptureConfigView{
+		Enabled:       configConfig.EvidenceCapture.Enabled,
+		MaxCountLimit: configConfig.EvidenceCapture.MaxCountLimit,
+		BufferTTL:     time.Duration(configConfig.EvidenceCapture.BufferTTLHours) * time.Hour,
+		MaxBodyBytes:  configConfig.EvidenceCapture.MaxBodyBytes,
+	})
+	evidenceCaptureHandler := admin.NewEvidenceCaptureHandler(evidenceCaptureService)
 	openAITokenProvider := service.ProvideOpenAITokenProvider(accountRepository, geminiTokenCache, openAIOAuthService, oAuthRefreshAPI)
 	openAIGatewayService := service.NewOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository)
 	geminiOAuthClient := repository.NewGeminiOAuthClient(configConfig)
@@ -297,7 +306,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	affiliateHandler := admin.NewAffiliateHandler(affiliateService, adminService)
 	complianceHandler := admin.NewComplianceHandler(settingService)
 	pricingModelHandler := admin.NewPricingModelHandler(pricingDisplayService)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, adminRegionHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, pricingModelHandler, adminFeedbackHandler, riskV2AdminHandler)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, adminRegionHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, pricingModelHandler, adminFeedbackHandler, riskV2AdminHandler, evidenceCaptureHandler)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
 	userMessageQueueService := service.ProvideUserMessageQueueService(userMsgQueueCache, rpmCache, configConfig)

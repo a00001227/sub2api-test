@@ -44,7 +44,10 @@ func RegisterGatewayRoutes(
 		// Risk V2 影子采集：转发路径本地采集会漏，这里补一条观测(仅 Claude Code，内部门控)。
 		// 与计费解耦、best-effort，不影响上面的计费与已回传响应。
 		h.Gateway.ObserveForwardedRiskV2(c, env, reqBody, startedAt)
-	}, h.PricingDisplay.IsModelEnabled)
+	}, h.PricingDisplay.IsModelEnabled, func(c *gin.Context, userID, apiKeyID int64, reqBody []byte) {
+		// 疑似蒸馏取证：命中捕获名单才记原文(内部零开销闸门)；与转发/计费解耦。
+		h.Admin.EvidenceCapture.Capture(c, userID, apiKeyID, reqBody)
+	})
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")

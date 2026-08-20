@@ -91,7 +91,7 @@ func engineWithHandlerRng(resolver cellResolver, rng func() float64) *gin.Engine
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
 			c.Next()
 		},
-		newEdgeForwardHandler(resolver, groupSet, "cellkey", rng, nil, nil),
+		newEdgeForwardHandler(resolver, groupSet, "cellkey", rng, nil, nil, nil),
 		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
 	)
 	return e

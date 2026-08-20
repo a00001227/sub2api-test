@@ -27,6 +27,10 @@ import (
 // startedAt 为本次转发开始时间。二者仅用于观测,不参与计费。
 type EdgeConsumerBiller func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time)
 
+// EvidenceCaptureFunc 疑似蒸馏取证：转发命中后回调,命中捕获名单则记一条请求原文(脱敏)。
+// nil = 不采;内部有零开销闸门,默认无 flag 时一次原子读即返回。仅取证,不影响转发/计费。
+type EvidenceCaptureFunc func(c *gin.Context, userID, apiKeyID int64, reqBody []byte)
+
 // ModelAllowFunc 判断请求 model 是否允许转发(转发模型白名单)。
 // 由 pricing_models 的"启用模型"集合驱动。nil = 不校验(白名单关)。
 type ModelAllowFunc func(ctx context.Context, model string) bool
@@ -44,7 +48,7 @@ type ModelAllowFunc func(ctx context.Context, model string) bool
 //
 // 用手写流式代理而非 httputil.ReverseProxy:后者会触碰 gin 的 CloseNotify(在某些
 // ResponseWriter / h2c 下会 panic),且手写更利于逐块 flush SSE。
-func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc) gin.HandlerFunc {
+func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc) gin.HandlerFunc {
 	noop := func(c *gin.Context) { c.Next() }
 	if !cfg.Enabled || len(cfg.Groups) == 0 {
 		return noop
@@ -95,12 +99,12 @@ func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelA
 			slog.Info("edge_forward: 模型白名单启用(仅转发 pricing_models 启用模型)")
 		}
 	}
-	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker)
+	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture)
 }
 
 // newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
 // 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
-func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc) gin.HandlerFunc {
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	client := &http.Client{Transport: http.DefaultTransport}
 	// 会话→cell 亲和(P3-3c),处理函数生命周期内共享。
@@ -168,6 +172,12 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				return
 			}
 			body = b
+		}
+
+		// 疑似蒸馏取证：命中捕获名单则记一条请求原文(内部零开销闸门 + 异步脱敏存储)。
+		// 放在此处 → 覆盖成功/失败/白名单拒绝所有情况;仅取证,绝不影响转发。
+		if capture != nil {
+			capture(c, apiKey.UserID, apiKey.ID, body)
 		}
 
 		// 转发模型白名单(可选):请求 model 不在"价格展示启用模型"内 → 直接 403,

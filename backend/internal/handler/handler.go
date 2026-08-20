@@ -41,6 +41,7 @@ type AdminHandlers struct {
 	PricingModel           *admin.PricingModelHandler
 	Feedback               *admin.FeedbackHandler
 	RiskV2                 *admin.RiskV2Handler
+	EvidenceCapture        *admin.EvidenceCaptureHandler
 }
 
 // Handlers contains all HTTP handlers

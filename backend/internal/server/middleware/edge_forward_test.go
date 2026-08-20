@@ -28,7 +28,7 @@ func newEdgeForwardEngine(cfg config.EdgeForwardConfig, groupSlug string) *gin.E
 			}
 			c.Next()
 		},
-		EdgeForward(cfg, nil, nil),
+		EdgeForward(cfg, nil, nil, nil),
 		func(c *gin.Context) {
 			c.Header("X-Handled-By", "local")
 			c.String(http.StatusOK, "local-ok")
@@ -120,7 +120,7 @@ func TestEdgeForward_WebSocketForwards(t *testing.T) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
 			c.Next()
 		},
-		EdgeForward(cfg, nil, nil),
+		EdgeForward(cfg, nil, nil, nil),
 		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
 	)
 	central := httptest.NewServer(e)
@@ -175,7 +175,7 @@ func TestEdgeForward_SSEStreamsChunked(t *testing.T) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
 			c.Next()
 		},
-		EdgeForward(cfg, nil, nil),
+		EdgeForward(cfg, nil, nil, nil),
 		func(c *gin.Context) { c.String(http.StatusOK, "local-should-not-run") },
 	)
 	central := httptest.NewServer(e)
@@ -235,7 +235,7 @@ func TestEdgeForward_DoesNotLeakConsumerKey(t *testing.T) {
 func newEdgeForwardEngineWithResolver(resolver cellResolver, groupSlug, key string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, key, func() float64 { return 0 }, nil, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, key, func() float64 { return 0 }, nil, nil, nil)
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			if groupSlug != "" {
@@ -354,7 +354,7 @@ func TestEdgeForward_ModelWhitelist(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, "k", func() float64 { return 0 }, nil, allow)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, "k", func() float64 { return 0 }, nil, allow, nil)
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})

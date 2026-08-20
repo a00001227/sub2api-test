@@ -112,6 +112,23 @@ func RegisterAdminRoutes(
 
 		// Risk V2 Shadow 只读 Admin API（切片 5）。纯只读，绝不触发任何拦截/封禁。
 		registerRiskV2Routes(admin, h)
+
+		// 疑似蒸馏取证：请求原文捕获 Admin API（管理员标记后捕获、查看、清除）。
+		registerEvidenceCaptureRoutes(admin, h)
+	}
+}
+
+// registerEvidenceCaptureRoutes 注册取证捕获 Admin 路由（前缀 /admin/evidence）。同 admin 组鉴权。
+func registerEvidenceCaptureRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h.Admin.EvidenceCapture == nil {
+		return // 未接线 → 不注册
+	}
+	ev := admin.Group("/evidence")
+	{
+		ev.POST("/captures", h.Admin.EvidenceCapture.StartCapture)
+		ev.GET("/captures", h.Admin.EvidenceCapture.ListCaptures)
+		ev.GET("/captures/:target", h.Admin.EvidenceCapture.ListEvidence)
+		ev.DELETE("/captures/:target", h.Admin.EvidenceCapture.PurgeEvidence)
 	}
 }
 
