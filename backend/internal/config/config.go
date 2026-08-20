@@ -1891,6 +1891,31 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 			slog.Warn("RISK_V2_MAX_TEXT_BYTES 非整数,已忽略", "err", err)
 		}
 	}
+	// Evidence Capture 取证捕获 env 兜底（viper 对嵌套键的 AutomaticEnv 不可靠，手写更稳）。
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EVIDENCE_CAPTURE_ENABLED"))); v != "" {
+		cfg.EvidenceCapture.Enabled = v == "1" || v == "true" || v == "on"
+	}
+	if v := strings.TrimSpace(os.Getenv("EVIDENCE_CAPTURE_MAX_COUNT_LIMIT")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.EvidenceCapture.MaxCountLimit = n
+		} else {
+			slog.Warn("EVIDENCE_CAPTURE_MAX_COUNT_LIMIT 非整数,已忽略", "err", err)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("EVIDENCE_CAPTURE_BUFFER_TTL_HOURS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.EvidenceCapture.BufferTTLHours = n
+		} else {
+			slog.Warn("EVIDENCE_CAPTURE_BUFFER_TTL_HOURS 非整数,已忽略", "err", err)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("EVIDENCE_CAPTURE_MAX_BODY_BYTES")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.EvidenceCapture.MaxBodyBytes = n
+		} else {
+			slog.Warn("EVIDENCE_CAPTURE_MAX_BODY_BYTES 非整数,已忽略", "err", err)
+		}
+	}
 	// EDGE_FORWARD_* 环境变量兜底（中央“执行→转发”开关与目标 cell）。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_ENABLED"))); v == "1" || v == "true" || v == "on" {
 		cfg.EdgeForward.Enabled = true
