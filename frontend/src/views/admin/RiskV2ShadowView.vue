@@ -441,6 +441,9 @@
               <li>{{ t('admin.riskV2.liveNearDupNote') }}</li>
             </ul>
           </div>
+
+          <!-- 疑似蒸馏取证：请求原文捕获（管理员定向） -->
+          <EvidenceCapturePanel :user-id="detailUserId" />
         </div>
       </div>
     </div>
@@ -451,6 +454,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import EvidenceCapturePanel from '@/components/admin/EvidenceCapturePanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
   riskV2API,
