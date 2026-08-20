@@ -80,6 +80,11 @@
         </template>
       </div>
 
+      <!-- Enforcement layer (HIGH auto-throttle + manual ban), default-off -->
+      <div class="mb-6">
+        <EnforcementPanel />
+      </div>
+
       <!-- Filter bar -->
       <div class="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-500 sm:grid-cols-2 lg:grid-cols-4">
         <div>
@@ -481,6 +486,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import EvidenceCapturePanel from '@/components/admin/EvidenceCapturePanel.vue'
+import EnforcementPanel from '@/components/admin/EnforcementPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
   riskV2API,
