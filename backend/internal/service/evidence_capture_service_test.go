@@ -151,6 +151,22 @@ func TestEvidence_SimhashAndRequestID(t *testing.T) {
 	}
 }
 
+// simhash 只看最新一条：多轮对话（共享历史、最新一条不同）不误判为重复；同一模板反复发才判重。
+func TestEvidence_SimhashUsesLastMessageOnly(t *testing.T) {
+	// 同历史、不同最新一条 → 不同 simhash（正常对话连续多轮不被误标）。
+	a := []byte(`{"messages":[{"role":"user","content":"same shared preamble history"},{"role":"assistant","content":"ok"},{"role":"user","content":"a distinct question about apples and oranges"}]}`)
+	b := []byte(`{"messages":[{"role":"user","content":"same shared preamble history"},{"role":"assistant","content":"ok"},{"role":"user","content":"a completely different question on quantum entanglement physics"}]}`)
+	if evidencePromptSimhash(a) == evidencePromptSimhash(b) {
+		t.Error("different last messages must yield different simhash (no false dup for continued conversation)")
+	}
+	// 不同历史、相同最新一条 → 相同 simhash（同一模板反复发被正确识别）。
+	c := []byte(`{"messages":[{"role":"user","content":"history one alpha"},{"role":"user","content":"harvest the exact same template prompt here"}]}`)
+	d := []byte(`{"messages":[{"role":"user","content":"totally other history two beta"},{"role":"user","content":"harvest the exact same template prompt here"}]}`)
+	if evidencePromptSimhash(c) != evidencePromptSimhash(d) {
+		t.Error("same last message must yield same simhash (real repeated template must be detected)")
+	}
+}
+
 // 抓够 N 条自动停：第 N+1 条不再捕获，Active 变回 false。
 func TestEvidence_StopsAtN(t *testing.T) {
 	f := newFakeEvidenceStore()

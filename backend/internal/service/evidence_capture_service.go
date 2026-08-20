@@ -13,16 +13,29 @@ import (
 	"go.uber.org/zap"
 )
 
-// evidencePromptSimhash 从请求体提取提示词（anthropic messages / gemini contents，
-// 否则整体 body）算归一化 64 位 simhash。同模板不同数字坍缩同值，用于前端「模板重复」红标。
+// evidencePromptSimhash 对请求的「最新一条消息」算归一化 64 位 simhash，用于前端「模板重复」红标。
+//
+// 只取最新一条（而非整个 messages 数组）：多轮对话每轮都带完整历史，若对整个数组算 simhash，
+// 会因共享的历史前缀（simhash 只取前 8KB）而把「同一对话的连续多轮」误判为重复。蒸馏的特征是
+// 「同一提示模板反复发」——体现在最新用户轮；正常对话每轮最新消息不同，故只哈希最新一条最准。
 func evidencePromptSimhash(body []byte) uint64 {
-	if m := gjson.GetBytes(body, "messages"); m.Exists() && m.Raw != "" {
-		return ComputeMessagesSimhash([]byte(m.Raw))
-	}
-	if c := gjson.GetBytes(body, "contents"); c.Exists() && c.Raw != "" {
-		return ComputeMessagesSimhash([]byte(c.Raw))
+	if last := lastMessageRaw(body); last != "" {
+		return ComputeMessagesSimhash([]byte(last))
 	}
 	return ComputeMessagesSimhash(body)
+}
+
+// lastMessageRaw 取 messages / contents 数组的最后一条（最新用户轮）的原始 JSON；无则空。
+func lastMessageRaw(body []byte) string {
+	for _, field := range []string{"messages", "contents"} {
+		if arr := gjson.GetBytes(body, field); arr.IsArray() {
+			items := arr.Array()
+			if len(items) > 0 {
+				return items[len(items)-1].Raw
+			}
+		}
+	}
+	return ""
 }
 
 var (
