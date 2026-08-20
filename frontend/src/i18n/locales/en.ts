@@ -418,7 +418,7 @@ export default {
     channelMonitor: 'Channel Monitor',
     channelStatus: 'Channel Status',
     riskControl: 'Risk Control',
-    riskV2Shadow: 'Risk V2',
+    riskV2Shadow: 'Distillation Detection',
     pricingDisplay: 'Pricing Display',
   },
 
@@ -6822,7 +6822,7 @@ export default {
     },
 
     riskV2: {
-      title: 'Model Extraction Risk V2 · Shadow',
+      title: 'Distillation Detection',
       description: 'Read-only shadow observation of model-extraction risk. Nothing is enforced.',
       refresh: 'Refresh',
       tabLegacy: 'Legacy Risk',

@@ -418,7 +418,7 @@ export default {
     channelMonitor: '渠道监控',
     channelStatus: '渠道状态',
     riskControl: '风控中心',
-    riskV2Shadow: '风险 V2',
+    riskV2Shadow: '蒸馏检测',
     pricingDisplay: '价格展示',
   },
 
@@ -6976,7 +6976,7 @@ export default {
     },
 
     riskV2: {
-      title: '模型提取风险 V2 · 仅观察',
+      title: '蒸馏检测',
       description: '模型提取风险的只读影子观测。不执行任何处罚。',
       refresh: '刷新',
       tabLegacy: '旧版风险',
