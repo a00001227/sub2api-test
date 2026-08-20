@@ -43,7 +43,6 @@ func ProvideAdminHandlers(
 	complianceHandler *admin.ComplianceHandler,
 	pricingModelHandler *admin.PricingModelHandler,
 	feedbackHandler *admin.FeedbackHandler,
-	userRiskHandler *admin.UserRiskHandler,
 	riskV2Handler *admin.RiskV2Handler,
 ) *AdminHandlers {
 	return &AdminHandlers{
@@ -81,7 +80,6 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		PricingModel:           pricingModelHandler,
 		Feedback:               feedbackHandler,
-		UserRisk:               userRiskHandler,
 		RiskV2:                 riskV2Handler,
 	}
 }
@@ -215,7 +213,6 @@ var ProviderSet = wire.NewSet(
 	admin.NewComplianceHandler,
 	admin.NewPricingModelHandler,
 	admin.NewFeedbackHandler,
-	admin.NewUserRiskHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

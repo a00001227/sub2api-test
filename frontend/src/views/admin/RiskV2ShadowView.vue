@@ -19,9 +19,6 @@
         </button>
       </div>
 
-      <!-- Legacy / Risk V2 Shadow switcher (shared component) -->
-      <RiskModeTabs active="v2" />
-
       <!-- Persistent Shadow banner -->
       <div class="mb-6 flex items-start gap-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-700 dark:bg-amber-900/20">
         <Icon name="eye" size="lg" class="mt-0.5 text-amber-600 dark:text-amber-400" />
@@ -455,7 +452,6 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import RiskModeTabs from '@/components/admin/RiskModeTabs.vue'
 import {
   riskV2API,
   type RiskV2Tier,

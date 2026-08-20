@@ -40,7 +40,6 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	PricingModel           *admin.PricingModelHandler
 	Feedback               *admin.FeedbackHandler
-	UserRisk               *admin.UserRiskHandler
 	RiskV2                 *admin.RiskV2Handler
 }
 

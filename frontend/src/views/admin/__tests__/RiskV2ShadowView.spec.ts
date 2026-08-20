@@ -88,7 +88,7 @@ function defer<T>() {
 function mountView() {
   return mount(RiskV2ShadowView, {
     global: {
-      stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true, RiskModeTabs: true },
+      stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true },
     },
   })
 }

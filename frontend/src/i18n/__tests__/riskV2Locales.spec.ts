@@ -35,12 +35,6 @@ describe('risk v2 shadow locale copy', () => {
     expect(zhKeys).toEqual(enKeys)
   })
 
-  it('en and zh admin.riskTabs have identical key sets', () => {
-    const enKeys = keys(en.admin.riskTabs as Record<string, unknown>).sort()
-    const zhKeys = keys(zh.admin.riskTabs as Record<string, unknown>).sort()
-    expect(zhKeys).toEqual(enKeys)
-  })
-
   it('interpolation variables match across locales for every riskV2 key', () => {
     const enFlat = flat(en.admin.riskV2 as Record<string, unknown>)
     const zhFlat = flat(zh.admin.riskV2 as Record<string, unknown>)

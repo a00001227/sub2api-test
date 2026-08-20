@@ -100,8 +100,6 @@ var ProviderSet = wire.NewSet(
 	NewUserPlatformQuotaRepository,     // T14: user × platform quota
 	NewUserPlatformQuotaServiceAdapter, // T14: adapter → service.UserPlatformQuotaRepository
 	NewPricingModelRepository,
-	NewUserRiskRepository, // Risk Phase 0（仅观测）：user_risk 仓储
-	NewRiskSketchCache,    // Risk Phase 0（仅观测）：Redis 特征草图缓存
 	NewFeedbackRepository,
 
 	// Cache implementations

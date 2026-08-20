@@ -653,10 +653,6 @@ type GatewayService struct {
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 
-	// riskSketchCache 反蒸馏 Phase 0（仅观测）：响应后异步更新的每用户 Redis 特征草图。
-	// 可选（nil 时不更新草图，评分 worker 仍可回退到 usage_logs 聚合）。绝不进入请求热路径。
-	riskSketchCache RiskSketchCache
-
 	// riskV2Cfg / riskV2Dispatcher 是 Model Extraction Risk V2 Shadow（P1A）。
 	// dispatcher 为 nil 或 cfg.Enabled=false 时，V2 采集完全不发生（legacy 行为逐字节不变）。
 	riskV2Cfg        config.RiskV2Config
@@ -748,14 +744,6 @@ func NewGatewayService(
 		svc.initDebugGatewayBodyFile(path)
 	}
 	return svc
-}
-
-// SetRiskSketchCache 注入反蒸馏 Phase 0（仅观测）的每用户 Redis 特征草图缓存。
-// 可选依赖：不注入时记录路径不更新草图，评分 worker 回退到 usage_logs 聚合。
-func (s *GatewayService) SetRiskSketchCache(cache RiskSketchCache) {
-	if s != nil {
-		s.riskSketchCache = cache
-	}
 }
 
 // SetRiskV2 注入 Model Extraction Risk V2 Shadow（P1A）的配置与有界采集器。
@@ -9770,10 +9758,6 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
-
-	// Risk Phase 0（仅观测）：响应后更新每用户 Redis 特征草图（异步、best-effort，
-	// 绝不进入请求热路径）。simhash 已在 buildRecordUsageLog 计算并挂在 usageLog 上。
-	s.updateRiskSketchAsync(usageLog, input.RiskFeatures)
 
 	// Model Extraction Risk V2 Shadow（P1A，仅 risk.v2.enabled 时生效）：非阻塞入队
 	// 不可逆观测包。dispatcher/请求侧特征缺失即静默跳过；绝不影响主请求与 legacy 采集。

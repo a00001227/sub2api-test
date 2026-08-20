@@ -110,16 +110,12 @@ func RegisterAdminRoutes(
 		// Pricing Display System 管理
 		registerPricingModelRoutes(admin, h)
 
-		// 反蒸馏/账号保护风险评分（Phase 0 仅观测/影子模式）
-		registerRiskRoutes(admin, h)
-
 		// Risk V2 Shadow 只读 Admin API（切片 5）。纯只读，绝不触发任何拦截/封禁。
 		registerRiskV2Routes(admin, h)
 	}
 }
 
-// registerRiskV2Routes 注册 Risk V2 只读 Admin 路由（前缀 /admin/risk/v2）。
-// 与 legacy /admin/risk 同组、同鉴权；均为静态段兄弟，无路由冲突。纯只读。
+// registerRiskV2Routes 注册 Risk V2 只读 Admin 路由（前缀 /admin/risk/v2）。同鉴权，纯只读。
 func registerRiskV2Routes(admin *gin.RouterGroup, h *handler.Handlers) {
 	if h.Admin.RiskV2 == nil {
 		return // 未接线（例如极简构建）→ 不注册
@@ -133,20 +129,6 @@ func registerRiskV2Routes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-// registerRiskRoutes 注册反蒸馏 Phase 0（仅观测）的 admin 路由。
-// 前缀 /admin/risk（与 /admin/risk-control 独立）。绝不触发任何请求拦截。
-func registerRiskRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	risk := admin.Group("/risk")
-	{
-		// config 先注册，避免与 /users/:id 冲突（本组内路径段不同，仍显式先注册）。
-		risk.GET("/config", h.Admin.UserRisk.GetConfig)
-		risk.PATCH("/config", h.Admin.UserRisk.PatchConfig)
-		risk.GET("/users", h.Admin.UserRisk.ListUsers)
-		risk.GET("/users/:id", h.Admin.UserRisk.GetUser)
-		risk.POST("/users/:id/allowlist", h.Admin.UserRisk.SetAllowlist)
-		risk.POST("/users/:id/manual-tier", h.Admin.UserRisk.SetManualTier)
-	}
-}
 
 func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	compliance := admin.Group("/compliance")

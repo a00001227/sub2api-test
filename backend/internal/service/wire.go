@@ -269,27 +269,6 @@ func ProvideProviderUsageOutboxWorker(cfg *config.Config, db *sql.DB) *ProviderU
 	return worker
 }
 
-// ProvideRiskScoringService (Risk Phase 0，仅观测) 构造并启动评分 worker。
-// 依赖不全（nil sketch/repo）时 Start 为 no-op，不报错。EDGE cell 无消费者评分
-// 语义，且中央才有完整 user 视图，故仅非 EDGE 启动。Stop 注册在 cleanup 列表。
-func ProvideRiskScoringService(
-	sketch RiskSketchCache,
-	riskRepo UserRiskRepository,
-	userRPM UserRPMCache,
-	cfg *config.Config,
-) *RiskScoringService {
-	svc := NewRiskScoringService(sketch, riskRepo, userRPM, cfg)
-	if cfg == nil || !cfg.EdgeMode {
-		svc.Start()
-	}
-	return svc
-}
-
-// ProvideRiskAdminService (Risk Phase 0，仅观测) 构造 admin 服务。
-func ProvideRiskAdminService(repo UserRiskRepository, userRPM UserRPMCache, cfg *config.Config) *RiskAdminService {
-	return NewRiskAdminService(repo, userRPM, cfg)
-}
-
 // ProvideRateLimitService creates RateLimitService with optional dependencies.
 func ProvideRateLimitService(
 	accountRepo AccountRepository,
@@ -694,9 +673,7 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
-	ProvideRiskScoringService, // Risk Phase 0（仅观测）：评分 worker
-	ProvideRiskAdminService,   // Risk Phase 0（仅观测）：admin 服务
-	ProvideRiskV2Dispatcher,   // Risk V2 Shadow：有界采集器（disabled/DEGRADED → nil）
+	ProvideRiskV2Dispatcher, // Risk V2 Shadow：有界采集器（disabled/DEGRADED → nil）
 )
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
