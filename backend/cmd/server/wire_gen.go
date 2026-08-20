@@ -190,6 +190,17 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		MaxBodyBytes:   configConfig.EvidenceCapture.MaxBodyBytes,
 	})
 	evidenceCaptureHandler := admin.NewEvidenceCaptureHandler(evidenceCaptureService)
+	// 蒸馏执行层：HIGH 自动限速 + 人工封禁（Redis store + 服务 + admin handler）。默认关。
+	// 只读 user_risk_v2 tier，绝不改 scoring；服务自 gate（master 关时 Start no-op）。
+	enforcementStore := repository.NewEnforcementStore(redisClient)
+	enforcementService := service.NewEnforcementService(enforcementStore, repository.NewUserRiskV2Repository(db), service.EnforcementConfigView{
+		Enabled:         configConfig.Enforcement.Enabled,
+		ThrottleRPM:     configConfig.Enforcement.ThrottleRPM,
+		ConfidenceMin:   configConfig.Enforcement.ConfidenceMin,
+		RefreshInterval: time.Duration(configConfig.Enforcement.RefreshIntervalSeconds) * time.Second,
+		CounterTTL:      time.Duration(configConfig.Enforcement.CounterTTLHours) * time.Hour,
+	})
+	enforcementService.Start()
 	openAITokenProvider := service.ProvideOpenAITokenProvider(accountRepository, geminiTokenCache, openAIOAuthService, oAuthRefreshAPI)
 	openAIGatewayService := service.NewOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository)
 	geminiOAuthClient := repository.NewGeminiOAuthClient(configConfig)
@@ -228,6 +239,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
 	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient)
 	adminService := service.NewAdminService(userRepository, groupRepository, accountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService)
+	enforcementHandler := admin.NewEnforcementHandler(enforcementService, adminService)
 	adminUserHandler := admin.NewUserHandler(adminService, concurrencyService, serviceUserPlatformQuotaRepository, billingCache)
 	groupCapacityService := service.NewGroupCapacityService(accountRepository, groupRepository, concurrencyService, sessionLimitCache, rpmCache)
 	groupHandler := admin.NewGroupHandler(adminService, dashboardService, groupCapacityService)
@@ -307,7 +319,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	affiliateHandler := admin.NewAffiliateHandler(affiliateService, adminService)
 	complianceHandler := admin.NewComplianceHandler(settingService)
 	pricingModelHandler := admin.NewPricingModelHandler(pricingDisplayService)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, adminRegionHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, pricingModelHandler, adminFeedbackHandler, riskV2AdminHandler, evidenceCaptureHandler)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, adminRegionHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, pricingModelHandler, adminFeedbackHandler, riskV2AdminHandler, evidenceCaptureHandler, enforcementHandler)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
 	userMessageQueueService := service.ProvideUserMessageQueueService(userMsgQueueCache, rpmCache, configConfig)
@@ -343,7 +355,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db, configConfig)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop, enforcementService)
 	// 切片 4.2：in-flight tracker 包裹业务 handler（Server.Close 后据此确认 Handler 真正退出）。
 	riskV2InflightTracker := &inflightTracker{}
 	httpServer.Handler = riskV2InflightTracker.Middleware(httpServer.Handler)
@@ -417,6 +429,7 @@ func provideCleanup(
 	riskV2Dispatcher *service.RiskV2Dispatcher,
 	riskV2ScoringWorker *service.RiskV2ScoringWorker,
 	riskV2HealthLoop *service.RiskV2HealthReportLoop,
+	enforcementService *service.EnforcementService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -435,6 +448,7 @@ func provideCleanup(
 		riskV2ScoringWorker.Stop()     // *RiskV2ScoringWorker.Stop 为 nil-safe
 		_ = riskV2Dispatcher.Stop(ctx) // graceful drain
 		riskV2HealthLoop.Stop()        // 最后 flush + Deregister（nil-safe）
+		enforcementService.Stop()      // 停执行层刷新 goroutine（nil-safe）
 		log.Printf("[Cleanup] RiskV2 runtime stopped (worker→dispatcher→health)")
 
 		parallelSteps := []cleanupStep{

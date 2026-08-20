@@ -124,6 +124,23 @@ type Config struct {
 	Risk RiskConfig `mapstructure:"risk" yaml:"risk"`
 	// EvidenceCapture 疑似蒸馏取证：请求原文捕获（默认无 flag = 不采）。
 	EvidenceCapture EvidenceCaptureConfig `mapstructure:"evidence_capture" yaml:"evidence_capture"`
+	// Enforcement 蒸馏执行层：HIGH 自动限速 + 人工封禁（master 默认关，仅读 risk_v2 tier，绝不改 scoring）。
+	Enforcement EnforcementConfig `mapstructure:"enforcement" yaml:"enforcement"`
+}
+
+// EnforcementConfig 蒸馏执行层运行参数。默认全关；打开后仅对 risk_v2 判定为 HIGH 且置信度达标的用户
+// 施加一个独立的低 RPM 上限（超限 429），豁免名单一票否决。封禁只走人工 admin API。scoring 保持影子。
+type EnforcementConfig struct {
+	// Enabled master kill switch。默认 false（Go 零值）→ 中间件与端点全 no-op、零开销。
+	Enabled bool `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	// ThrottleRPM 命中 HIGH 时的每分钟请求上限（独立计数桶，不动用户正常 RPM）。默认 5。
+	ThrottleRPM int `mapstructure:"throttle_rpm" yaml:"throttle_rpm" json:"throttle_rpm"`
+	// ConfidenceMin 施加限速的最低置信度地板（HIGH 已隐含 ≥0.6，这里再设一道）。默认 0.6。
+	ConfidenceMin float64 `mapstructure:"confidence_min" yaml:"confidence_min" json:"confidence_min"`
+	// RefreshIntervalSeconds 后台从 user_risk_v2 刷新 HIGH 名单的周期（秒）。默认 60。
+	RefreshIntervalSeconds int `mapstructure:"refresh_interval_seconds" yaml:"refresh_interval_seconds" json:"refresh_interval_seconds"`
+	// CounterTTLHours 限速计数键的兜底 TTL（小时）。默认 2。
+	CounterTTLHours int `mapstructure:"counter_ttl_hours" yaml:"counter_ttl_hours" json:"counter_ttl_hours"`
 }
 
 // EvidenceCaptureConfig 取证捕获运行参数。仅当管理员显式标记某 user/key 时才采集，
@@ -1925,6 +1942,31 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 			slog.Warn("EVIDENCE_CAPTURE_MAX_BODY_BYTES 非整数,已忽略", "err", err)
 		}
 	}
+	// Enforcement 蒸馏执行层 env 兜底（viper 对嵌套键的 AutomaticEnv 不可靠，手写更稳）。
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("ENFORCEMENT_ENABLED"))); v != "" {
+		cfg.Enforcement.Enabled = v == "1" || v == "true" || v == "on"
+	}
+	if v := strings.TrimSpace(os.Getenv("ENFORCEMENT_THROTTLE_RPM")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Enforcement.ThrottleRPM = n
+		} else {
+			slog.Warn("ENFORCEMENT_THROTTLE_RPM 非整数,已忽略", "err", err)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENFORCEMENT_CONFIDENCE_MIN")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Enforcement.ConfidenceMin = f
+		} else {
+			slog.Warn("ENFORCEMENT_CONFIDENCE_MIN 非浮点数,已忽略", "err", err)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENFORCEMENT_REFRESH_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Enforcement.RefreshIntervalSeconds = n
+		} else {
+			slog.Warn("ENFORCEMENT_REFRESH_SECONDS 非整数,已忽略", "err", err)
+		}
+	}
 	// EDGE_FORWARD_* 环境变量兜底（中央“执行→转发”开关与目标 cell）。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_ENABLED"))); v == "1" || v == "true" || v == "on" {
 		cfg.EdgeForward.Enabled = true
@@ -2432,6 +2474,13 @@ func setDefaults() {
 	viper.SetDefault("evidence_capture.store_threshold", 2)
 	viper.SetDefault("evidence_capture.buffer_ttl_hours", 168)
 	viper.SetDefault("evidence_capture.max_body_bytes", 16*1024)
+
+	// Enforcement 蒸馏执行层：HIGH 自动限速 + 人工封禁（master 默认关）。
+	viper.SetDefault("enforcement.enabled", false)
+	viper.SetDefault("enforcement.throttle_rpm", 5)
+	viper.SetDefault("enforcement.confidence_min", 0.6)
+	viper.SetDefault("enforcement.refresh_interval_seconds", 60)
+	viper.SetDefault("enforcement.counter_ttl_hours", 2)
 
 	// Gateway
 	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久

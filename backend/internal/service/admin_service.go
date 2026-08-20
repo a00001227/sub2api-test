@@ -71,6 +71,8 @@ type AdminService interface {
 	// API Key management (admin)
 	AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error)
 	AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error)
+	// AdminUpdateAPIKeyStatus 管理员启用/禁用某 API Key（用于蒸馏人工封禁，可逆）。status: active|disabled。
+	AdminUpdateAPIKeyStatus(ctx context.Context, keyID int64, status string) (*APIKey, error)
 
 	// ReplaceUserGroup 替换用户的专属分组：授予新分组权限、迁移 Key、移除旧分组权限
 	ReplaceUserGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (*ReplaceUserGroupResult, error)
@@ -2507,6 +2509,27 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 
 	result.APIKey = apiKey
 	return result, nil
+}
+
+// AdminUpdateAPIKeyStatus 管理员启用/禁用某 API Key（蒸馏人工封禁，可逆）。
+// 复用 GetByID + Update + 认证缓存失效；auth 中间件对 disabled 键返回 401 API_KEY_DISABLED。
+func (s *adminServiceImpl) AdminUpdateAPIKeyStatus(ctx context.Context, keyID int64, status string) (*APIKey, error) {
+	if status != StatusAPIKeyActive && status != StatusAPIKeyDisabled {
+		return nil, infraerrors.BadRequest("INVALID_STATUS", "status must be active or disabled")
+	}
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
+	if err != nil {
+		return nil, err
+	}
+	apiKey.Status = status
+	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+		return nil, fmt.Errorf("update api key status: %w", err)
+	}
+	// Status 嵌入 auth cache snapshot，变更后必须失效，否则一个 L2 TTL 内不生效。
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+	}
+	return apiKey, nil
 }
 
 // AdminResetAPIKeyRateLimitUsage resets all API key rate-limit usage windows.

@@ -45,6 +45,7 @@ func ProvideAdminHandlers(
 	feedbackHandler *admin.FeedbackHandler,
 	riskV2Handler *admin.RiskV2Handler,
 	evidenceCaptureHandler *admin.EvidenceCaptureHandler,
+	enforcementHandler *admin.EnforcementHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -83,6 +84,7 @@ func ProvideAdminHandlers(
 		Feedback:               feedbackHandler,
 		RiskV2:                 riskV2Handler,
 		EvidenceCapture:        evidenceCaptureHandler,
+		Enforcement:            enforcementHandler,
 	}
 }
 

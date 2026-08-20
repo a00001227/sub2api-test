@@ -115,6 +115,28 @@ func RegisterAdminRoutes(
 
 		// 疑似蒸馏取证：请求原文捕获 Admin API（管理员标记后捕获、查看、清除）。
 		registerEvidenceCaptureRoutes(admin, h)
+
+		// 蒸馏执行层：HIGH 自动限速 + 人工封禁 Admin API（默认关；豁免/封禁/查看）。
+		registerEnforcementRoutes(admin, h)
+	}
+}
+
+// registerEnforcementRoutes 注册执行层 Admin 路由（前缀 /admin/enforcement）。同 admin 组鉴权。
+func registerEnforcementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h.Admin.Enforcement == nil {
+		return // 未接线 → 不注册
+	}
+	ef := admin.Group("/enforcement")
+	{
+		ef.GET("/status", h.Admin.Enforcement.GetStatus)
+		ef.GET("/high-users", h.Admin.Enforcement.ListHighUsers)
+		ef.POST("/allowlist", h.Admin.Enforcement.AddAllowlist)
+		ef.DELETE("/allowlist/:userId", h.Admin.Enforcement.RemoveAllowlist)
+		ef.POST("/ban", h.Admin.Enforcement.Ban)
+		ef.POST("/unban", h.Admin.Enforcement.Unban)
+		ef.GET("/model-rules", h.Admin.Enforcement.ListModelRules)
+		ef.POST("/model-rules", h.Admin.Enforcement.SetModelRule)
+		ef.DELETE("/model-rules/:model", h.Admin.Enforcement.DeleteModelRule)
 	}
 }
 
@@ -145,7 +167,6 @@ func registerRiskV2Routes(admin *gin.RouterGroup, h *handler.Handlers) {
 		v2.GET("/users/:user_id/windows", h.Admin.RiskV2.GetWindows)
 	}
 }
-
 
 func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	compliance := admin.Group("/compliance")
