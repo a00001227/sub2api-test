@@ -37,9 +37,10 @@ func (h *GatewayHandler) ObserveForwardedRiskV2(c *gin.Context, env service.Edge
 		fwdRiskLog().Info("skip", zap.String("reason", "not_effective_enabled"))
 		return
 	}
-	// 只针对 Claude Code：UA 必须是 claude-cli/x.x.x。
-	if !claudeCodeValidator.ValidateUserAgent(ua) {
-		fwdRiskLog().Info("skip", zap.String("reason", "ua_not_claude_code"), zap.String("ua", ua))
+	// 只采 Claude(Anthropic)转发；OpenAI 走不同成本路径,不在此采(避免按 anthropic 误解析)。
+	// 不再按客户端 UA 过滤——反代/网关会改写 UA(如 Go-http-client),按 UA 过滤会漏掉真实流量。
+	if env.IsOpenAI() {
+		fwdRiskLog().Info("skip", zap.String("reason", "openai_platform"))
 		return
 	}
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)

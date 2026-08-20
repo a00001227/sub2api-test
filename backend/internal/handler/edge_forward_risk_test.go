@@ -85,17 +85,33 @@ func TestObserveForwardedRiskV2_ClaudeCode(t *testing.T) {
 	}
 }
 
-// 非 Claude Code(普通 UA)→ 不采集。
-func TestObserveForwardedRiskV2_NonClaudeCode(t *testing.T) {
+// 反代改写过 UA(如 Go-http-client)的 Claude 转发流量 → 照样采集(不再按 UA 过滤)。
+func TestObserveForwardedRiskV2_RewrittenUA_Collects(t *testing.T) {
 	h, sink, disp := newForwardRiskHandler(t)
 	body := []byte(`{"model":"claude-3-5-sonnet","messages":[{"role":"user","content":"hello world"}]}`)
-	c := newForwardCtx("python-requests/2.31", body)
+	c := newForwardCtx("Go-http-client/2.0", body)
 
 	h.ObserveForwardedRiskV2(c, forwardEnv(), body, time.Now())
 	_ = disp.Stop(context.Background())
 
+	if sink.len() != 1 {
+		t.Fatalf("reverse-proxied Claude traffic should enqueue regardless of UA, got %d", sink.len())
+	}
+}
+
+// OpenAI 平台的转发 → 不采（避免按 anthropic 误解析）。
+func TestObserveForwardedRiskV2_OpenAISkip(t *testing.T) {
+	h, sink, disp := newForwardRiskHandler(t)
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+	env := forwardEnv()
+	env.Platform = service.PlatformOpenAI
+	c := newForwardCtx("Go-http-client/2.0", body)
+
+	h.ObserveForwardedRiskV2(c, env, body, time.Now())
+	_ = disp.Stop(context.Background())
+
 	if sink.len() != 0 {
-		t.Fatalf("non-claude-cli request must not enqueue, got %d", sink.len())
+		t.Fatalf("openai forwarded must not enqueue, got %d", sink.len())
 	}
 }
 
