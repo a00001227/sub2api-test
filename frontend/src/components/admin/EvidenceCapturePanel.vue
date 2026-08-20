@@ -71,7 +71,7 @@
         </span>
       </p>
       <div v-if="entries.length === 0" class="text-xs text-gray-400">{{ t('admin.evidence.empty') }}</div>
-      <div v-else class="max-h-72 space-y-2 overflow-y-auto pr-1">
+      <div v-else class="max-h-[32rem] space-y-2 overflow-y-auto pr-1">
         <div
           v-for="(e, i) in entries" :key="i"
           class="rounded border p-2 text-xs"
@@ -88,7 +88,7 @@
             <span class="font-mono">{{ e.endpoint }}</span>
             <span v-if="e.truncated" class="text-amber-600 dark:text-amber-400">{{ t('admin.evidence.truncated') }}</span>
           </div>
-          <pre class="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-gray-50 p-2 font-mono text-[11px] text-gray-800 dark:bg-dark-700 dark:text-gray-200">{{ e.body }}</pre>
+          <pre class="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-gray-50 p-2 font-mono text-[11px] text-gray-800 dark:bg-dark-700 dark:text-gray-200">{{ e.body }}</pre>
         </div>
       </div>
     </div>

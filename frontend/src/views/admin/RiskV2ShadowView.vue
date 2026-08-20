@@ -280,7 +280,7 @@
         aria-modal="true"
         aria-labelledby="rv2-drawer-title"
         tabindex="-1"
-        class="flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white shadow-xl outline-none dark:bg-dark-800"
+        class="flex h-full w-full max-w-4xl flex-col overflow-y-auto bg-white shadow-xl outline-none dark:bg-dark-800"
         @keydown="onDrawerKeydown"
       >
         <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-dark-500">
