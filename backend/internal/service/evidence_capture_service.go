@@ -9,8 +9,21 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
+
+// evidencePromptSimhash 从请求体提取提示词（anthropic messages / gemini contents，
+// 否则整体 body）算归一化 64 位 simhash。同模板不同数字坍缩同值，用于前端「模板重复」红标。
+func evidencePromptSimhash(body []byte) uint64 {
+	if m := gjson.GetBytes(body, "messages"); m.Exists() && m.Raw != "" {
+		return ComputeMessagesSimhash([]byte(m.Raw))
+	}
+	if c := gjson.GetBytes(body, "contents"); c.Exists() && c.Raw != "" {
+		return ComputeMessagesSimhash([]byte(c.Raw))
+	}
+	return ComputeMessagesSimhash(body)
+}
 
 var (
 	// ErrEvidenceUnavailable 取证捕获未启用（store 缺失 / master 关）。
@@ -55,18 +68,23 @@ type EvidenceEntry struct {
 	Ts        int64  `json:"ts"`
 	UserID    int64  `json:"user_id"`
 	APIKeyID  int64  `json:"api_key_id"`
+	RequestID string `json:"request_id"`    // 平台生成的 client_request_id（跨日志关联）
 	Model     string `json:"model"`
 	Endpoint  string `json:"endpoint"`
 	IP        string `json:"ip"`
 	Body      string `json:"body"`
 	Truncated bool   `json:"truncated"`
+	// PromptSimhash 提示词归一化 64 位 simhash（hex）。同模板不同数字会坍缩成同值，
+	// 前端据此把「模板重复」的条目标红（批量蒸馏的典型特征）。空/无消息为 "0"。
+	PromptSimhash string `json:"prompt_simhash"`
 }
 
 // CaptureMeta 捕获时的请求元信息（由 handler 从 gin.Context 提取，service 不碰 gin）。
 type CaptureMeta struct {
-	Model    string
-	Endpoint string
-	IP       string
+	Model     string
+	Endpoint  string
+	IP        string
+	RequestID string
 }
 
 // EvidenceCaptureStore 由 repository 实现（Redis）。
@@ -177,9 +195,10 @@ func (s *EvidenceCaptureService) CaptureIfFlagged(userID, apiKeyID int64, rawBod
 	go func() {
 		san, trunc, _ := sanitizeAndTrimJSONPayload(bodyCopy, s.cfg.MaxBodyBytes)
 		entry := EvidenceEntry{
-			Ts: time.Now().Unix(), UserID: userID, APIKeyID: apiKeyID,
+			Ts: time.Now().Unix(), UserID: userID, APIKeyID: apiKeyID, RequestID: meta.RequestID,
 			Model: meta.Model, Endpoint: meta.Endpoint, IP: meta.IP,
 			Body: san, Truncated: trunc,
+			PromptSimhash: strconv.FormatUint(evidencePromptSimhash(bodyCopy), 16),
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), evidenceStoreOpTimeout)
 		defer cancel()

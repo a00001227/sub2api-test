@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -123,10 +124,12 @@ func (h *EvidenceCaptureHandler) Capture(c *gin.Context, userID, apiKeyID int64,
 	if h == nil || h.svc == nil || !h.svc.Active() {
 		return
 	}
+	reqID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
 	meta := service.CaptureMeta{
-		Model:    gjson.GetBytes(body, "model").String(),
-		Endpoint: c.Request.URL.Path,
-		IP:       ip.GetClientIP(c),
+		Model:     gjson.GetBytes(body, "model").String(),
+		Endpoint:  c.Request.URL.Path,
+		IP:        ip.GetClientIP(c),
+		RequestID: reqID,
 	}
 	h.svc.CaptureIfFlagged(userID, apiKeyID, body, meta)
 }

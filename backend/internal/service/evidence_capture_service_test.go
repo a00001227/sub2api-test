@@ -126,6 +126,31 @@ func TestEvidence_UserCapture(t *testing.T) {
 	}
 }
 
+// 模板重复：同一 prompt 的两条捕获应得到相同的 PromptSimhash（红标依据）；request id 透传。
+func TestEvidence_SimhashAndRequestID(t *testing.T) {
+	f := newFakeEvidenceStore()
+	s := newEvidenceSvc(f)
+	_, _ = s.StartCapture(context.Background(), EvidenceTargetUser, 42, 5, 1)
+	s.CaptureIfFlagged(42, 7, []byte(evBody), CaptureMeta{RequestID: "req-a"})
+	s.CaptureIfFlagged(42, 7, []byte(evBody), CaptureMeta{RequestID: "req-b"})
+	waitAppends(t, f, 2)
+	es, _ := s.ListEvidence(context.Background(), "u:42", 10)
+	if len(es) != 2 {
+		t.Fatalf("want 2 entries, got %d", len(es))
+	}
+	if es[0].PromptSimhash == "" || es[0].PromptSimhash == "0" {
+		t.Fatalf("expected non-zero simhash, got %q", es[0].PromptSimhash)
+	}
+	if es[0].PromptSimhash != es[1].PromptSimhash {
+		t.Errorf("identical prompts must share simhash: %s vs %s", es[0].PromptSimhash, es[1].PromptSimhash)
+	}
+	// request id 透传（两条各自不同）。
+	ids := map[string]bool{es[0].RequestID: true, es[1].RequestID: true}
+	if !ids["req-a"] || !ids["req-b"] {
+		t.Errorf("request ids not captured: %+v", []string{es[0].RequestID, es[1].RequestID})
+	}
+}
+
 // 抓够 N 条自动停：第 N+1 条不再捕获，Active 变回 false。
 func TestEvidence_StopsAtN(t *testing.T) {
 	f := newFakeEvidenceStore()

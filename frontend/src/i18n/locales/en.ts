@@ -6823,6 +6823,14 @@ export default {
 
     evidence: {
       section: 'Evidence Capture',
+      targetLabel: 'Target',
+      targetUser: 'Whole user',
+      targetKey: 'Specific key',
+      keyIdLabel: 'API key ID',
+      keyIdPlaceholder: 'api_key_id',
+      badKeyId: 'Enter a valid API key ID',
+      dupBadge: 'Template x{n}',
+      dupSummary: '{n} templated/duplicate request(s)',
       hint: '⚠ Captures the next N raw requests from this user (redacted) as evidence. Admin-only; retained per Terms of Service.',
       refresh: 'Refresh',
       maxCount: 'Max requests',

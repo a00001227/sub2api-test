@@ -24,11 +24,13 @@ export interface EvidenceEntry {
   ts: number
   user_id: number
   api_key_id: number
+  request_id: string // 平台生成的 client_request_id
   model: string
   endpoint: string
   ip: string
   body: string // 已脱敏 + 限大小
   truncated: boolean
+  prompt_simhash: string // 归一化 simhash(hex)；相同=模板重复
 }
 
 export const evidenceAPI = {

@@ -6977,6 +6977,14 @@ export default {
 
     evidence: {
       section: '请求原文取证',
+      targetLabel: '取证对象',
+      targetUser: '整个用户',
+      targetKey: '指定 Key',
+      keyIdLabel: 'API Key ID',
+      keyIdPlaceholder: 'api_key_id',
+      badKeyId: '请输入有效的 API Key ID',
+      dupBadge: '模板重复 x{n}',
+      dupSummary: '{n} 条模板重复',
       hint: '⚠ 捕获该用户后续 N 条请求原文（已脱敏）用于取证。仅管理员，依服务条款留存。',
       refresh: '刷新',
       maxCount: '最多抓取条数',
