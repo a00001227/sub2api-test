@@ -2,6 +2,7 @@ package routes
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
@@ -34,12 +35,15 @@ func RegisterGatewayRoutes(
 	// 中央“执行→转发”中间件建一次,复用到 /v1 组 + 无前缀别名 + codexDirect（默认关 = no-op）。
 	// #86b/#86a-2:转发成功后用 cell 带回的权威用量给消费者计费(占位号,不重复发 provider
 	// 用量)。按 envelope 平台分派到对应成本路径:openai → OpenAI,其余 → claude。
-	edgeForward := middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope) {
+	edgeForward := middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time) {
 		if env.IsOpenAI() {
 			h.OpenAIGateway.RecordForwardedConsumerUsage(c, env)
 		} else {
 			h.Gateway.RecordForwardedConsumerUsage(c, env)
 		}
+		// Risk V2 影子采集：转发路径本地采集会漏，这里补一条观测(仅 Claude Code，内部门控)。
+		// 与计费解耦、best-effort，不影响上面的计费与已回传响应。
+		h.Gateway.ObserveForwardedRiskV2(c, env, reqBody, startedAt)
 	}, h.PricingDisplay.IsModelEnabled)
 
 	// API网关（Claude API兼容）

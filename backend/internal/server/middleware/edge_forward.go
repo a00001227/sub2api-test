@@ -22,7 +22,10 @@ import (
 
 // EdgeConsumerBiller 由中央在转发成功、从 cell 响应剥出权威用量后调用,给消费者计费
 // (#86b)。nil = 不计费(默认关时无意义)。实现见 handler.GatewayHandler。
-type EdgeConsumerBiller func(c *gin.Context, env service.EdgeUsageEnvelope)
+//
+// reqBody 为缓冲的原始请求体(供 Risk V2 影子采集从中算请求侧特征;转发路径本地采集会漏)，
+// startedAt 为本次转发开始时间。二者仅用于观测,不参与计费。
+type EdgeConsumerBiller func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time)
 
 // ModelAllowFunc 判断请求 model 是否允许转发(转发模型白名单)。
 // 由 pricing_models 的"启用模型"集合驱动。nil = 不校验(白名单关)。
@@ -104,6 +107,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 	affinity := newSessionAffinity(stickyAffinityTTL)
 
 	return func(c *gin.Context) {
+		reqStart := time.Now() // 转发开始时间;仅供 Risk V2 观测,不影响计费/响应。
 		apiKey, ok := GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.Group == nil {
 			slog.Debug("edge_forward: 跳过(无 apiKey/分组)", "path", c.Request.URL.Path,
@@ -241,8 +245,9 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			}
 			env := streamCellResponse(c, resp)
 			// #86b:cell 带回权威用量 → 给消费者计费(占位号,不重复发 provider 用量)。
+			// reqBody/reqStart 顺带传给 biller 供 Risk V2 影子采集(不参与计费)。
 			if env != nil && biller != nil {
-				biller(c, *env)
+				biller(c, *env, body, reqStart)
 			}
 			c.Abort()
 			return
