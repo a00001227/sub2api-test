@@ -160,13 +160,26 @@ func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
 // 注意:
 //   - 调用方必须关闭 resp.Body，否则会导致 inFlight 计数泄漏
 //   - inFlight > 0 的客户端不会被淘汰，确保活跃请求不被中断
-// effectiveUpstreamProxy 决定本次上游请求实际用哪个代理:EDGE cell 配了
-// CELL_UPSTREAM_PROXY 就用它(整台 cell 统一出口,覆盖按账号代理),否则用传入的
-// proxyURL(空=直连)。中央模式(非 EdgeMode)永不覆盖。覆盖所有上游(含 OAuth
-// 换码/刷新/校验)以保证 revoke-safe:铸造、使用、刷新走同一出口 IP。
+// effectiveUpstreamProxy 决定本次上游请求实际用哪个代理。中央模式(非 EdgeMode)
+// 永不覆盖,直接用传入的按账号 proxyURL(空=直连)。EDGE cell 下有两种出口策略:
+//   - 多出口(EdgeMultiEgress 开,Option A):每个账号走自己的按账号代理(proxyURL),
+//     只有该号没有按账号代理时才退回 CELL_UPSTREAM_PROXY 兜底(仍空=直连)。
+//   - 单一出口(默认):CELL_UPSTREAM_PROXY 覆盖所有账号,整台 cell 统一出口。
+//
+// 两种策略都保持 revoke-safe:effectiveUpstreamProxy 是唯一决策点,覆盖全部上游
+// (含 OAuth 换码/刷新/校验),所以一个号的铸造、使用、刷新永远走它那一个固定出口 IP。
 func effectiveUpstreamProxy(cfg *config.Config, proxyURL string) string {
 	if cfg != nil && cfg.EdgeMode {
-		if override := strings.TrimSpace(cfg.EdgeUpstreamProxy); override != "" {
+		override := strings.TrimSpace(cfg.EdgeUpstreamProxy)
+		if cfg.EdgeMultiEgress {
+			// 多出口:按账号代理优先;没有才用 cell 兜底出口。
+			if perAccount := strings.TrimSpace(proxyURL); perAccount != "" {
+				return perAccount
+			}
+			return override
+		}
+		// 单一出口:cell 出口覆盖按账号代理。
+		if override != "" {
 			return override
 		}
 	}

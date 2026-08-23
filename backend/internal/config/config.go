@@ -105,6 +105,13 @@ type Config struct {
 	// 直连本机出口(旧行为)。环境变量:CELL_UPSTREAM_PROXY(http/https/socks5,可带
 	// user:pass)。中央模式忽略此项。
 	EdgeUpstreamProxy string `mapstructure:"edge_upstream_proxy" yaml:"edge_upstream_proxy"`
+	// EdgeMultiEgress：仅 EDGE cell 生效(多出口 Option A)。开=共享 cell 上每个账号
+	// 走**自己的**按账号代理(自己的出口 IP,来自平台 IP 池 max_bindings 密度分配),
+	// EdgeUpstreamProxy 退化为「没有按账号代理的号」的兜底出口。关(默认)=旧行为:
+	// EdgeUpstreamProxy 覆盖所有账号,整台 cell 单一出口。仍 revoke-safe:每个号的
+	// 铸造/使用/刷新走它自己那一个固定 IP(effectiveUpstreamProxy 是唯一决策点,覆盖
+	// API + OAuth 换码/刷新/校验)。环境变量:CELL_MULTI_EGRESS(1/true/on)。中央模式忽略。
+	EdgeMultiEgress bool `mapstructure:"edge_multi_egress" yaml:"edge_multi_egress"`
 	// CellGatewayKey：仅 EDGE cell 生效。cell 信任的"来自中央的转发 key"——中央
 	// EdgeForward 转发时带的 Authorization Bearer 值。设了之后,cell 收到用该 key 的
 	// /v1 请求即视为"中央可信转发":不在 cell 上要求/建立消费者身份,直接用本地号池
@@ -1879,6 +1886,11 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("CELL_GATEWAY_KEY")); v != "" {
 		cfg.CellGatewayKey = v
+	}
+	// CELL_MULTI_EGRESS 环境变量兜底(多出口:每号自己的 IP)。仅显式真值置 true,
+	// 默认关=旧的单一 cell 出口行为。
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("CELL_MULTI_EGRESS"))); v == "1" || v == "true" || v == "on" {
+		cfg.EdgeMultiEgress = true
 	}
 	// Risk V2 Shadow env 兜底。独立密钥,绝不复用其它 secret。
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("RISK_V2_ENABLED"))); v == "1" || v == "true" || v == "on" {

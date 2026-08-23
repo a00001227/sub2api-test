@@ -43,6 +43,19 @@ func TestClaudeOAuth_newClientAppliesCellProxy(t *testing.T) {
 	if got != "http://per-account:3128" {
 		t.Fatalf("未配 override 应用传入; got %q", got)
 	}
+
+	// 多出口(Option A):OAuth 也必须走该号自己的按账号出口(而非 cell 兜底),否则
+	// 换码/刷新会在错误的 IP 上进行,破坏 revoke-safe。
+	s3 := &claudeOAuthService{
+		cfg:           &config.Config{EdgeMode: true, EdgeMultiEgress: true, EdgeUpstreamProxy: override},
+		clientFactory: func(p string) (*req.Client, error) { got = p; return req.C(), nil },
+	}
+	if _, err := s3.newClient("http://per-account:3128"); err != nil {
+		t.Fatalf("newClient: %v", err)
+	}
+	if got != "http://per-account:3128" {
+		t.Fatalf("多出口 OAuth 应走按账号出口; got %q want %q", got, "http://per-account:3128")
+	}
 }
 
 type ClaudeOAuthServiceSuite struct {

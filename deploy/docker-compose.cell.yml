@@ -74,6 +74,9 @@ services:
       - CELL_HEARTBEAT_SECONDS=${CELL_HEARTBEAT_SECONDS:-30}
       # ── 上游统一出口代理(建议配;所有上游含 OAuth 换码走它,revoke-safe) ──
       - CELL_UPSTREAM_PROXY=${CELL_UPSTREAM_PROXY:-}
+      # ── 多出口(Option A):开=每个账号走自己的按账号代理(自己的出口 IP),
+      #    CELL_UPSTREAM_PROXY 退化为无按账号代理时的兜底出口。默认关=单一 cell 出口。
+      - CELL_MULTI_EGRESS=${CELL_MULTI_EGRESS:-}
       # ── 访问 GitHub/定价数据的代理(可选,和上游无关) ───────────
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
     depends_on:
