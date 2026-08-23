@@ -54,6 +54,13 @@ func (a *Agent) handleListCells(w http.ResponseWriter, r *http.Request) {
 		}
 		it.Port, it.AdvertiseAddr, it.Region, it.Node = cs.Port, cs.AdvertiseAddr, cs.Region, cs.Node
 	}
+	// Authoritative host port per project from running containers (Portal's
+	// "adopt cells" matches Portal cells to projects by this port).
+	for project, port := range a.containerPorts(ctx) {
+		if it, ok := seen[project]; ok {
+			it.Port = port
+		}
+	}
 	out := make([]item, 0, len(seen))
 	for _, it := range seen {
 		out = append(out, *it)

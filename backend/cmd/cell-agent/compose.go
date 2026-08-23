@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -78,6 +79,37 @@ func (a *Agent) listProjects(ctx context.Context) (map[string]string, error) {
 		}
 	}
 	return res, nil
+}
+
+var containerNameRe = regexp.MustCompile(`^(cell[0-9]+)-`)
+var publishedPortRe = regexp.MustCompile(`:([0-9]+)->8080`)
+
+// containerPorts reads each cell project's ACTUAL published host port from
+// running containers (docker is the source of truth — the .env files may lack a
+// CELL_PORT line). Maps project → host port (the one bound to container :8080).
+func (a *Agent) containerPorts(ctx context.Context) map[string]int {
+	out := map[string]int{}
+	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}\t{{.Ports}}")
+	cmd.Dir = a.cfg.DeployDir
+	b, err := cmd.Output()
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		nm := containerNameRe.FindStringSubmatch(parts[0])
+		pm := publishedPortRe.FindStringSubmatch(parts[1])
+		if nm == nil || pm == nil {
+			continue
+		}
+		if port, err := strconv.Atoi(pm[1]); err == nil {
+			out[nm[1]] = port
+		}
+	}
+	return out
 }
 
 func fileExists(p string) bool {
