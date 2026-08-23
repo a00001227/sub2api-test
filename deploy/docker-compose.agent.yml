@@ -1,0 +1,23 @@
+# cell-agent 容器部署(备选;主方式是 systemd)。在主机 deploy/ 目录里跑:
+#   docker compose -f docker-compose.agent.yml --env-file .env.agent up -d --build
+# ⚠ 挂 docker socket = 等同 host root。只把端口绑到私网/loopback,绝不公网。
+services:
+  cell-agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+    restart: unless-stopped
+    env_file:
+      - .env.agent
+    environment:
+      # 容器内固定绑 0.0.0.0:9099,对外可达范围靠下面 ports 的宿主绑定地址限制。
+      - AGENT_BIND_ADDR=0.0.0.0:9099
+      - AGENT_DEPLOY_DIR=/deploy
+    ports:
+      # 默认只映射到宿主 loopback。Portal 从内网另一台调时改成内网网卡 IP。
+      - "127.0.0.1:9099:9099"
+    volumes:
+      # 唯一实质风险:agent 能驱动 host docker(仅固定 compose 动词 + cellN 白名单)。
+      - /var/run/docker.sock:/var/run/docker.sock
+      # cell compose 文件 + 各 .env.cellN + agent-state.json。
+      - ./:/deploy

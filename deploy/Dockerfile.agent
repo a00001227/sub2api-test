@@ -1,0 +1,19 @@
+# cell-agent 容器镜像(部署备选;主方式是 systemd,见 cell-agent.service)。
+# 构建上下文 = 仓库根(context: ..)。最终镜像基于 docker:cli —— 自带 docker + compose 插件,
+# 靠挂载宿主 docker socket 驱动 host 上的 compose。
+ARG GOLANG_IMAGE=golang:1.26.4-alpine
+ARG DOCKER_IMAGE=docker:27-cli
+ARG GOPROXY=https://goproxy.cn,direct
+
+FROM ${GOLANG_IMAGE} AS builder
+ARG GOPROXY
+ENV GOPROXY=${GOPROXY} CGO_ENABLED=0 GOOS=linux
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+RUN go build -o /out/cell-agent ./cmd/cell-agent
+
+FROM ${DOCKER_IMAGE}
+COPY --from=builder /out/cell-agent /usr/local/bin/cell-agent
+ENTRYPOINT ["/usr/local/bin/cell-agent"]

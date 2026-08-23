@@ -1,0 +1,21 @@
+# sub2api cell-agent —— systemd 单元(主机上直接跑 agent 二进制,主部署方式)。
+# 装法见 deploy/install-agent.sh。二进制在 /usr/local/bin/cell-agent,
+# 配置在 /opt/sub2api/deploy/.env.agent(改路径请同步下面两处)。
+[Unit]
+Description=sub2api cell-agent (Portal-driven cell control)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/sub2api/deploy/.env.agent
+WorkingDirectory=/opt/sub2api/deploy
+ExecStart=/usr/local/bin/cell-agent
+Restart=on-failure
+RestartSec=3
+# 需要 docker CLI + 访问 docker socket(root 或 docker 组)。
+User=root
+
+[Install]
+WantedBy=multi-user.target
