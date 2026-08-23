@@ -22,9 +22,12 @@ rm -f "$REPO_DIR/backend/cell-agent-bin"
 
 echo "==> 安装 systemd 单元"
 install -m 0644 "$REPO_DIR/deploy/cell-agent.service" /etc/systemd/system/cell-agent.service
+# 单元模板里写死了 /opt/sub2api/deploy;按本机实际仓库路径改写(支持任意 REPO_DIR)。
+sed -i "s|/opt/sub2api/deploy|$REPO_DIR/deploy|g" /etc/systemd/system/cell-agent.service
 
 if [ ! -f "$REPO_DIR/deploy/.env.agent" ]; then
   cp "$REPO_DIR/deploy/.env.agent.example" "$REPO_DIR/deploy/.env.agent"
+  sed -i "s|^AGENT_DEPLOY_DIR=.*|AGENT_DEPLOY_DIR=$REPO_DIR/deploy|" "$REPO_DIR/deploy/.env.agent"
   echo "!! 已生成 $REPO_DIR/deploy/.env.agent —— 填好 AGENT_TOKEN 再启动:"
   echo "     AGENT_TOKEN=\$(openssl rand -hex 32)"
 fi
