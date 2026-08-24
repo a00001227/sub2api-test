@@ -65,5 +65,7 @@ func RegisterProviderInternalRoutes(
 	proxies.Use(gin.HandlerFunc(auth))
 	{
 		proxies.POST("/sync", h.SyncProxies)
+		// account→proxy occupancy (which IP is used by which account).
+		proxies.GET("/bindings", h.ProxyBindings)
 	}
 }

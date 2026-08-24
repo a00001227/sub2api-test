@@ -28,6 +28,42 @@ type ProxySyncResult struct {
 	Disabled int `json:"disabled"`
 }
 
+// ProxyBinding maps one egress proxy to the accounts currently bound to it
+// (accounts.proxy_id). `Accounts` are external refs (account.Name = pa_…); the
+// Portal joins them back to display names. No credentials.
+type ProxyBinding struct {
+	Host     string   `json:"host"`
+	Port     int      `json:"port"`
+	Username string   `json:"username"`
+	Accounts []string `json:"accounts"`
+}
+
+// Bindings returns, per ACTIVE local proxy, which accounts are bound to it — so
+// the Portal can show "which IP is used by which account". Read-only.
+func (s *ProxySyncService) Bindings(ctx context.Context) ([]ProxyBinding, error) {
+	existing, _, err := s.repo.List(ctx, pagination.PaginationParams{Page: 1, PageSize: 1000})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProxyBinding, 0, len(existing))
+	for i := range existing {
+		p := &existing[i]
+		if p.Status != "active" {
+			continue
+		}
+		accts, err := s.repo.ListAccountSummariesByProxyID(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(accts))
+		for _, a := range accts {
+			names = append(names, a.Name)
+		}
+		out = append(out, ProxyBinding{Host: p.Host, Port: p.Port, Username: p.Username, Accounts: names})
+	}
+	return out, nil
+}
+
 // ProxySyncService reconciles this cell's local `proxies` table with a desired
 // set pushed from the Portal (Portal→cell /internal/proxies/sync). This is the
 // only thing standing between the existing per-account allocator + multi-egress

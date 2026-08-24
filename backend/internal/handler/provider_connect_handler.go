@@ -110,6 +110,22 @@ func (h *ProviderConnectHandler) SyncProxies(c *gin.Context) {
 	response.Success(c, res)
 }
 
+// ProxyBindings returns which accounts are bound to which local proxy (account→IP
+// occupancy), so the Portal can show "which IP is used by which account". Same
+// provider-internal auth; edge-surviving.
+func (h *ProviderConnectHandler) ProxyBindings(c *gin.Context) {
+	if h.proxySync == nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_SYNC_DISABLED", "proxy sync not configured"))
+		return
+	}
+	bindings, err := h.proxySync.Bindings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"bindings": bindings})
+}
+
 // accountConfigRuleRequest 是一条临时不可调度规则的请求体。
 type accountConfigRuleRequest struct {
 	ErrorCode       int      `json:"error_code"`
