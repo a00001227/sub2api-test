@@ -20,11 +20,10 @@ const createTimeout = 15 * time.Minute
 // shared secrets never appear here — they come from the host-local secrets
 // template (AGENT_SECRETS_ENV or an existing .env.cellN).
 type createCellRequest struct {
-	Region        string `json:"region"`
-	Node          string `json:"node"`
-	MultiEgress   *bool  `json:"multiEgress"`   // default true
-	UpstreamProxy string `json:"upstreamProxy"` // fallback egress; optional
-	TZ            string `json:"tz"`            // optional
+	Region      string `json:"region"`
+	Node        string `json:"node"`
+	MultiEgress *bool  `json:"multiEgress"` // default true
+	TZ          string `json:"tz"`          // optional
 }
 
 // createMu serializes allocation+create so two concurrent creates never pick the
@@ -80,7 +79,10 @@ func (a *Agent) handleCellCreate(w http.ResponseWriter, r *http.Request) {
 	} else {
 		kv["CELL_MULTI_EGRESS"] = ""
 	}
-	kv["CELL_UPSTREAM_PROXY"] = strings.TrimSpace(req.UpstreamProxy)
+	// No single-egress fallback proxy: agent-created cells never set
+	// CELL_UPSTREAM_PROXY (perCellKeys strips any template value), so an account
+	// without a pool IP simply egresses via the container's own IP. The knob is
+	// dead in the backend-create flow — there is no manual step to populate it.
 	if tz := strings.TrimSpace(req.TZ); tz != "" {
 		kv["TZ"] = tz
 	}
