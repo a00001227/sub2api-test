@@ -139,3 +139,6 @@ frontend/coverage/
 aicodex
 output/
 deploy/ADD_CELL.md
+
+# cell-agent build artifact
+/backend/cell-agent

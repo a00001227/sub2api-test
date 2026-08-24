@@ -592,6 +592,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
 	NewOAuthService,
 	NewProxyAllocator,
+	NewProxySyncService,
 	NewProviderConnectService,
 	NewProviderConnectCompletionService,
 	NewProviderConnectImportService,

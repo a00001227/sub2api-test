@@ -58,4 +58,12 @@ func RegisterProviderInternalRoutes(
 	{
 		connect.POST("/complete", h.CompleteAuthorization)
 	}
+
+	// 多出口(Option A): Portal 推送本 cell 的 IP 池 → 灌进本地 proxies 表。
+	// 同一 provider-internal 鉴权;edge 存活(本函数被无条件注册)。
+	proxies := r.Group("/internal/proxies")
+	proxies.Use(gin.HandlerFunc(auth))
+	{
+		proxies.POST("/sync", h.SyncProxies)
+	}
 }

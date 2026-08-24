@@ -24,6 +24,10 @@ type Agent struct {
 
 	lockMu sync.Mutex
 	locks  map[string]*sync.Mutex
+
+	// createMu serializes cell creation (allocation + up) so concurrent creates
+	// never race on the same project name / host port.
+	createMu sync.Mutex
 }
 
 func (a *Agent) projectLock(project string) *sync.Mutex {
@@ -48,6 +52,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /agent/v1/health", a.auth(a.handleHealth))
 	mux.HandleFunc("GET /agent/v1/cells", a.auth(a.handleListCells))
+	mux.HandleFunc("POST /agent/v1/cells", a.auth(a.handleCellCreate))
 	mux.HandleFunc("GET /agent/v1/cells/{project}/status", a.auth(a.handleCellStatus))
 	mux.HandleFunc("POST /agent/v1/cells/{project}/start", a.auth(a.handleCellStart))
 	mux.HandleFunc("POST /agent/v1/cells/{project}/stop", a.auth(a.handleCellStop))

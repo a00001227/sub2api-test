@@ -34,6 +34,7 @@ type ProviderConnectHandler struct {
 	test       *service.ProviderAccountTestService
 	config     *service.ProviderAccountConfigService
 	pricing    *service.PricingService
+	proxySync  *service.ProxySyncService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -51,8 +52,62 @@ func NewProviderConnectHandler(
 	test *service.ProviderAccountTestService,
 	config *service.ProviderAccountConfigService,
 	pricing *service.PricingService,
+	proxySync *service.ProxySyncService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, pricing: pricing}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, pricing: pricing, proxySync: proxySync}
+}
+
+// proxySyncRequest is the Portal→cell /internal/proxies/sync body: the desired
+// egress IP pool for this cell (multi-egress, Option A). region = the cell's
+// region; mode = "upsert" (add/update only) | "replace" (also disable the rest).
+type proxySyncRequest struct {
+	Region string `json:"region"`
+	Mode   string `json:"mode"`
+	Proxies []struct {
+		Protocol    string `json:"protocol"`
+		Host        string `json:"host"`
+		Port        int    `json:"port"`
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		Region      string `json:"region"`
+		MaxBindings int    `json:"max_bindings"`
+	} `json:"proxies"`
+}
+
+// SyncProxies reconciles this cell's local proxies table with the Portal's
+// desired pool. Edge-surviving (same provider-internal auth). Never echoes creds.
+func (h *ProviderConnectHandler) SyncProxies(c *gin.Context) {
+	if h.proxySync == nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_SYNC_DISABLED", "proxy sync not configured"))
+		return
+	}
+	var req proxySyncRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	desired := make([]service.ProxyInput, 0, len(req.Proxies))
+	for _, p := range req.Proxies {
+		desired = append(desired, service.ProxyInput{
+			Protocol:    p.Protocol,
+			Host:        p.Host,
+			Port:        p.Port,
+			Username:    p.Username,
+			Password:    p.Password,
+			Region:      p.Region,
+			MaxBindings: p.MaxBindings,
+		})
+	}
+	mode := req.Mode
+	if mode != "replace" {
+		mode = "upsert"
+	}
+	res, err := h.proxySync.Sync(c.Request.Context(), req.Region, desired, mode)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, res)
 }
 
 // accountConfigRuleRequest 是一条临时不可调度规则的请求体。
