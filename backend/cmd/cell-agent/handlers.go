@@ -99,6 +99,33 @@ func (a *Agent) handleCellRestart(w http.ResponseWriter, r *http.Request) {
 	a.lifecycle(w, r, "restart", []string{"restart"}, false)
 }
 
+// handleCellRebuild re-builds the cell image from the (freshly git-pulled) source
+// and brings it back up: `docker compose up -d --build`. Unlike restart/start this
+// picks up new code. Slow (image build) → uses the long create timeout; the Portal
+// calls it fire-and-forget so the browser doesn't wait.
+func (a *Agent) handleCellRebuild(w http.ResponseWriter, r *http.Request) {
+	project := r.PathValue("project")
+	if !validProject(project) {
+		writeErr(w, http.StatusBadRequest, "invalid project name")
+		return
+	}
+	lock := a.projectLock(project)
+	lock.Lock()
+	defer lock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), createTimeout)
+	defer cancel()
+
+	out, err := a.compose(ctx, project, "up", "-d", "--build")
+	if err != nil {
+		slog.Warn("cell-agent rebuild failed", "project", project, "err", firstLine(err.Error()))
+		writeErr(w, http.StatusBadGateway, "docker compose up --build failed: "+firstLine(out+" "+err.Error()))
+		return
+	}
+	slog.Info("cell-agent rebuild ok", "project", project)
+	writeJSON(w, http.StatusOK, map[string]any{"project": project, "action": "rebuild", "running": true})
+}
+
 // handleCellDown tears a cell fully down: `docker compose down -v` (stop + remove
 // containers, networks AND volumes), then removes the agent-rendered .env.<project>
 // and its state entry so the port/project frees up. Used by the Portal's one-shot
