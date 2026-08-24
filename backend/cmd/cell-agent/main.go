@@ -57,6 +57,7 @@ func main() {
 	mux.HandleFunc("POST /agent/v1/cells/{project}/start", a.auth(a.handleCellStart))
 	mux.HandleFunc("POST /agent/v1/cells/{project}/stop", a.auth(a.handleCellStop))
 	mux.HandleFunc("POST /agent/v1/cells/{project}/restart", a.auth(a.handleCellRestart))
+	mux.HandleFunc("POST /agent/v1/cells/{project}/down", a.auth(a.handleCellDown))
 
 	srv := &http.Server{
 		Addr:              cfg.BindAddr,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -96,6 +97,48 @@ func (a *Agent) handleCellStop(w http.ResponseWriter, r *http.Request) {
 
 func (a *Agent) handleCellRestart(w http.ResponseWriter, r *http.Request) {
 	a.lifecycle(w, r, "restart", []string{"restart"}, false)
+}
+
+// handleCellDown tears a cell fully down: `docker compose down -v` (stop + remove
+// containers, networks AND volumes), then removes the agent-rendered .env.<project>
+// and its state entry so the port/project frees up. Used by the Portal's one-shot
+// delete — a stopped-but-present cell would keep self-registering. Destructive by
+// design (the Portal confirms + guards); still a FIXED verb against a validated
+// cellN project.
+func (a *Agent) handleCellDown(w http.ResponseWriter, r *http.Request) {
+	project := r.PathValue("project")
+	if !validProject(project) {
+		writeErr(w, http.StatusBadRequest, "invalid project name")
+		return
+	}
+
+	lock := a.projectLock(project)
+	lock.Lock()
+	defer lock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), composeTimeout)
+	defer cancel()
+
+	// Resolve the env file BEFORE `down` removes nothing on disk — down still needs
+	// it for interpolation. Capture it now, delete after a successful teardown.
+	envPath := a.envPathFor(project)
+
+	out, err := a.compose(ctx, project, "down", "-v")
+	if err != nil {
+		slog.Warn("cell-agent down failed", "project", project, "err", firstLine(err.Error()))
+		writeErr(w, http.StatusBadGateway, "docker compose down failed: "+firstLine(out+" "+err.Error()))
+		return
+	}
+
+	// Best-effort cleanup: drop the rendered env + state so nothing lingers.
+	if envPath != "" && strings.HasPrefix(envPath, a.cfg.DeployDir) {
+		if rmErr := os.Remove(envPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			slog.Warn("cell-agent down: env cleanup failed", "project", project, "err", rmErr)
+		}
+	}
+	_ = a.state.Delete(project)
+	slog.Info("cell-agent down ok", "project", project)
+	writeJSON(w, http.StatusOK, map[string]any{"project": project, "action": "down"})
 }
 
 // lifecycle runs a FIXED compose verb against a validated project, serialized
