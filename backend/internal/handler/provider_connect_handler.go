@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"math"
 	neturl "net/url"
 	"sort"
@@ -608,10 +609,40 @@ func (h *ProviderConnectHandler) CompleteAuthorization(c *gin.Context) {
 		State:     state,
 	})
 	if err != nil {
-		response.ErrorFrom(c, err)
+		// Log the raw error internally (may contain the egress proxy IP / upstream
+		// detail); return a CATEGORIZED, SAFE reason code to the Portal — no internal
+		// info leaks to the provider-facing UI.
+		slog.Warn("connect complete failed", "session", sessionID, "err", err.Error())
+		response.ErrorFrom(c, classifyOnboardingError(err))
 		return
 	}
 	response.Success(c, result)
+}
+
+// classifyOnboardingError maps a raw OAuth-completion error into a SAFE reason
+// code the Portal/UI can act on — no IP, URL, or internal detail. Classification
+// is by error-signature substrings (proxy checked first: a proxy timeout/refusal
+// otherwise looks like a generic upstream failure). The raw error is logged
+// separately for operators.
+func classifyOnboardingError(err error) *infraerrors.ApplicationError {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "socks") || strings.Contains(msg, "proxy"):
+		// includes "username/password authentication failed", proxy refused/timeout.
+		return infraerrors.ServiceUnavailable("EGRESS_PROXY_FAILED", "egress proxy failed")
+	case strings.Contains(msg, "invalid_grant") || strings.Contains(msg, "invalid grant") ||
+		strings.Contains(msg, "invalid_code") || strings.Contains(msg, "expired"):
+		return infraerrors.BadRequest("AUTH_CODE_INVALID", "authorization code invalid or expired")
+	case strings.Contains(msg, "429") || strings.Contains(msg, "too many requests") ||
+		strings.Contains(msg, "rate limit"):
+		return infraerrors.TooManyRequests("UPSTREAM_RATE_LIMITED", "upstream rate limited")
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "connection refused") || strings.Contains(msg, "dial tcp") ||
+		strings.Contains(msg, "context deadline") || strings.Contains(msg, "i/o timeout"):
+		return infraerrors.ServiceUnavailable("UPSTREAM_UNREACHABLE", "upstream unreachable")
+	default:
+		return infraerrors.ServiceUnavailable("AUTH_COMPLETE_FAILED", "authorization failed")
+	}
 }
 
 // extractConnectCodeState 从"裸 code / 整条回调 URL"里抽出 code(和 state)。
