@@ -98,10 +98,14 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 	// 接入即默认配置(#90-A1):在既有 pacing/会话默认之上,叠加平台默认——拦截预热
 	// (省 token)+ 临时不可调度规则(命中即临时绕开坏号,请求侧自愈)。仅 anthropic
 	// 预置(关键词按 Anthropic 响应体英文串);其它平台留给「每账号配置编辑器」(#90-B)。
-	// TLS 指纹 / 会话 ID 伪装属反封面(业务方自负),本项目不设,见 helper 内占位。
+	// 护号:铸号即默认开启 TLS 指纹伪装(不绑 profile → ResolveTLSProfile 返回空
+	// Profile → dialer 用内置真 Claude Code 默认指纹 JA3 44f88fca / ALPN http/1.1)。
+	// 仅 Anthropic OAuth/SetupToken 生效(IsTLSFingerprintEnabled 门控),其它平台
+	// 该键无副作用。会话 ID 伪装仍未设。
 	extra := map[string]any{
-		"pacing_mode":  defaultMode,
-		"max_sessions": profile.MaxSessions,
+		"pacing_mode":            defaultMode,
+		"max_sessions":           profile.MaxSessions,
+		"enable_tls_fingerprint": true,
 	}
 	creds := normalizeJSONMap(in.Credentials)
 	extraDefaults, credDefaults := defaultProviderAccountConfig(in.Platform)
