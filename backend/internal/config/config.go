@@ -485,6 +485,10 @@ type EdgeForwardConfig struct {
 	CellURL string   `mapstructure:"cell_url" yaml:"cell_url"` // 静态 cell 基址(RegistryURL 为空时用;有 Registry 时作兜底候选)
 	Key     string   `mapstructure:"key" yaml:"key"`           // cell 接受的消费者 key(Authorization: Bearer)
 	Groups  []string `mapstructure:"groups" yaml:"groups"`     // 要转发的组 slug 列表;空=不转发
+	// GroupLanes:消费者组 slug → 工作道(normal|batch|distillation)映射,决定该组请求
+	// 只路由到对应道的 cell(护号:蒸馏/批量严格隔离)。未映射的组 → normal。
+	// env: EDGE_FORWARD_GROUP_LANES,格式 "slug:lane,slug:lane"。空=全部按 normal(行为不变)。
+	GroupLanes map[string]string `mapstructure:"group_lanes" yaml:"group_lanes"`
 	// P3-2 动态选路:配了 RegistryURL 就周期性从 Portal 拉可路由 cell 列表(按健康分
 	// 降序),按分数选最优并在传输失败时顺位转移;为空则退回静态单 CellURL(旧行为)。
 	RegistryURL    string `mapstructure:"registry_url" yaml:"registry_url"`       // Portal routable 端点,如 https://portal-api/internal/cells/routable
@@ -2001,6 +2005,27 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 			}
 		}
 		cfg.EdgeForward.Groups = groups
+	}
+	// EDGE_FORWARD_GROUP_LANES:消费者组 slug → 工作道映射,如 "coding:normal,distill:distillation"。
+	// 浅解析(仅拆分,不规范化 lane —— 规范化是中间件 normalizeLane 的单一职责);畸形项 warn 跳过。
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_GROUP_LANES")); v != "" {
+		m := make(map[string]string)
+		for _, p := range strings.Split(v, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			kv := strings.SplitN(p, ":", 2)
+			slug := strings.TrimSpace(kv[0])
+			if slug == "" || len(kv) != 2 || strings.TrimSpace(kv[1]) == "" {
+				slog.Warn("EDGE_FORWARD_GROUP_LANES 项格式应为 slug:lane,已忽略", "item", p)
+				continue
+			}
+			m[slug] = strings.TrimSpace(kv[1])
+		}
+		if len(m) > 0 {
+			cfg.EdgeForward.GroupLanes = m
+		}
 	}
 	// PROVIDER_CONNECT_* 环境变量兜底。这些是嵌套键(provider_connect.*)，viper
 	// AutomaticEnv 对未在 config 文件出现的嵌套键不会绑定；EDGE_MODE cell 走

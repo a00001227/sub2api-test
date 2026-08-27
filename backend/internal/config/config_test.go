@@ -281,6 +281,33 @@ func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadEdgeForwardGroupLanesFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	// 含畸形项:foo(无冒号)、:normal(空 slug)、bar:(空 lane)应被跳过,有效项保留。
+	t.Setenv("EDGE_FORWARD_GROUP_LANES", "coding:normal, distill:distillation ,foo,:normal,bar:")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	gl := cfg.EdgeForward.GroupLanes
+	if len(gl) != 2 {
+		t.Fatalf("应只解析出 2 个有效映射; got %d: %+v", len(gl), gl)
+	}
+	if gl["coding"] != "normal" {
+		t.Fatalf("coding 应映射 normal; got %q", gl["coding"])
+	}
+	// lane 值仅浅解析(去空格),不在此层规范化 —— 规范化是中间件 normalizeLane 的职责。
+	if gl["distill"] != "distillation" {
+		t.Fatalf("distill 应映射 distillation; got %q", gl["distill"])
+	}
+	for _, bad := range []string{"foo", "", "bar"} {
+		if _, ok := gl[bad]; ok {
+			t.Fatalf("畸形项 %q 不应进入映射", bad)
+		}
+	}
+}
+
 func TestLoadWeChatConnectConfigFromLegacyEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("WECHAT_OAUTH_OPEN_APP_ID", "wx-open-app")

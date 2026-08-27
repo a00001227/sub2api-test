@@ -56,7 +56,7 @@ func engineWithHandler(resolver cellResolver, groupSlug string) *gin.Engine {
 			}
 			c.Next()
 		},
-		newEdgeForwardHandler(resolver, groupSet, "cellkey", zeroRng, nil, nil, nil),
+		newEdgeForwardHandler(resolver, groupSet, nil, "cellkey", zeroRng, nil, nil, nil),
 		func(c *gin.Context) {
 			c.Header("X-Handled-By", "local")
 			c.String(http.StatusOK, "local-ok")
@@ -129,8 +129,69 @@ func TestStaticResolver_IsPoolNotFallback(t *testing.T) {
 	if len(s.poolCandidates()) != 1 || s.poolCandidates()[0].reputation != 50 {
 		t.Fatalf("静态单 cell 应是池、base 50; got %+v", s.poolCandidates())
 	}
+	if s.poolCandidates()[0].lane != laneNormal {
+		t.Fatalf("静态单 cell 应视为 normal 道; got %q", s.poolCandidates()[0].lane)
+	}
 	if s.fallback() != nil {
 		t.Fatalf("静态模式无独立 fallback")
+	}
+}
+
+func TestNormalizeLane(t *testing.T) {
+	cases := map[string]string{
+		"":             laneNormal,
+		"   ":          laneNormal,
+		"NORMAL":       laneNormal,
+		"normal":       laneNormal,
+		"batch":        laneBatch,
+		"  Batch ":     laneBatch,
+		"distillation": laneDistillation,
+		"DISTILLATION": laneDistillation,
+		"garbage":      laneNormal, // 未知 → normal(fail-safe)
+	}
+	for in, want := range cases {
+		if got := normalizeLane(in); got != want {
+			t.Fatalf("normalizeLane(%q)=%q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFilterByLane(t *testing.T) {
+	pool := []cellCandidate{
+		{url: mustURL(t, "http://n"), lane: laneNormal},
+		{url: mustURL(t, "http://b"), lane: laneBatch},
+		{url: mustURL(t, "http://d"), lane: laneDistillation},
+		{url: mustURL(t, "http://x"), lane: ""}, // 空 → 视为 normal
+	}
+	if got := urlStrings(candURLs(filterByLane(pool, laneDistillation))); strings.Join(got, ",") != "http://d" {
+		t.Fatalf("distillation 过滤应只留 d; got %v", got)
+	}
+	if got := candURLs(filterByLane(pool, laneNormal)); len(got) != 2 {
+		t.Fatalf("normal 过滤应含 n + 空道 x(共 2); got %d", len(got))
+	}
+	if got := candURLs(filterByLane(pool, laneBatch)); len(got) != 1 || got[0].String() != "http://b" {
+		t.Fatalf("batch 过滤应只留 b; got %v", urlStrings(got))
+	}
+}
+
+// candURLs 抽出候选的 URL 便于断言。
+func candURLs(cs []cellCandidate) []*url.URL {
+	out := make([]*url.URL, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.url)
+	}
+	return out
+}
+
+// 陈旧的跨道会话绑定绝不能把消费者钉到别道 cell:order 已按道过滤,moveToFront 找不到
+// 该 cell(idx=-1)→ 忽略。这是「亲和不跨道」的结构性保证。
+func TestAffinity_DoesNotPinAcrossLane(t *testing.T) {
+	normal := cellCandidate{url: mustURL(t, "http://n"), reputation: 50, lane: laneNormal}
+	distill := cellCandidate{url: mustURL(t, "http://d"), reputation: 50, lane: laneDistillation}
+	order := weightedOrder(filterByLane([]cellCandidate{normal, distill}, laneDistillation), zeroRng)
+	order = moveToFront(order, normal.url) // 上一轮 normal 会话遗留的绑定
+	if len(order) != 1 || order[0].String() != "http://d" {
+		t.Fatalf("跨道陈旧绑定不应把消费者钉到 normal cell; got %v", urlStrings(order))
 	}
 }
 
@@ -241,5 +302,40 @@ func TestStartRegistryRefresh_PopulatesFromPortal(t *testing.T) {
 	}
 	if gotAuth != "Bearer tok" {
 		t.Fatalf("应带内部 token; got %q", gotAuth)
+	}
+}
+
+// Portal routable 的 type 字段 → 候选的 lane;缺 type 的 cell 归一为 normal(向后兼容旧 Portal)。
+func TestStartRegistryRefresh_ParsesLane(t *testing.T) {
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cells":[` +
+			`{"baseUrl":"http://d","reputation":50,"type":"distillation"},` +
+			`{"baseUrl":"http://n","reputation":50}]}`)) // 无 type → normal
+	}))
+	defer portal.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &dynamicResolver{}
+	startRegistryRefresh(ctx, d, portal.URL, "", time.Hour)
+
+	var pool []cellCandidate
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pool = d.poolCandidates(); len(pool) == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	byURL := map[string]string{}
+	for _, c := range pool {
+		byURL[c.url.String()] = c.lane
+	}
+	if byURL["http://d"] != laneDistillation {
+		t.Fatalf("type=distillation 应解析为 distillation 道; got %q", byURL["http://d"])
+	}
+	if byURL["http://n"] != laneNormal {
+		t.Fatalf("缺 type 应归一为 normal; got %q", byURL["http://n"])
 	}
 }

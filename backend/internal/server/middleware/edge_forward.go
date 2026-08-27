@@ -99,12 +99,31 @@ func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelA
 			slog.Info("edge_forward: 模型白名单启用(仅转发 pricing_models 启用模型)")
 		}
 	}
-	return newEdgeForwardHandler(resolver, groupSet, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture)
+	// 组→工作道映射(护号需求侧路由):构造期规范化一次,避免每请求重复归一。
+	// 防呆:原值非空、非 normal,却被归一成 normal(多半是 lane 拼错)→ warn —— 否则
+	// 会把一个本应隔离的组静默路由到好号 cell。
+	groupLanes := make(map[string]string, len(cfg.GroupLanes))
+	for slug, lane := range cfg.GroupLanes {
+		s := strings.TrimSpace(slug)
+		if s == "" {
+			continue
+		}
+		nl := normalizeLane(lane)
+		if raw := strings.TrimSpace(lane); nl == laneNormal && raw != "" && !strings.EqualFold(raw, laneNormal) {
+			slog.Warn("edge_forward: 未识别的 lane,已按 normal 处理(护号风险,请检查 EDGE_FORWARD_GROUP_LANES)", "group", s, "lane", lane)
+		}
+		groupLanes[s] = nl
+	}
+	if len(groupLanes) > 0 {
+		slog.Info("edge_forward: 组→工作道路由启用", "group_lanes", groupLanes)
+	}
+
+	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture)
 }
 
 // newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
 // 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
-func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc) gin.HandlerFunc {
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	client := &http.Client{Transport: http.DefaultTransport}
 	// 会话→cell 亲和(P3-3c),处理函数生命周期内共享。
@@ -131,25 +150,36 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			c.Next()
 			return
 		}
-		slog.Debug("edge_forward: 命中,转发到 cell", "path", c.Request.URL.Path, "key_group_slug", apiKey.Group.Slug)
+		// 消费者工作道(护号):由组 slug 映射决定;未映射 → normal。
+		consumerLane := laneNormal
+		if l, ok := groupLanes[apiKey.Group.Slug]; ok {
+			consumerLane = l // 构造期已归一
+		}
+		slog.Debug("edge_forward: 命中,转发到 cell", "path", c.Request.URL.Path, "key_group_slug", apiKey.Group.Slug, "lane", consumerLane)
 
-		// 加权随机选序(P3-3b):按信誉分对存活池加权随机排序,首个 = 加权首选,其余
-		// 顺位作失败转移候选;静态兜底 append 到最后(仅动态池全空/全挂时才会用到)。
-		order := weightedOrder(resolver.poolCandidates(), rng)
-		if fb := resolver.fallback(); fb != nil {
-			present := false
-			for _, u := range order {
-				if u.String() == fb.String() {
-					present = true
-					break
+		// 严格隔离:先按工作道过滤候选,再做加权随机 —— 使信誉权重只在同道内比较,
+		// 且非 normal 消费者绝不落到别道 cell。加权随机选序(P3-3b):首个 = 加权首选,
+		// 其余顺位作失败转移候选。
+		order := weightedOrder(filterByLane(resolver.poolCandidates(), consumerLane), rng)
+		// 静态兜底仅对 normal 消费者生效(静态 cell 视为 normal 道):蒸馏/批量消费者
+		// 绝不回落到它。
+		if consumerLane == laneNormal {
+			if fb := resolver.fallback(); fb != nil {
+				present := false
+				for _, u := range order {
+					if u.String() == fb.String() {
+						present = true
+						break
+					}
 				}
-			}
-			if !present {
-				order = append(order, fb)
+				if !present {
+					order = append(order, fb)
+				}
 			}
 		}
 		if len(order) == 0 {
-			slog.Error("edge_forward: 无可路由 cell", "path", c.Request.URL.Path)
+			// 对应工作道无可用 cell → 502,绝不跨道、绝不本地执行(fail-closed 护号)。
+			slog.Error("edge_forward: 无可路由 cell", "path", c.Request.URL.Path, "lane", consumerLane)
 			writeEdgeError(c)
 			return
 		}

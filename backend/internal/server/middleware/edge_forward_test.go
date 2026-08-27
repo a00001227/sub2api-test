@@ -235,7 +235,7 @@ func TestEdgeForward_DoesNotLeakConsumerKey(t *testing.T) {
 func newEdgeForwardEngineWithResolver(resolver cellResolver, groupSlug, key string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, key, func() float64 { return 0 }, nil, nil, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, nil, key, func() float64 { return 0 }, nil, nil, nil)
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			if groupSlug != "" {
@@ -247,6 +247,145 @@ func newEdgeForwardEngineWithResolver(resolver cellResolver, groupSlug, key stri
 		func(c *gin.Context) { c.String(http.StatusOK, "local-ok") },
 	)
 	return e
+}
+
+// newEdgeForwardEngineWithLanes:带「组→工作道」映射的引擎,groupSet 含消费者组,
+// 便于测按道路由(护号)。zeroRng → 候选顺序=过滤后池顺序。
+func newEdgeForwardEngineWithLanes(resolver cellResolver, groupSlug, key string, groupLanes map[string]string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{groupSlug: {}}, groupLanes, key, func() float64 { return 0 }, nil, nil, nil)
+	e.POST("/v1/messages",
+		func(c *gin.Context) {
+			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: groupSlug}})
+			c.Next()
+		},
+		h,
+		func(c *gin.Context) { c.Header("X-Handled-By", "local"); c.String(http.StatusOK, "local-ok") },
+	)
+	return e
+}
+
+// 蒸馏消费者只应命中蒸馏 cell —— 即便好号 cell 信誉更高也绝不跨道(护号)。
+func TestEdgeForward_DistillationConsumerOnlyDrawsDistillationCells(t *testing.T) {
+	var normalHit bool
+	normalCell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		normalHit = true
+		_, _ = w.Write([]byte("normal-ok"))
+	}))
+	defer normalCell.Close()
+	distillCell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Handled-By", "distill")
+		_, _ = w.Write([]byte("distill-ok"))
+	}))
+	defer distillCell.Close()
+
+	resolver := &dynamicResolver{cached: []cellCandidate{
+		{url: mustURL(t, normalCell.URL), reputation: 90, lane: laneNormal}, // 高信誉好号 cell
+		{url: mustURL(t, distillCell.URL), reputation: 50, lane: laneDistillation},
+	}}
+	e := newEdgeForwardEngineWithLanes(resolver, "distill", "k", map[string]string{"distill": laneDistillation})
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if w.Body.String() != "distill-ok" || w.Header().Get("X-Handled-By") != "distill" {
+		t.Fatalf("蒸馏消费者只应命中蒸馏 cell; got header=%q body=%q", w.Header().Get("X-Handled-By"), w.Body.String())
+	}
+	if normalHit {
+		t.Fatalf("好号 cell 绝不应被蒸馏流量命中(护号)")
+	}
+}
+
+// 未映射的组 → normal:只命中 normal cell,不碰蒸馏 cell。
+func TestEdgeForward_UnmappedGroupIsNormal(t *testing.T) {
+	var distillHit bool
+	distillCell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		distillHit = true
+		_, _ = w.Write([]byte("distill-ok"))
+	}))
+	defer distillCell.Close()
+	normalCell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Handled-By", "normal")
+		_, _ = w.Write([]byte("normal-ok"))
+	}))
+	defer normalCell.Close()
+
+	resolver := &dynamicResolver{cached: []cellCandidate{
+		{url: mustURL(t, normalCell.URL), reputation: 50, lane: laneNormal},
+		{url: mustURL(t, distillCell.URL), reputation: 50, lane: laneDistillation},
+	}}
+	// 消费者组 "claude" 不在映射里 → normal。
+	e := newEdgeForwardEngineWithLanes(resolver, "claude", "k", map[string]string{"distill": laneDistillation})
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if w.Body.String() != "normal-ok" {
+		t.Fatalf("未映射组应走 normal cell; got body=%q", w.Body.String())
+	}
+	if distillHit {
+		t.Fatalf("normal 消费者不应命中蒸馏 cell")
+	}
+}
+
+// 对应道无可用 cell → 502,绝不跨道、绝不回落本地(fail-closed 护号)。
+func TestEdgeForward_EmptyAfterFilterReturns502NoLocal(t *testing.T) {
+	var normalHit bool
+	normalCell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		normalHit = true
+		_, _ = w.Write([]byte("normal-ok"))
+	}))
+	defer normalCell.Close()
+
+	// 池里只有 normal cell,消费者是蒸馏 → 过滤后为空。
+	resolver := &dynamicResolver{cached: []cellCandidate{
+		{url: mustURL(t, normalCell.URL), reputation: 50, lane: laneNormal},
+	}}
+	e := newEdgeForwardEngineWithLanes(resolver, "distill", "k", map[string]string{"distill": laneDistillation})
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "upstream_error") {
+		t.Fatalf("蒸馏无对应 cell 应 502 upstream_error; got code=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Header().Get("X-Handled-By") == "local" || strings.Contains(w.Body.String(), "local-ok") {
+		t.Fatalf("绝不应回落本地; body=%q", w.Body.String())
+	}
+	if normalHit {
+		t.Fatalf("蒸馏流量绝不应落到 normal cell(护号)")
+	}
+}
+
+// 静态兜底仅对 normal 消费者生效:蒸馏消费者绝不回落到静态(normal)cell。
+func TestEdgeForward_StaticFallbackNormalOnly(t *testing.T) {
+	var fbHits int
+	fb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fbHits++
+		w.Header().Set("X-Handled-By", "fallback")
+		_, _ = w.Write([]byte("fb-ok"))
+	}))
+	defer fb.Close()
+
+	// 空动态池 + 静态兜底。normal 消费者 → 命中兜底。
+	rN := &dynamicResolver{static: mustURL(t, fb.URL)}
+	eN := newEdgeForwardEngineWithLanes(rN, "gnorm", "k", map[string]string{"gnorm": laneNormal})
+	wN := httptest.NewRecorder()
+	eN.ServeHTTP(wN, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+	if wN.Body.String() != "fb-ok" || wN.Header().Get("X-Handled-By") != "fallback" {
+		t.Fatalf("normal 消费者应回落静态兜底; got header=%q body=%q", wN.Header().Get("X-Handled-By"), wN.Body.String())
+	}
+	hitsAfterNormal := fbHits
+
+	// 蒸馏消费者 → 502,兜底不再被命中。
+	rD := &dynamicResolver{static: mustURL(t, fb.URL)}
+	eD := newEdgeForwardEngineWithLanes(rD, "gdist", "k", map[string]string{"gdist": laneDistillation})
+	wD := httptest.NewRecorder()
+	eD.ServeHTTP(wD, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+	if wD.Code != http.StatusBadGateway {
+		t.Fatalf("蒸馏消费者无对应 cell 应 502; got %d", wD.Code)
+	}
+	if fbHits != hitsAfterNormal {
+		t.Fatalf("蒸馏消费者绝不应回落到静态(normal)兜底; fbHits 从 %d 变到 %d", hitsAfterNormal, fbHits)
+	}
 }
 
 // cell 返回 503「no available accounts」(选号前失败,没调上游)→ 中央应视同该
@@ -354,7 +493,7 @@ func TestEdgeForward_ModelWhitelist(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, "k", func() float64 { return 0 }, nil, allow, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, nil, "k", func() float64 { return 0 }, nil, allow, nil)
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})

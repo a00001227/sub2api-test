@@ -11,11 +11,44 @@ import (
 	"time"
 )
 
+// 工作道(risk tier / 号池),对齐 Portal cells/lane.ts。一 cell 一道:蒸馏=可牺牲池
+// (护号,绝不碰好号),batch=批量池,normal=好号池。未知/空 → normal(fail-safe)。
+const (
+	laneNormal       = "normal"
+	laneBatch        = "batch"
+	laneDistillation = "distillation"
+)
+
+// normalizeLane 归一工作道;是全链路的单一真源(config 只做浅解析,规范化都走这里)。
+func normalizeLane(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case laneBatch:
+		return laneBatch
+	case laneDistillation:
+		return laneDistillation
+	default:
+		return laneNormal
+	}
+}
+
 // cellCandidate 是一个可路由 cell:地址 + 信誉分(DeRouter 口径,来自链上结算历史,
-// 中央选 cell 的 40% 权重)。
+// 中央选 cell 的 40% 权重)+ 工作道(消费者按道过滤,一 cell 一道)。
 type cellCandidate struct {
 	url        *url.URL
 	reputation int
+	lane       string // normal|batch|distillation;"" 视为 normal
+}
+
+// filterByLane 只保留工作道匹配的 cell。严格隔离:非 normal 消费者绝不跨道 —— 过滤在
+// 加权抽样之前,使信誉权重只在同道内比较(高信誉好号 cell 不会盖过蒸馏 cell)。
+func filterByLane(pool []cellCandidate, want string) []cellCandidate {
+	out := make([]cellCandidate, 0, len(pool))
+	for _, c := range pool {
+		if normalizeLane(c.lane) == want {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // cellResolver 提供转发候选。
@@ -33,7 +66,8 @@ func (s *staticResolver) poolCandidates() []cellCandidate {
 	if s.target == nil {
 		return nil
 	}
-	return []cellCandidate{{url: s.target, reputation: 50}} // 无信誉信息 → base 50
+	// 静态单 cell 视为 normal 道(蒸馏/批量消费者绝不回落到它)。无信誉信息 → base 50。
+	return []cellCandidate{{url: s.target, reputation: 50, lane: laneNormal}}
 }
 func (s *staticResolver) fallback() *url.URL { return nil }
 
@@ -125,6 +159,7 @@ type routableResponse struct {
 	Cells []struct {
 		BaseURL    string `json:"baseUrl"`
 		Reputation int    `json:"reputation"`
+		Type       string `json:"type"` // 工作道;旧 Portal 不发 → "" → 归一为 normal
 	} `json:"cells"`
 }
 
@@ -161,7 +196,7 @@ func startRegistryRefresh(ctx context.Context, d *dynamicResolver, routableURL, 
 			if perr != nil || u.Scheme == "" || u.Host == "" {
 				continue
 			}
-			cells = append(cells, cellCandidate{url: u, reputation: c.Reputation})
+			cells = append(cells, cellCandidate{url: u, reputation: c.Reputation, lane: normalizeLane(c.Type)})
 		}
 		d.set(cells)
 		slog.Debug("edge_forward: routable cells 刷新", "count", len(cells))
