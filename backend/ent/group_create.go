@@ -133,6 +133,20 @@ func (_c *GroupCreate) SetNillableIsExclusive(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetLane sets the "lane" field.
+func (_c *GroupCreate) SetLane(v string) *GroupCreate {
+	_c.mutation.SetLane(v)
+	return _c
+}
+
+// SetNillableLane sets the "lane" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableLane(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetLane(*v)
+	}
+	return _c
+}
+
 // SetStatus sets the "status" field.
 func (_c *GroupCreate) SetStatus(v string) *GroupCreate {
 	_c.mutation.SetStatus(v)
@@ -658,6 +672,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
 	}
+	if _, ok := _c.mutation.Lane(); !ok {
+		v := group.DefaultLane
+		_c.mutation.SetLane(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := group.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -763,6 +781,14 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
+	}
+	if _, ok := _c.mutation.Lane(); !ok {
+		return &ValidationError{Name: "lane", err: errors.New(`ent: missing required field "Group.lane"`)}
+	}
+	if v, ok := _c.mutation.Lane(); ok {
+		if err := group.LaneValidator(v); err != nil {
+			return &ValidationError{Name: "lane", err: fmt.Errorf(`ent: validator failed for field "Group.lane": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "Group.status"`)}
@@ -899,6 +925,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 		_node.IsExclusive = value
+	}
+	if value, ok := _c.mutation.Lane(); ok {
+		_spec.SetField(group.FieldLane, field.TypeString, value)
+		_node.Lane = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
@@ -1273,6 +1303,18 @@ func (u *GroupUpsert) SetIsExclusive(v bool) *GroupUpsert {
 // UpdateIsExclusive sets the "is_exclusive" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateIsExclusive() *GroupUpsert {
 	u.SetExcluded(group.FieldIsExclusive)
+	return u
+}
+
+// SetLane sets the "lane" field.
+func (u *GroupUpsert) SetLane(v string) *GroupUpsert {
+	u.Set(group.FieldLane, v)
+	return u
+}
+
+// UpdateLane sets the "lane" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateLane() *GroupUpsert {
+	u.SetExcluded(group.FieldLane)
 	return u
 }
 
@@ -1906,6 +1948,20 @@ func (u *GroupUpsertOne) SetIsExclusive(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateIsExclusive() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetLane sets the "lane" field.
+func (u *GroupUpsertOne) SetLane(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLane(v)
+	})
+}
+
+// UpdateLane sets the "lane" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateLane() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLane()
 	})
 }
 
@@ -2782,6 +2838,20 @@ func (u *GroupUpsertBulk) SetIsExclusive(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateIsExclusive() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetLane sets the "lane" field.
+func (u *GroupUpsertBulk) SetLane(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLane(v)
+	})
+}
+
+// UpdateLane sets the "lane" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateLane() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLane()
 	})
 }
 

@@ -151,6 +151,20 @@ func (_u *GroupUpdate) SetNillableIsExclusive(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetLane sets the "lane" field.
+func (_u *GroupUpdate) SetLane(v string) *GroupUpdate {
+	_u.mutation.SetLane(v)
+	return _u
+}
+
+// SetNillableLane sets the "lane" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableLane(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetLane(*v)
+	}
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *GroupUpdate) SetStatus(v string) *GroupUpdate {
 	_u.mutation.SetStatus(v)
@@ -946,6 +960,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "slug", err: fmt.Errorf(`ent: validator failed for field "Group.slug": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.Lane(); ok {
+		if err := group.LaneValidator(v); err != nil {
+			return &ValidationError{Name: "lane", err: fmt.Errorf(`ent: validator failed for field "Group.lane": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := group.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Group.status": %w`, err)}
@@ -1013,6 +1032,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Lane(); ok {
+		_spec.SetField(group.FieldLane, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
@@ -1591,6 +1613,20 @@ func (_u *GroupUpdateOne) SetIsExclusive(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableIsExclusive(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetIsExclusive(*v)
+	}
+	return _u
+}
+
+// SetLane sets the "lane" field.
+func (_u *GroupUpdateOne) SetLane(v string) *GroupUpdateOne {
+	_u.mutation.SetLane(v)
+	return _u
+}
+
+// SetNillableLane sets the "lane" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableLane(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetLane(*v)
 	}
 	return _u
 }
@@ -2403,6 +2439,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "slug", err: fmt.Errorf(`ent: validator failed for field "Group.slug": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.Lane(); ok {
+		if err := group.LaneValidator(v); err != nil {
+			return &ValidationError{Name: "lane", err: fmt.Errorf(`ent: validator failed for field "Group.lane": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := group.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Group.status": %w`, err)}
@@ -2487,6 +2528,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Lane(); ok {
+		_spec.SetField(group.FieldLane, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)

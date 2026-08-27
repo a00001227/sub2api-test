@@ -203,6 +203,7 @@ type CreateGroupInput struct {
 	Platform         string
 	RateMultiplier   float64
 	IsExclusive      bool
+	Lane             string   // 工作道/号池:normal|batch|distillation
 	SubscriptionType string   // standard/subscription
 	DailyLimitUSD    *float64 // 日限额 (USD)
 	WeeklyLimitUSD   *float64 // 周限额 (USD)
@@ -244,6 +245,7 @@ type UpdateGroupInput struct {
 	Platform         string
 	RateMultiplier   *float64 // 使用指针以支持设置为0
 	IsExclusive      *bool
+	Lane             *string // 工作道/号池:normal|batch|distillation
 	Status           string
 	SubscriptionType string   // standard/subscription
 	DailyLimitUSD    *float64 // 日限额 (USD)
@@ -1905,6 +1907,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		Platform:                        platform,
 		RateMultiplier:                  input.RateMultiplier,
 		IsExclusive:                     input.IsExclusive,
+		Lane:                            NormalizeGroupLane(input.Lane),
 		Status:                          StatusActive,
 		SubscriptionType:                subscriptionType,
 		DailyLimitUSD:                   dailyLimit,
@@ -2108,6 +2111,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive
+	}
+	if input.Lane != nil {
+		group.Lane = NormalizeGroupLane(*input.Lane)
 	}
 	if input.Status != "" {
 		group.Status = input.Status

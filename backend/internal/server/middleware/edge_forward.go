@@ -150,10 +150,13 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			c.Next()
 			return
 		}
-		// 消费者工作道(护号):由组 slug 映射决定;未映射 → normal。
-		consumerLane := laneNormal
-		if l, ok := groupLanes[apiKey.Group.Slug]; ok {
-			consumerLane = l // 构造期已归一
+		// 消费者工作道(护号):优先读组自身的 lane(后台可视化、免重启、近实时生效);
+		// 为 normal/空时再退回 env 映射 EDGE_FORWARD_GROUP_LANES(过渡期兼容,迁完可删)。
+		consumerLane := normalizeLane(apiKey.Group.Lane)
+		if consumerLane == laneNormal {
+			if l, ok := groupLanes[apiKey.Group.Slug]; ok {
+				consumerLane = l // 构造期已归一
+			}
 		}
 		slog.Debug("edge_forward: 命中,转发到 cell", "path", c.Request.URL.Path, "key_group_slug", apiKey.Group.Slug, "lane", consumerLane)
 

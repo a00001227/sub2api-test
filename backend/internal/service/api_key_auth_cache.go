@@ -67,6 +67,7 @@ type APIKeyAuthGroupSnapshot struct {
 	Slug                            string   `json:"slug,omitempty"`
 	Platform                        string   `json:"platform"`
 	IsExclusive                     bool     `json:"is_exclusive"`
+	Lane                            string   `json:"lane,omitempty"`
 	Status                          string   `json:"status"`
 	SubscriptionType                string   `json:"subscription_type"`
 	RateMultiplier                  float64  `json:"rate_multiplier"`

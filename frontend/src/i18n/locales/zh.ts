@@ -2316,6 +2316,13 @@ export default {
       unsavedChanges: '有未保存的修改',
       revertChanges: '撤销修改',
       userInfo: '用户信息',
+      lane: {
+        label: '号池（工作道）',
+        hint: '该分组的流量只路由到对应号池的 cell。非「常规」为内部护号池，请勿分配给终端客户分组。',
+        normal: '常规池',
+        batch: '批量池',
+        distillation: '蒸馏池',
+      },
       subscription: {
         title: '订阅设置',
         type: '计费类型',

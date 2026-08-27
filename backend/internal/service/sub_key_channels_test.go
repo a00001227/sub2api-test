@@ -65,6 +65,73 @@ func (s *channelsGroupRepoStub) GetByID(ctx context.Context, id int64) (*Group, 
 	return g, nil
 }
 
+func (s *channelsGroupRepoStub) ListActive(ctx context.Context) ([]Group, error) {
+	out := make([]Group, 0, len(s.groups))
+	for _, g := range s.groups {
+		out = append(out, *g)
+	}
+	return out, nil
+}
+
+// 无订阅的用户桩(GetAvailableGroups 会查订阅)。
+type channelsUserSubRepoStub struct{ UserSubscriptionRepository }
+
+func (channelsUserSubRepoStub) ListActiveByUserID(context.Context, int64) ([]UserSubscription, error) {
+	return nil, nil
+}
+
+// 客户密钥未指定通道时,默认放开面向客户的固定组(proxy+openai);内部号池组(蒸馏)
+// 既不在白名单也不进默认。护号 UX 的核心断言。
+func TestResolveSubKeyGroupsDefaultsToCustomerFacingChannels(t *testing.T) {
+	proxy, openai, distill, main := int64(1), int64(2), int64(3), int64(9)
+	mk := func(id int64, slug string) *Group {
+		return &Group{ID: id, Name: "g", Slug: slug, Platform: "anthropic", Status: StatusActive, Hydrated: true, SubscriptionType: "standard"}
+	}
+	groupRepo := &channelsGroupRepoStub{groups: map[int64]*Group{
+		proxy:   mk(proxy, "proxy"),
+		openai:  mk(openai, "openai"),
+		distill: mk(distill, "distill"), // 内部蒸馏组,slug 不在默认白名单
+		main:    mk(main, "vip"),
+	}}
+	svc := NewAPIKeyService(
+		&channelsKeyRepoStub{},
+		&channelsUserRepoStub{user: &User{ID: 7, Balance: 1000}},
+		groupRepo,
+		channelsUserSubRepoStub{},
+		nil, nil,
+		&config.Config{},
+	)
+
+	mainID := main
+	// opts 完全不带通道 → 走默认。
+	gotMain, allowed, err := svc.resolveSubKeyGroups(context.Background(), &User{ID: 7}, &mainID, CreateSubKeyOptions{})
+	if err != nil {
+		t.Fatalf("resolveSubKeyGroups: %v", err)
+	}
+	if gotMain == nil || *gotMain != main {
+		t.Fatalf("main group = %v, want %d", gotMain, main)
+	}
+	set := map[int64]bool{}
+	for _, id := range allowed {
+		set[id] = true
+	}
+	if len(allowed) != 2 || !set[proxy] || !set[openai] {
+		t.Fatalf("默认通道应为 proxy+openai; got %v", allowed)
+	}
+	if set[distill] {
+		t.Fatalf("内部蒸馏组绝不应进入客户密钥默认通道; got %v", allowed)
+	}
+
+	// 显式传了通道 → 不触发默认(只放开显式那个)。
+	_, allowed2, err := svc.resolveSubKeyGroups(context.Background(), &User{ID: 7}, &mainID, CreateSubKeyOptions{AllowedGroupIDs: []int64{proxy}})
+	if err != nil {
+		t.Fatalf("resolveSubKeyGroups(explicit): %v", err)
+	}
+	if len(allowed2) != 1 || allowed2[0] != proxy {
+		t.Fatalf("显式指定应原样保留、不追加默认; got %v", allowed2)
+	}
+}
+
 func TestUpdateSubKeyChangesChannels(t *testing.T) {
 	mainOld, chanB, chanC := int64(1), int64(2), int64(3)
 	mkGroup := func(id int64) *Group {

@@ -95,6 +95,11 @@ func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
 }
 
+// Lane applies equality check predicate on the "lane" field. It's identical to LaneEQ.
+func Lane(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLane, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldStatus, v))
@@ -608,6 +613,71 @@ func IsExclusiveEQ(v bool) predicate.Group {
 // IsExclusiveNEQ applies the NEQ predicate on the "is_exclusive" field.
 func IsExclusiveNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldIsExclusive, v))
+}
+
+// LaneEQ applies the EQ predicate on the "lane" field.
+func LaneEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLane, v))
+}
+
+// LaneNEQ applies the NEQ predicate on the "lane" field.
+func LaneNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldLane, v))
+}
+
+// LaneIn applies the In predicate on the "lane" field.
+func LaneIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldLane, vs...))
+}
+
+// LaneNotIn applies the NotIn predicate on the "lane" field.
+func LaneNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldLane, vs...))
+}
+
+// LaneGT applies the GT predicate on the "lane" field.
+func LaneGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldLane, v))
+}
+
+// LaneGTE applies the GTE predicate on the "lane" field.
+func LaneGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldLane, v))
+}
+
+// LaneLT applies the LT predicate on the "lane" field.
+func LaneLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldLane, v))
+}
+
+// LaneLTE applies the LTE predicate on the "lane" field.
+func LaneLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldLane, v))
+}
+
+// LaneContains applies the Contains predicate on the "lane" field.
+func LaneContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldLane, v))
+}
+
+// LaneHasPrefix applies the HasPrefix predicate on the "lane" field.
+func LaneHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldLane, v))
+}
+
+// LaneHasSuffix applies the HasSuffix predicate on the "lane" field.
+func LaneHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldLane, v))
+}
+
+// LaneEqualFold applies the EqualFold predicate on the "lane" field.
+func LaneEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldLane, v))
+}
+
+// LaneContainsFold applies the ContainsFold predicate on the "lane" field.
+func LaneContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldLane, v))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

@@ -266,6 +266,54 @@ func newEdgeForwardEngineWithLanes(resolver cellResolver, groupSlug, key string,
 	return e
 }
 
+// newEdgeForwardEngineWithGroupLane:消费者工作道来自组自身的 Group.Lane(D:后台打标签),
+// env 映射为 nil。验证中央改读 Group.Lane 后免 env 也能按池路由。
+func newEdgeForwardEngineWithGroupLane(resolver cellResolver, groupSlug, groupLane, key string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{groupSlug: {}}, nil, key, func() float64 { return 0 }, nil, nil, nil)
+	e.POST("/v1/messages",
+		func(c *gin.Context) {
+			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: groupSlug, Lane: groupLane}})
+			c.Next()
+		},
+		h,
+		func(c *gin.Context) { c.Header("X-Handled-By", "local"); c.String(http.StatusOK, "local-ok") },
+	)
+	return e
+}
+
+// D:消费者工作道直接来自 Group.Lane(后台打的标签),不依赖 env 映射。
+func TestEdgeForward_ConsumerLaneFromGroupField(t *testing.T) {
+	var normalHit bool
+	normalCell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		normalHit = true
+		_, _ = w.Write([]byte("normal-ok"))
+	}))
+	defer normalCell.Close()
+	distillCell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Handled-By", "distill")
+		_, _ = w.Write([]byte("distill-ok"))
+	}))
+	defer distillCell.Close()
+
+	resolver := &dynamicResolver{cached: []cellCandidate{
+		{url: mustURL(t, normalCell.URL), reputation: 90, lane: laneNormal},
+		{url: mustURL(t, distillCell.URL), reputation: 50, lane: laneDistillation},
+	}}
+	// 组自身 Lane=distillation,env 映射为 nil。
+	e := newEdgeForwardEngineWithGroupLane(resolver, "anygroup", "distillation", "k")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if w.Body.String() != "distill-ok" || w.Header().Get("X-Handled-By") != "distill" {
+		t.Fatalf("应按 Group.Lane 路由到蒸馏 cell; got header=%q body=%q", w.Header().Get("X-Handled-By"), w.Body.String())
+	}
+	if normalHit {
+		t.Fatalf("好号 cell 绝不应被命中(Group.Lane=distillation)")
+	}
+}
+
 // 蒸馏消费者只应命中蒸馏 cell —— 即便好号 cell 信誉更高也绝不跨道(护号)。
 func TestEdgeForward_DistillationConsumerOnlyDrawsDistillationCells(t *testing.T) {
 	var normalHit bool

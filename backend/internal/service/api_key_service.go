@@ -981,6 +981,20 @@ type CreateSubKeyOptions struct {
 // maxSubKeyAllowedGroups 白名单上限，防御性限制。
 const maxSubKeyAllowedGroups = 32
 
+// DefaultSubKeyGroupSlugs 客户密钥的默认通道(护号 UX):调用方未指定 allowedGroupIds
+// 时,默认放开这些"面向客户"的固定通道。内部号池组(蒸馏/批量)不在此列 → 既不显示、
+// 也不会被开进客户密钥。以后要调整只改这里(或改成后台设置)。
+var DefaultSubKeyGroupSlugs = []string{"proxy", "openai"}
+
+func isDefaultSubKeyGroupSlug(slug string) bool {
+	for _, s := range DefaultSubKeyGroupSlugs {
+		if s == slug {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveSubKeyGroups 校验并规范化客户密钥的主通道与白名单。
 // 每个分组都要求：存在、启用、且账号主有权绑定（专属组/订阅组按既有规则）。
 func (s *APIKeyService) resolveSubKeyGroups(ctx context.Context, user *User, defaultGroupID *int64, opts CreateSubKeyOptions) (*int64, []int64, error) {
@@ -1026,6 +1040,30 @@ func (s *APIKeyService) resolveSubKeyGroups(ctx context.Context, user *User, def
 		}
 		seen[id] = struct{}{}
 		allowed = append(allowed, id)
+	}
+	// 客户密钥默认通道(护号 UX):调用方完全没指定通道时,默认放开"面向客户"的固定组
+	// (slug ∈ DefaultSubKeyGroupSlugs,现为 proxy+openai)。只纳入该账号可绑定+active
+	// 的组,主通道去重。→ 内部号池组(蒸馏/批量)既不显示也进不去客户密钥,前端也不用
+	// 再暴露「允许的通道」。已显式传通道的调用方不受影响。
+	if len(opts.AllowedGroupIDs) == 0 {
+		avail, err := s.GetAvailableGroups(ctx, user.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range avail {
+			g := avail[i]
+			if !isDefaultSubKeyGroupSlug(g.Slug) {
+				continue
+			}
+			if mainGroupID != nil && g.ID == *mainGroupID {
+				continue
+			}
+			if _, dup := seen[g.ID]; dup {
+				continue
+			}
+			seen[g.ID] = struct{}{}
+			allowed = append(allowed, g.ID)
+		}
 	}
 	return mainGroupID, allowed, nil
 }

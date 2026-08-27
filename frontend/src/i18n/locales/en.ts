@@ -2232,6 +2232,13 @@ export default {
         "Are you sure you want to delete '{name}'? All associated API keys will no longer belong to any group.",
       deleteConfirmSubscription:
         "Are you sure you want to delete subscription group '{name}'? This will invalidate all API keys bound to this subscription and delete all related subscription records. This action cannot be undone.",
+      lane: {
+        label: 'Pool (workload lane)',
+        hint: "This group's traffic routes only to cells of the matching pool. Non-normal pools are internal account-protection pools — do not assign them to end-customer groups.",
+        normal: 'Normal pool',
+        batch: 'Batch pool',
+        distillation: 'Distillation pool',
+      },
       subscription: {
         title: 'Subscription Settings',
         type: 'Billing Type',

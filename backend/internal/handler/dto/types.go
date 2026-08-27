@@ -130,6 +130,9 @@ type Group struct {
 type AdminGroup struct {
 	Group
 
+	// 工作道 / 号池(护号):normal|batch|distillation。中央按此路由该组流量到对应池的 cell。
+	Lane string `json:"lane"`
+
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`
 	ModelRoutingEnabled bool               `json:"model_routing_enabled"`

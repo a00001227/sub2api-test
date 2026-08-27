@@ -52,6 +52,11 @@ func (Group) Fields() []ent.Field {
 			Default(1.0),
 		field.Bool("is_exclusive").
 			Default(false),
+		// 工作道 / 号池(护号):该组的流量路由到哪个 lane 的 cell。
+		// normal|batch|distillation;默认 normal。见 provider-portal cells/lane.ts。
+		field.String("lane").
+			MaxLen(20).
+			Default("normal"),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),

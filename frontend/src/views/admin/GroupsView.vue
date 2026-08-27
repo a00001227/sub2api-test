@@ -597,6 +597,12 @@
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
+            <label class="input-label">{{ t("admin.groups.lane.label") }}</label>
+            <Select v-model="createForm.lane" :options="laneOptions" />
+            <p class="input-hint">{{ t("admin.groups.lane.hint") }}</p>
+          </div>
+
+          <div class="mt-4">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -1894,6 +1900,12 @@
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
+            <label class="input-label">{{ t("admin.groups.lane.label") }}</label>
+            <Select v-model="editForm.lane" :options="laneOptions" />
+            <p class="input-hint">{{ t("admin.groups.lane.hint") }}</p>
+          </div>
+
+          <div class="mt-4">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -3178,6 +3190,13 @@ const subscriptionTypeOptions = computed(() => [
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
 ]);
 
+// 工作道 / 号池(护号):该组流量路由到哪个 lane 的 cell。
+const laneOptions = computed(() => [
+  { value: "normal", label: t("admin.groups.lane.normal") },
+  { value: "batch", label: t("admin.groups.lane.batch") },
+  { value: "distillation", label: t("admin.groups.lane.distillation") },
+]);
+
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
 const fallbackGroupOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
@@ -3350,6 +3369,7 @@ const createForm = reactive({
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
   is_exclusive: false,
+  lane: "normal",
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
@@ -3682,6 +3702,7 @@ const editForm = reactive({
   rate_multiplier: 1.0,
   is_exclusive: false,
   status: "active" as "active" | "inactive",
+  lane: "normal",
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
@@ -3935,6 +3956,7 @@ const closeCreateModal = () => {
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
   createForm.is_exclusive = false;
+  createForm.lane = "normal";
   createForm.subscription_type = "standard";
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
@@ -4062,6 +4084,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.rate_multiplier = group.rate_multiplier;
   editForm.is_exclusive = group.is_exclusive;
   editForm.status = group.status;
+  editForm.lane = group.lane || "normal";
   editForm.subscription_type = group.subscription_type || "standard";
   editForm.daily_limit_usd = group.daily_limit_usd;
   editForm.weekly_limit_usd = group.weekly_limit_usd;
