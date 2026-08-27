@@ -18,6 +18,7 @@ type User struct {
 	AvatarSHA256   string
 	PasswordHash   string
 	Role           string
+	Lane           string // 工作道/号池:normal|batch|distillation(护号焊池)
 	Balance        float64
 	Concurrency    int
 	Status         string

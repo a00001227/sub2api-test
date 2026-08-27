@@ -27,6 +27,8 @@ const (
 	FieldPasswordHash = "password_hash"
 	// FieldRole holds the string denoting the role field in the database.
 	FieldRole = "role"
+	// FieldLane holds the string denoting the lane field in the database.
+	FieldLane = "lane"
 	// FieldBalance holds the string denoting the balance field in the database.
 	FieldBalance = "balance"
 	// FieldConcurrency holds the string denoting the concurrency field in the database.
@@ -198,6 +200,7 @@ var Columns = []string{
 	FieldEmail,
 	FieldPasswordHash,
 	FieldRole,
+	FieldLane,
 	FieldBalance,
 	FieldConcurrency,
 	FieldStatus,
@@ -255,6 +258,10 @@ var (
 	DefaultRole string
 	// RoleValidator is a validator for the "role" field. It is called by the builders before save.
 	RoleValidator func(string) error
+	// DefaultLane holds the default value on creation for the "lane" field.
+	DefaultLane string
+	// LaneValidator is a validator for the "lane" field. It is called by the builders before save.
+	LaneValidator func(string) error
 	// DefaultBalance holds the default value on creation for the "balance" field.
 	DefaultBalance float64
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
@@ -323,6 +330,11 @@ func ByPasswordHash(opts ...sql.OrderTermOption) OrderOption {
 // ByRole orders the results by the role field.
 func ByRole(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRole, opts...).ToFunc()
+}
+
+// ByLane orders the results by the lane field.
+func ByLane(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLane, opts...).ToFunc()
 }
 
 // ByBalance orders the results by the balance field.

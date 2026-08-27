@@ -401,6 +401,12 @@ func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
 		return true
 	}
 	group := apiKey.Group
+	// 护号:用户只能用与自身工作道(lane)相同的组。跨 lane 一律拒绝。此函数在每个
+	// 请求都跑(applyForcedGroupIfAny 解析出生效组之后)→ 同时覆盖 forced-group 路径
+	// 与无前缀路径、账号+客户+历史 key。放在订阅短路之前,订阅组也按 lane 收敛。
+	if service.NormalizeGroupLane(group.Lane) != service.NormalizeGroupLane(apiKey.User.Lane) {
+		return false
+	}
 	if group.IsSubscriptionType() {
 		return true
 	}

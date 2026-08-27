@@ -85,6 +85,7 @@ export interface User {
   oidc_bound?: boolean
   wechat_bound?: boolean
   role: 'admin' | 'user' // User role for authorization
+  lane?: string // 工作道/号池(护号):normal|batch|distillation;用户只能用同 lane 的组
   balance: number // User balance for API usage
   concurrency: number // Allowed concurrent requests
   rpm_limit?: number // User-level RPM cap (0 = unlimited); effective as fallback when group has no rpm_limit
@@ -518,6 +519,7 @@ export interface Group {
   slug?: string // URL 通道标识（如 /{slug}/v1/messages），空 = 未启用
   description: string | null
   platform: GroupPlatform
+  lane?: string // 工作道/号池:normal|batch|distillation(admin 接口返回)
   rate_multiplier: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
   is_exclusive: boolean
@@ -1589,6 +1591,7 @@ export interface UpdateUserRequest {
   username?: string
   notes?: string
   role?: 'admin' | 'user'
+  lane?: string // 工作道/号池:normal|batch|distillation
   balance?: number
   concurrency?: number
   status?: 'active' | 'disabled'

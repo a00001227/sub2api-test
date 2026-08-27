@@ -132,6 +132,42 @@ func TestResolveSubKeyGroupsDefaultsToCustomerFacingChannels(t *testing.T) {
 	}
 }
 
+// 护号:非 normal 用户的 sub-key 默认通道 = 其 lane 的组(GetAvailableGroups 已按
+// lane 过滤,好号组 proxy/openai 对蒸馏用户不可见,故默认落到蒸馏组、且非空)。
+func TestResolveSubKeyGroupsLaneAwareDefaults(t *testing.T) {
+	proxy, distill := int64(1), int64(3)
+	mk := func(id int64, slug, lane string) *Group {
+		return &Group{ID: id, Name: "g", Slug: slug, Lane: lane, Platform: "anthropic", Status: StatusActive, Hydrated: true, SubscriptionType: "standard"}
+	}
+	groupRepo := &channelsGroupRepoStub{groups: map[int64]*Group{
+		proxy:   mk(proxy, "proxy", "normal"),
+		distill: mk(distill, "distill", "distillation"),
+	}}
+	svc := NewAPIKeyService(
+		&channelsKeyRepoStub{},
+		&channelsUserRepoStub{user: &User{ID: 7, Balance: 1000, Lane: "distillation"}},
+		groupRepo,
+		channelsUserSubRepoStub{},
+		nil, nil,
+		&config.Config{},
+	)
+
+	// 蒸馏用户没指定通道 → 默认落到蒸馏组(不是 proxy),且非空。
+	_, allowed, err := svc.resolveSubKeyGroups(context.Background(), &User{ID: 7, Lane: "distillation"}, nil, CreateSubKeyOptions{})
+	if err != nil {
+		t.Fatalf("resolveSubKeyGroups: %v", err)
+	}
+	if len(allowed) != 1 || allowed[0] != distill {
+		t.Fatalf("蒸馏用户默认通道应为蒸馏组; got %v", allowed)
+	}
+
+	// 蒸馏用户显式想用 proxy(好号组)→ 被拒(跨 lane)。
+	_, _, err = svc.resolveSubKeyGroups(context.Background(), &User{ID: 7, Lane: "distillation"}, nil, CreateSubKeyOptions{AllowedGroupIDs: []int64{proxy}})
+	if err == nil {
+		t.Fatalf("蒸馏用户绑好号组应被拒(跨 lane)")
+	}
+}
+
 func TestUpdateSubKeyChangesChannels(t *testing.T) {
 	mainOld, chanB, chanC := int64(1), int64(2), int64(3)
 	mkGroup := func(id int64) *Group {

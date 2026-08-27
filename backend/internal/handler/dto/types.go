@@ -41,6 +41,8 @@ type User struct {
 type AdminUser struct {
 	User
 
+	// 工作道 / 号池(护号):normal|batch|distillation。用户被焊在此池,只能用同池的组。
+	Lane       string     `json:"lane"`
 	Notes      string     `json:"notes"`
 	LastUsedAt *time.Time `json:"last_used_at"`
 	// GroupRates 用户专属分组倍率配置
@@ -292,8 +294,8 @@ type Proxy struct {
 	ExpiryWarnDays int        `json:"expiry_warn_days"`
 	// BindRegion 是入库的绑定分区标签（provider-connect 自动分配用），区别于
 	// ProxyWithAccountCount.Region（运行时 IP 地理探测结果）。空 = 未分区。
-	BindRegion *string `json:"bind_region,omitempty"`
-	MaxBindings int    `json:"max_bindings"`
+	BindRegion  *string `json:"bind_region,omitempty"`
+	MaxBindings int     `json:"max_bindings"`
 }
 
 type ProxyWithAccountCount struct {

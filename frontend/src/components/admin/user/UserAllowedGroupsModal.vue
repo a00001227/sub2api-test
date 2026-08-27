@@ -12,6 +12,22 @@
         </div>
       </div>
 
+      <!-- 用户号池(护号):设了 lane,下面只列同 lane 的组;跨 lane 的组用户用不了 -->
+      <div class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.groups.lane.label') }}</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.lane.hint') }}</p>
+          </div>
+          <select
+            v-model="userLane"
+            class="w-40 shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700"
+          >
+            <option v-for="v in LANE_VALUES" :key="v" :value="v">{{ t('admin.groups.lane.' + v) }}</option>
+          </select>
+        </div>
+      </div>
+
       <!-- 加载状态 -->
       <div v-if="loading" class="flex justify-center py-12">
         <svg class="h-10 w-10 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
@@ -151,8 +167,8 @@
           </div>
         </div>
 
-        <!-- 无分组提示 -->
-        <div v-if="groups.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+        <!-- 无分组提示(该 lane 下无组) -->
+        <div v-if="exclusiveGroupConfigs.length === 0 && publicGroupConfigs.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
           <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700">
             <svg class="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -192,10 +208,14 @@ interface GroupRateConfig {
   groupName: string
   platform: GroupPlatform
   isExclusive: boolean
+  lane: string
   defaultRate: number
   customRate: number | null
   isSelected: boolean
 }
+
+// 工作道/号池选项(护号)。用户设了 lane 后,只列同 lane 的组。
+const LANE_VALUES = ['normal', 'batch', 'distillation'] as const
 
 const props = defineProps<{ show: boolean; user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
@@ -207,13 +227,22 @@ const groupConfigs = ref<GroupRateConfig[]>([])
 const originalGroupRates = ref<Record<number, number>>({}) // 记录原始专属倍率，用于检测删除
 const loading = ref(false)
 const submitting = ref(false)
+const userLane = ref('normal') // 用户号池(护号):只列/只存同 lane 的组
 
-// 分离专属分组和公开分组
-const exclusiveGroups = computed(() => groups.value.filter((g) => g.is_exclusive))
-const publicGroups = computed(() => groups.value.filter((g) => !g.is_exclusive))
+// 分离专属分组和公开分组 —— 只显示与用户 lane 相同的组(护号:蒸馏用户看不到好组)。
+const exclusiveGroups = computed(() =>
+  groups.value.filter((g) => g.is_exclusive && (g.lane || 'normal') === userLane.value)
+)
+const publicGroups = computed(() =>
+  groups.value.filter((g) => !g.is_exclusive && (g.lane || 'normal') === userLane.value)
+)
 
-const exclusiveGroupConfigs = computed(() => groupConfigs.value.filter((c) => c.isExclusive))
-const publicGroupConfigs = computed(() => groupConfigs.value.filter((c) => !c.isExclusive))
+const exclusiveGroupConfigs = computed(() =>
+  groupConfigs.value.filter((c) => c.isExclusive && c.lane === userLane.value)
+)
+const publicGroupConfigs = computed(() =>
+  groupConfigs.value.filter((c) => !c.isExclusive && c.lane === userLane.value)
+)
 
 watch(
   () => props.show,
@@ -227,6 +256,7 @@ watch(
 const load = async () => {
   loading.value = true
   try {
+    userLane.value = props.user?.lane || 'normal'
     const res = await adminAPI.groups.list(1, 1000)
     // 只显示标准类型且活跃的分组
     groups.value = res.items.filter((g) => g.subscription_type === 'standard' && g.status === 'active')
@@ -243,6 +273,7 @@ const load = async () => {
       groupName: g.name,
       platform: g.platform,
       isExclusive: g.is_exclusive,
+      lane: g.lane || 'normal',
       defaultRate: g.rate_multiplier,
       customRate: userGroupRates[g.id] ?? null,
       // 专属分组：检查是否在 allowed_groups 中
@@ -280,8 +311,10 @@ const handleSave = async () => {
   submitting.value = true
 
   try {
-    // 构建 allowed_groups（仅包含专属分组中被勾选的）
-    const allowedGroups = groupConfigs.value.filter((c) => c.isExclusive && c.isSelected).map((c) => c.groupId)
+    // 构建 allowed_groups（仅包含专属分组中被勾选的、且与用户 lane 相同的）
+    const allowedGroups = groupConfigs.value
+      .filter((c) => c.isExclusive && c.isSelected && c.lane === userLane.value)
+      .map((c) => c.groupId)
 
     // 构建 group_rates
     // - 有新专属倍率: 设置为该值
@@ -300,6 +333,7 @@ const handleSave = async () => {
     }
 
     await adminAPI.users.update(props.user.id, {
+      lane: userLane.value,
       allowed_groups: allowedGroups,
       group_rates: Object.keys(groupRates).length > 0 ? groupRates : undefined,
     })

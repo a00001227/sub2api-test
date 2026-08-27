@@ -43369,6 +43369,7 @@ type UserMutation struct {
 	email                         *string
 	password_hash                 *string
 	role                          *string
+	lane                          *string
 	balance                       *float64
 	addbalance                    *float64
 	concurrency                   *int
@@ -43761,6 +43762,42 @@ func (m *UserMutation) OldRole(ctx context.Context) (v string, err error) {
 // ResetRole resets all changes to the "role" field.
 func (m *UserMutation) ResetRole() {
 	m.role = nil
+}
+
+// SetLane sets the "lane" field.
+func (m *UserMutation) SetLane(s string) {
+	m.lane = &s
+}
+
+// Lane returns the value of the "lane" field in the mutation.
+func (m *UserMutation) Lane() (r string, exists bool) {
+	v := m.lane
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLane returns the old "lane" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldLane(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLane is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLane requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLane: %w", err)
+	}
+	return oldValue.Lane, nil
+}
+
+// ResetLane resets all changes to the "lane" field.
+func (m *UserMutation) ResetLane() {
+	m.lane = nil
 }
 
 // SetBalance sets the "balance" field.
@@ -45277,7 +45314,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 24)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -45295,6 +45332,9 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.role != nil {
 		fields = append(fields, user.FieldRole)
+	}
+	if m.lane != nil {
+		fields = append(fields, user.FieldLane)
 	}
 	if m.balance != nil {
 		fields = append(fields, user.FieldBalance)
@@ -45367,6 +45407,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.PasswordHash()
 	case user.FieldRole:
 		return m.Role()
+	case user.FieldLane:
+		return m.Lane()
 	case user.FieldBalance:
 		return m.Balance()
 	case user.FieldConcurrency:
@@ -45422,6 +45464,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldPasswordHash(ctx)
 	case user.FieldRole:
 		return m.OldRole(ctx)
+	case user.FieldLane:
+		return m.OldLane(ctx)
 	case user.FieldBalance:
 		return m.OldBalance(ctx)
 	case user.FieldConcurrency:
@@ -45506,6 +45550,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRole(v)
+		return nil
+	case user.FieldLane:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLane(v)
 		return nil
 	case user.FieldBalance:
 		v, ok := value.(float64)
@@ -45794,6 +45845,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldRole:
 		m.ResetRole()
+		return nil
+	case user.FieldLane:
+		m.ResetLane()
 		return nil
 	case user.FieldBalance:
 		m.ResetBalance()

@@ -102,6 +102,20 @@ func (_c *UserCreate) SetNillableRole(v *string) *UserCreate {
 	return _c
 }
 
+// SetLane sets the "lane" field.
+func (_c *UserCreate) SetLane(v string) *UserCreate {
+	_c.mutation.SetLane(v)
+	return _c
+}
+
+// SetNillableLane sets the "lane" field if the given value is not nil.
+func (_c *UserCreate) SetNillableLane(v *string) *UserCreate {
+	if v != nil {
+		_c.SetLane(*v)
+	}
+	return _c
+}
+
 // SetBalance sets the "balance" field.
 func (_c *UserCreate) SetBalance(v float64) *UserCreate {
 	_c.mutation.SetBalance(v)
@@ -590,6 +604,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultRole
 		_c.mutation.SetRole(v)
 	}
+	if _, ok := _c.mutation.Lane(); !ok {
+		v := user.DefaultLane
+		_c.mutation.SetLane(v)
+	}
 	if _, ok := _c.mutation.Balance(); !ok {
 		v := user.DefaultBalance
 		_c.mutation.SetBalance(v)
@@ -671,6 +689,14 @@ func (_c *UserCreate) check() error {
 	if v, ok := _c.mutation.Role(); ok {
 		if err := user.RoleValidator(v); err != nil {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "User.role": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.Lane(); !ok {
+		return &ValidationError{Name: "lane", err: errors.New(`ent: missing required field "User.lane"`)}
+	}
+	if v, ok := _c.mutation.Lane(); ok {
+		if err := user.LaneValidator(v); err != nil {
+			return &ValidationError{Name: "lane", err: fmt.Errorf(`ent: validator failed for field "User.lane": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Balance(); !ok {
@@ -774,6 +800,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 		_node.Role = value
+	}
+	if value, ok := _c.mutation.Lane(); ok {
+		_spec.SetField(user.FieldLane, field.TypeString, value)
+		_node.Lane = value
 	}
 	if value, ok := _c.mutation.Balance(); ok {
 		_spec.SetField(user.FieldBalance, field.TypeFloat64, value)
@@ -1173,6 +1203,18 @@ func (u *UserUpsert) UpdateRole() *UserUpsert {
 	return u
 }
 
+// SetLane sets the "lane" field.
+func (u *UserUpsert) SetLane(v string) *UserUpsert {
+	u.Set(user.FieldLane, v)
+	return u
+}
+
+// UpdateLane sets the "lane" field to the value that was provided on create.
+func (u *UserUpsert) UpdateLane() *UserUpsert {
+	u.SetExcluded(user.FieldLane)
+	return u
+}
+
 // SetBalance sets the "balance" field.
 func (u *UserUpsert) SetBalance(v float64) *UserUpsert {
 	u.Set(user.FieldBalance, v)
@@ -1556,6 +1598,20 @@ func (u *UserUpsertOne) SetRole(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRole() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRole()
+	})
+}
+
+// SetLane sets the "lane" field.
+func (u *UserUpsertOne) SetLane(v string) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetLane(v)
+	})
+}
+
+// UpdateLane sets the "lane" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateLane() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateLane()
 	})
 }
 
@@ -2152,6 +2208,20 @@ func (u *UserUpsertBulk) SetRole(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRole() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRole()
+	})
+}
+
+// SetLane sets the "lane" field.
+func (u *UserUpsertBulk) SetLane(v string) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetLane(v)
+	})
+}
+
+// UpdateLane sets the "lane" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateLane() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateLane()
 	})
 }
 

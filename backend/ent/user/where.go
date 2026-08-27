@@ -85,6 +85,11 @@ func Role(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRole, v))
 }
 
+// Lane applies equality check predicate on the "lane" field. It's identical to LaneEQ.
+func Lane(v string) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldLane, v))
+}
+
 // Balance applies equality check predicate on the "balance" field. It's identical to BalanceEQ.
 func Balance(v float64) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldBalance, v))
@@ -493,6 +498,71 @@ func RoleEqualFold(v string) predicate.User {
 // RoleContainsFold applies the ContainsFold predicate on the "role" field.
 func RoleContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldRole, v))
+}
+
+// LaneEQ applies the EQ predicate on the "lane" field.
+func LaneEQ(v string) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldLane, v))
+}
+
+// LaneNEQ applies the NEQ predicate on the "lane" field.
+func LaneNEQ(v string) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldLane, v))
+}
+
+// LaneIn applies the In predicate on the "lane" field.
+func LaneIn(vs ...string) predicate.User {
+	return predicate.User(sql.FieldIn(FieldLane, vs...))
+}
+
+// LaneNotIn applies the NotIn predicate on the "lane" field.
+func LaneNotIn(vs ...string) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldLane, vs...))
+}
+
+// LaneGT applies the GT predicate on the "lane" field.
+func LaneGT(v string) predicate.User {
+	return predicate.User(sql.FieldGT(FieldLane, v))
+}
+
+// LaneGTE applies the GTE predicate on the "lane" field.
+func LaneGTE(v string) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldLane, v))
+}
+
+// LaneLT applies the LT predicate on the "lane" field.
+func LaneLT(v string) predicate.User {
+	return predicate.User(sql.FieldLT(FieldLane, v))
+}
+
+// LaneLTE applies the LTE predicate on the "lane" field.
+func LaneLTE(v string) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldLane, v))
+}
+
+// LaneContains applies the Contains predicate on the "lane" field.
+func LaneContains(v string) predicate.User {
+	return predicate.User(sql.FieldContains(FieldLane, v))
+}
+
+// LaneHasPrefix applies the HasPrefix predicate on the "lane" field.
+func LaneHasPrefix(v string) predicate.User {
+	return predicate.User(sql.FieldHasPrefix(FieldLane, v))
+}
+
+// LaneHasSuffix applies the HasSuffix predicate on the "lane" field.
+func LaneHasSuffix(v string) predicate.User {
+	return predicate.User(sql.FieldHasSuffix(FieldLane, v))
+}
+
+// LaneEqualFold applies the EqualFold predicate on the "lane" field.
+func LaneEqualFold(v string) predicate.User {
+	return predicate.User(sql.FieldEqualFold(FieldLane, v))
+}
+
+// LaneContainsFold applies the ContainsFold predicate on the "lane" field.
+func LaneContainsFold(v string) predicate.User {
+	return predicate.User(sql.FieldContainsFold(FieldLane, v))
 }
 
 // BalanceEQ applies the EQ predicate on the "balance" field.

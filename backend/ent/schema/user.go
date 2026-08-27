@@ -46,6 +46,11 @@ func (User) Fields() []ent.Field {
 		field.String("role").
 			MaxLen(20).
 			Default(domain.RoleUser),
+		// 工作道 / 号池(护号):该用户被焊在哪个池。normal|batch|distillation;
+		// 默认 normal。用户只能用与自身 lane 相同的组(见 api_key_auth 闸口)。
+		field.String("lane").
+			MaxLen(20).
+			Default("normal"),
 		field.Float("balance").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
 			Default(0),

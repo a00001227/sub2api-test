@@ -398,6 +398,10 @@ func (s *APIKeyService) incrementAPIKeyErrorCount(ctx context.Context, userID in
 // 对于订阅类型分组：检查用户是否有有效订阅
 // 对于标准类型分组：使用原有的 AllowedGroups 和 IsExclusive 逻辑
 func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group *Group) bool {
+	// 护号:用户只能绑定与自身工作道(lane)相同的组。跨 lane 直接拒绝。
+	if NormalizeGroupLane(group.Lane) != NormalizeGroupLane(user.Lane) {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		_, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
@@ -860,6 +864,11 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 
 // canUserBindGroupInternal 内部方法，检查用户是否可以绑定分组（使用预加载的订阅数据）
 func (s *APIKeyService) canUserBindGroupInternal(user *User, group *Group, subscribedGroupIDs map[int64]bool) bool {
+	// 护号:用户只可见/可绑与自身工作道(lane)相同的组 → GetAvailableGroups 只返回同
+	// lane 组(用户分组配置弹窗、可用通道、sub-key 默认通道均随之收敛)。
+	if NormalizeGroupLane(group.Lane) != NormalizeGroupLane(user.Lane) {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		return subscribedGroupIDs[group.ID]
@@ -1041,18 +1050,22 @@ func (s *APIKeyService) resolveSubKeyGroups(ctx context.Context, user *User, def
 		seen[id] = struct{}{}
 		allowed = append(allowed, id)
 	}
-	// 客户密钥默认通道(护号 UX):调用方完全没指定通道时,默认放开"面向客户"的固定组
-	// (slug ∈ DefaultSubKeyGroupSlugs,现为 proxy+openai)。只纳入该账号可绑定+active
-	// 的组,主通道去重。→ 内部号池组(蒸馏/批量)既不显示也进不去客户密钥,前端也不用
-	// 再暴露「允许的通道」。已显式传通道的调用方不受影响。
+	// 客户密钥默认通道(护号 UX):调用方完全没指定通道时,默认放开"面向客户"的固定组。
+	// GetAvailableGroups 已按 user.lane 过滤,故:
+	//   - normal 用户 → avail 是全部 normal 组,收窄到 slug ∈ DefaultSubKeyGroupSlugs
+	//     (proxy+openai);
+	//   - 非 normal 用户 → avail 本就只剩其 lane 的面向客户组,全放开(否则默认集会空,
+	//     蒸馏用户开的客户会没通道)。
+	// 只纳入该账号可绑定+active 的组,主通道去重。已显式传通道的调用方不受影响。
 	if len(opts.AllowedGroupIDs) == 0 {
 		avail, err := s.GetAvailableGroups(ctx, user.ID)
 		if err != nil {
 			return nil, nil, err
 		}
+		normalLane := NormalizeGroupLane(user.Lane) == GroupLaneNormal
 		for i := range avail {
 			g := avail[i]
-			if !isDefaultSubKeyGroupSlug(g.Slug) {
+			if normalLane && !isDefaultSubKeyGroupSlug(g.Slug) {
 				continue
 			}
 			if mainGroupID != nil && g.ID == *mainGroupID {
