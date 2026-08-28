@@ -282,3 +282,50 @@ func pcComputeGlobalRange(methods map[string]MethodLimits) (globalMin, globalMax
 	}
 	return globalMin, globalMax
 }
+
+// ApplyRechargeConfigBounds folds the admin recharge min/max cap into a
+// MethodLimitsResponse. Exported for handlers that already hold the payment
+// config (avoids a second settings fetch and keeps GetAvailableMethodLimits
+// free of a settings dependency its unit tests don't wire up).
+func ApplyRechargeConfigBounds(resp *MethodLimitsResponse, cfgMin, cfgMax float64) {
+	pcApplyConfigBounds(resp, cfgMin, cfgMax)
+}
+
+// pcApplyConfigBounds folds the global recharge min/max config (admin setting
+// SettingMin/MaxRechargeAmount) into the per-instance-derived method + global
+// limits. Provider-instance limits describe what a gateway *can* accept; the
+// admin recharge cap is a stricter business rule enforced on order creation
+// (payment_order.go). Surfacing it here keeps the checkout page's displayed
+// range consistent with what the server will actually accept.
+//
+// A bound of 0 means "no limit" on both sides. The floor raises min, the ceil
+// lowers max; an unlimited method (0) inherits the config bound directly.
+func pcApplyConfigBounds(resp *MethodLimitsResponse, cfgMin, cfgMax float64) {
+	if resp == nil {
+		return
+	}
+	for k, ml := range resp.Methods {
+		ml.SingleMin = pcApplyFloor(ml.SingleMin, cfgMin)
+		ml.SingleMax = pcApplyCeil(ml.SingleMax, cfgMax)
+		resp.Methods[k] = ml
+	}
+	resp.GlobalMin = pcApplyFloor(resp.GlobalMin, cfgMin)
+	resp.GlobalMax = pcApplyCeil(resp.GlobalMax, cfgMax)
+}
+
+// pcApplyFloor returns the stricter (higher) lower bound. floor<=0 means no floor.
+func pcApplyFloor(v, floor float64) float64 {
+	if floor > 0 && (v <= 0 || floor > v) {
+		return floor
+	}
+	return v
+}
+
+// pcApplyCeil returns the stricter (lower) upper bound. ceil<=0 means no ceil.
+// v<=0 means the method is unlimited, so it inherits the ceil directly.
+func pcApplyCeil(v, ceil float64) float64 {
+	if ceil > 0 && (v <= 0 || ceil < v) {
+		return ceil
+	}
+	return v
+}

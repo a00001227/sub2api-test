@@ -515,3 +515,43 @@ func TestGetAvailableMethodLimitsPreservesLegacyCrossProviderBehaviorWhenVisible
 	require.Equal(t, 10.0, resp.GlobalMin)
 	require.Equal(t, 400.0, resp.GlobalMax)
 }
+
+func TestApplyRechargeConfigBounds(t *testing.T) {
+	t.Run("ceil caps unlimited and higher method maxima", func(t *testing.T) {
+		resp := &MethodLimitsResponse{
+			Methods: map[string]MethodLimits{
+				"alipay": {PaymentType: "alipay", SingleMin: 0, SingleMax: 0},   // unlimited
+				"wxpay":  {PaymentType: "wxpay", SingleMin: 5, SingleMax: 1000}, // above cap
+				"stripe": {PaymentType: "stripe", SingleMin: 2, SingleMax: 300}, // below cap
+			},
+			GlobalMin: 0,
+			GlobalMax: 0,
+		}
+		// admin cap: min 1, max 500
+		ApplyRechargeConfigBounds(resp, 1, 500)
+
+		require.Equal(t, float64(500), resp.Methods["alipay"].SingleMax) // 0(unlimited) -> 500
+		require.Equal(t, float64(1), resp.Methods["alipay"].SingleMin)   // 0 -> floor 1
+		require.Equal(t, float64(500), resp.Methods["wxpay"].SingleMax)  // 1000 -> 500
+		require.Equal(t, float64(5), resp.Methods["wxpay"].SingleMin)    // 5 stays (>1)
+		require.Equal(t, float64(300), resp.Methods["stripe"].SingleMax) // 300 stays (<500)
+		require.Equal(t, float64(500), resp.GlobalMax)                   // global capped
+		require.Equal(t, float64(1), resp.GlobalMin)                     // global floored
+	})
+
+	t.Run("zero config bounds are a no-op", func(t *testing.T) {
+		resp := &MethodLimitsResponse{
+			Methods:   map[string]MethodLimits{"alipay": {PaymentType: "alipay", SingleMin: 3, SingleMax: 700}},
+			GlobalMin: 3,
+			GlobalMax: 700,
+		}
+		ApplyRechargeConfigBounds(resp, 0, 0)
+		require.Equal(t, float64(700), resp.Methods["alipay"].SingleMax)
+		require.Equal(t, float64(3), resp.Methods["alipay"].SingleMin)
+		require.Equal(t, float64(700), resp.GlobalMax)
+	})
+
+	t.Run("nil response is safe", func(t *testing.T) {
+		ApplyRechargeConfigBounds(nil, 1, 500)
+	})
+}

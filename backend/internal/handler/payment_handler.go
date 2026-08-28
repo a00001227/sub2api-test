@@ -112,6 +112,11 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		return
 	}
 
+	// Fold the admin recharge min/max cap into the instance-derived limits so the
+	// checkout page displays (and the frontend enforces) the same range the server
+	// will accept on order creation.
+	service.ApplyRechargeConfigBounds(limitsResp, cfg.MinAmount, cfg.MaxAmount)
+
 	// Fetch plans with group info
 	plans, _ := h.configService.ListPlansForSale(ctx)
 	groupInfo := h.configService.GetGroupInfoMap(ctx, plans)
