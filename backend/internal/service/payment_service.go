@@ -45,7 +45,9 @@ const (
 	topUsersLimit      = 10
 	amountToleranceCNY = 0.01
 
-	orderIDPrefix = "sub2_"
+	// 对外订单号前缀。刻意不用底层项目名,避免向用户/支付网关暴露技术栈。
+	// 仅影响新订单生成;历史 sub2_ 订单按完整 out_trade_no 精确查找,不受影响。
+	orderIDPrefix = "ei_"
 )
 
 const paymentResumeSigningKeyEnv = "PAYMENT_RESUME_SIGNING_KEY"
@@ -53,7 +55,7 @@ const paymentResumeSigningKeyEnv = "PAYMENT_RESUME_SIGNING_KEY"
 // --- Types ---
 
 // generateOutTradeNo creates a unique external order ID for payment providers.
-// Format: sub2_20250409aB3kX9mQ (prefix + date + 8-char random)
+// Format: ei_20250409aB3kX9mQ (prefix + date + 8-char random)
 func generateOutTradeNo() string {
 	date := time.Now().Format("20060102")
 	rnd := generateRandomString(8)
