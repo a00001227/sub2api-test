@@ -75,12 +75,50 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 	if err != nil {
 		return nil, err
 	}
-	req := &green.TextModerationRequest{
-		Service:           tea.String(svc),
-		ServiceParameters: tea.String(string(params)),
+
+	scores := map[string]float64{}
+	if aliyunServiceUsesPlus(svc) {
+		// 大模型审核服务（byllm/llm/*_pro，如 ugc_moderation_byllm_ec）走 TextModerationPlus:
+		// 与经典 TextModeration 请求同形（Service + ServiceParameters），但响应是 Data.Result 数组。
+		resp, err := client.TextModerationPlus(&green.TextModerationPlusRequest{
+			Service:           tea.String(svc),
+			ServiceParameters: tea.String(string(params)),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil || resp.Body == nil {
+			return nil, errors.New("aliyun moderation returned empty response")
+		}
+		if resp.Body.Code != nil && *resp.Body.Code != 200 {
+			msg := ""
+			if resp.Body.Message != nil {
+				msg = *resp.Body.Message
+			}
+			return nil, fmt.Errorf("aliyun moderation code %d: %s", *resp.Body.Code, msg)
+		}
+		if resp.Body.Data != nil {
+			for _, r := range resp.Body.Data.Result {
+				if r == nil || r.Label == nil {
+					continue
+				}
+				if cat := aliyunLabelToCategory(*r.Label); cat != "" {
+					score := 1.0
+					if r.Confidence != nil {
+						score = float64(*r.Confidence) / 100.0
+					}
+					putMaxScore(scores, cat, score)
+				}
+			}
+		}
+		return vendorCategoryScores(scores), nil
 	}
 
-	resp, err := client.TextModeration(req)
+	// 经典审核服务走 TextModeration（响应为逗号分隔的 Data.Labels）。
+	resp, err := client.TextModeration(&green.TextModerationRequest{
+		Service:           tea.String(svc),
+		ServiceParameters: tea.String(string(params)),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -94,8 +132,6 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 		}
 		return nil, fmt.Errorf("aliyun moderation code %d: %s", *resp.Body.Code, msg)
 	}
-
-	scores := map[string]float64{}
 	if resp.Body.Data != nil && resp.Body.Data.Labels != nil {
 		for _, label := range strings.Split(*resp.Body.Data.Labels, ",") {
 			if cat := aliyunLabelToCategory(label); cat != "" {
@@ -104,4 +140,12 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 		}
 	}
 	return vendorCategoryScores(scores), nil
+}
+
+// aliyunServiceUsesPlus 判断服务是否走大模型审核接口 TextModerationPlus:
+// byllm/llm 系列（ugc_moderation_byllm_ec、llm_query_moderation、llm_response_moderation）
+// 及 *_pro 专业版（chat_detection_pro 等）。其余经典服务走 TextModeration。
+func aliyunServiceUsesPlus(service string) bool {
+	s := strings.ToLower(strings.TrimSpace(service))
+	return strings.Contains(s, "llm") || strings.HasSuffix(s, "_pro")
 }
