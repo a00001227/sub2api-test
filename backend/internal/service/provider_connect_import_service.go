@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service/providerwebhook"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
 
 // Phase 21E-6E-4: Provider Credential Import（渠道商凭证导入）。
@@ -160,6 +162,21 @@ func (s *ProviderConnectImportService) ImportCredential(
 			Scope:      "full",
 		})
 		if cerr != nil || tokenInfo == nil || strings.TrimSpace(tokenInfo.AccessToken) == "" {
+			// The response stays a stable INVALID_CREDENTIAL (no leak). But the
+			// import layer otherwise swallows WHY — so a failed sessionKey import is
+			// undebuggable. Log a REDACTED classification (never the sessionKey): the
+			// CookieAuth error wraps the failing stage ("failed to get organization
+			// info" vs "…authorization code" vs "…exchange code"), separating a
+			// bad/expired key from a proxy/OAuth-flow problem.
+			reason := "empty_access_token"
+			if cerr != nil {
+				reason = logredact.RedactText(cerr.Error())
+			}
+			slog.WarnContext(ctx, "provider_connect.import.claude_cookie_auth_failed",
+				"external_ref", accountRef,
+				"region", region,
+				"proxy_used", proxyID != nil,
+				"reason", reason)
 			return nil, ErrImportInvalidCredential
 		}
 		credentials = tokenInfoToCredentials(tokenInfo)
