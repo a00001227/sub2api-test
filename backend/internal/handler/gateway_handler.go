@@ -56,6 +56,15 @@ type GatewayHandler struct {
 	settingService            *service.SettingService
 }
 
+// ContentModerationService 暴露审核服务给路由层，用于在 EdgeForward 之前挂前置审核中间件
+// （转发路径会短路网关 handler，原本 handler 内的审核对 cell 流量不生效）。
+func (h *GatewayHandler) ContentModerationService() *service.ContentModerationService {
+	if h == nil {
+		return nil
+	}
+	return h.contentModerationService
+}
+
 // NewGatewayHandler creates a new GatewayHandler
 func NewGatewayHandler(
 	gatewayService *service.GatewayService,

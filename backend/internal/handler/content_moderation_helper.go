@@ -41,6 +41,10 @@ func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.Conte
 	if svc == nil || c == nil || c.Request == nil {
 		return nil
 	}
+	// 前置审核中间件已审（本地路径）或 cell 回源可信流量（中央已审）→ 跳过，避免重复审核。
+	if c.GetBool(middleware2.ContentModerationDoneContextKey) || middleware2.IsEdgeTrusted(c) {
+		return nil
+	}
 	input := buildContentModerationInput(c, apiKey, subject, protocol, model, body)
 	if reqLog != nil {
 		reqLog.Info("content_moderation.gateway_check_start",

@@ -1584,6 +1584,15 @@ func (s *ContentModerationService) loadConfig(ctx context.Context) (*ContentMode
 	return cfg, nil
 }
 
+// Active 报告内容审计是否启用（供前置中间件零开销早退：关闭时连 body 都不读）。
+// 与 Check 内部同一闸门；mode（off/observe/pre_block）的进一步分派仍由 Check 处理。
+func (s *ContentModerationService) Active(ctx context.Context) bool {
+	if s == nil {
+		return false
+	}
+	return s.isRiskControlEnabled(ctx)
+}
+
 func (s *ContentModerationService) isRiskControlEnabled(ctx context.Context) bool {
 	raw, err := s.settingRepo.GetValue(ctx, SettingKeyRiskControlEnabled)
 	if err != nil {
