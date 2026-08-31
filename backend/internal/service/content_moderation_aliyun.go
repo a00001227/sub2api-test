@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
@@ -20,6 +21,10 @@ const defaultAliyunModerationService = "chat_detection"
 // aliyunLabelToCategory 阿里 label → 本系统合规分类键。
 func aliyunLabelToCategory(label string) string {
 	l := strings.ToLower(strings.TrimSpace(label))
+	// 护栏无风险标记：query_security_check 每个检测项无风险回 nonLabel（敏感数据回 "0"）。
+	if l == "" || l == "nonlabel" || l == "0" || l == "none" {
+		return ""
+	}
 	switch {
 	case strings.Contains(l, "politic"):
 		return ContentModerationCategoryPolitical
@@ -31,6 +36,9 @@ func aliyunLabelToCategory(label string) string {
 		return ContentModerationCategoryContraband
 	case strings.Contains(l, "profanity") || strings.Contains(l, "cyberbullying") || strings.Contains(l, "negative"):
 		return ContentModerationCategoryAbuse
+	case strings.Contains(l, "prompt") || strings.Contains(l, "attack") || strings.Contains(l, "jailbreak") || strings.Contains(l, "inject"):
+		// AI 安全护栏提示词攻击（越狱/注入/指令攻击）。
+		return ContentModerationCategoryPromptAttack
 	case l == "ad" || strings.Contains(l, "spam"):
 		return ContentModerationCategoryAd
 	default:
@@ -102,13 +110,19 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 				if r == nil || r.Label == nil {
 					continue
 				}
-				if cat := aliyunLabelToCategory(*r.Label); cat != "" {
-					score := 1.0
-					if r.Confidence != nil {
-						score = float64(*r.Confidence) / 100.0
+				cat := aliyunLabelToCategory(*r.Label)
+				if cat == "" {
+					// 未识别的非空标签（排除无风险标记）打点，便于补映射（如护栏提示词攻击的确切 label）。
+					if ll := strings.ToLower(strings.TrimSpace(*r.Label)); ll != "" && ll != "nonlabel" && ll != "0" && ll != "none" {
+						slog.Info("content_moderation.aliyun_unmapped_label", "service", svc, "label", *r.Label)
 					}
-					putMaxScore(scores, cat, score)
+					continue
 				}
+				score := 1.0
+				if r.Confidence != nil {
+					score = float64(*r.Confidence) / 100.0
+				}
+				putMaxScore(scores, cat, score)
 			}
 		}
 		return vendorCategoryScores(scores), nil
@@ -147,5 +161,7 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 // 及 *_pro 专业版（chat_detection_pro 等）。其余经典服务走 TextModeration。
 func aliyunServiceUsesPlus(service string) bool {
 	s := strings.ToLower(strings.TrimSpace(service))
-	return strings.Contains(s, "llm") || strings.HasSuffix(s, "_pro")
+	// llm/_pro：内容审核大模型与专业版；security_check：AI 安全护栏
+	// query_security_check / response_security_check（含 _intl）同样走 TextModerationPlus。
+	return strings.Contains(s, "llm") || strings.HasSuffix(s, "_pro") || strings.Contains(s, "security_check")
 }

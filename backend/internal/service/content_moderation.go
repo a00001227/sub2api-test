@@ -120,16 +120,18 @@ var contentModerationCategoryOrder = []string{
 	ContentModerationCategoryAbuse,
 	ContentModerationCategoryContraband,
 	ContentModerationCategoryAd,
+	ContentModerationCategoryPromptAttack,
 }
 
 // 合规分类键（云审厂商标签统一归一到这些）。
 const (
-	ContentModerationCategoryPolitical  = "political"
-	ContentModerationCategoryPorn       = "porn"
-	ContentModerationCategoryTerror     = "terror"
-	ContentModerationCategoryAbuse      = "abuse"
-	ContentModerationCategoryContraband = "contraband"
-	ContentModerationCategoryAd         = "ad"
+	ContentModerationCategoryPolitical    = "political"
+	ContentModerationCategoryPorn         = "porn"
+	ContentModerationCategoryTerror       = "terror"
+	ContentModerationCategoryAbuse        = "abuse"
+	ContentModerationCategoryContraband   = "contraband"
+	ContentModerationCategoryAd           = "ad"
+	ContentModerationCategoryPromptAttack = "prompt_attack"
 )
 
 func ContentModerationDefaultThresholds() map[string]float64 {
@@ -148,12 +150,13 @@ func ContentModerationDefaultThresholds() map[string]float64 {
 		"violence":               0.95,
 		"violence/graphic":       0.95,
 		// 合规分类默认阈值（政治/涉黄/暴恐/违禁从严；广告默认近乎关闭）。
-		ContentModerationCategoryPolitical:  0.60,
-		ContentModerationCategoryPorn:       0.60,
-		ContentModerationCategoryTerror:     0.60,
-		ContentModerationCategoryAbuse:      0.80,
-		ContentModerationCategoryContraband: 0.60,
-		ContentModerationCategoryAd:         0.99,
+		ContentModerationCategoryPolitical:    0.60,
+		ContentModerationCategoryPorn:         0.60,
+		ContentModerationCategoryTerror:       0.60,
+		ContentModerationCategoryAbuse:        0.80,
+		ContentModerationCategoryContraband:   0.60,
+		ContentModerationCategoryAd:           0.99,
+		ContentModerationCategoryPromptAttack: 0.60,
 	}
 }
 
@@ -164,17 +167,17 @@ func ContentModerationCategories() []string {
 }
 
 type ContentModerationConfig struct {
-	Enabled              bool                         `json:"enabled"`
-	Mode                 string                       `json:"mode"`
+	Enabled bool   `json:"enabled"`
+	Mode    string `json:"mode"`
 	// Provider 云审厂商：openai（默认）/ aliyun / tencent。
-	Provider             string                       `json:"provider,omitempty"`
-	BaseURL              string                       `json:"base_url"`
-	Model                string                       `json:"model"`
+	Provider string `json:"provider,omitempty"`
+	BaseURL  string `json:"base_url"`
+	Model    string `json:"model"`
 	// ProxyID 指定审计请求使用的代理服务器（IP管理-代理服务器），nil 表示直连。
 	// 仅作用于 OpenAI 形态审核路径（/v1/moderations）；阿里云/腾讯 SDK 路径保持直连。
-	ProxyID              *int64                       `json:"proxy_id,omitempty"`
-	APIKey               string                       `json:"api_key,omitempty"`
-	APIKeys              []string                     `json:"api_keys,omitempty"`
+	ProxyID *int64   `json:"proxy_id,omitempty"`
+	APIKey  string   `json:"api_key,omitempty"`
+	APIKeys []string `json:"api_keys,omitempty"`
 	// 阿里云内容安全凭据（provider=aliyun 时使用；与 OpenAI key 一样明文存于 settings JSON）。
 	AliyunAccessKeyID     string `json:"aliyun_access_key_id,omitempty"`
 	AliyunAccessKeySecret string `json:"aliyun_access_key_secret,omitempty"`
@@ -182,10 +185,10 @@ type ContentModerationConfig struct {
 	AliyunEndpoint        string `json:"aliyun_endpoint,omitempty"`
 	AliyunService         string `json:"aliyun_service,omitempty"`
 	// 腾讯云文本审核凭据（provider=tencent 时使用）。
-	TencentSecretID  string `json:"tencent_secret_id,omitempty"`
-	TencentSecretKey string `json:"tencent_secret_key,omitempty"`
-	TencentRegion    string `json:"tencent_region,omitempty"`
-	TencentBizType   string `json:"tencent_biz_type,omitempty"`
+	TencentSecretID      string                       `json:"tencent_secret_id,omitempty"`
+	TencentSecretKey     string                       `json:"tencent_secret_key,omitempty"`
+	TencentRegion        string                       `json:"tencent_region,omitempty"`
+	TencentBizType       string                       `json:"tencent_biz_type,omitempty"`
 	TimeoutMS            int                          `json:"timeout_ms"`
 	SampleRate           int                          `json:"sample_rate"`
 	AllGroups            bool                         `json:"all_groups"`
@@ -214,22 +217,22 @@ type ContentModerationConfig struct {
 }
 
 type ContentModerationConfigView struct {
-	Enabled                        bool                            `json:"enabled"`
-	Mode                           string                          `json:"mode"`
-	Provider                       string                          `json:"provider"`
-	BaseURL                        string                          `json:"base_url"`
-	Model                          string                          `json:"model"`
-	ProxyID                        *int64                          `json:"proxy_id"`
+	Enabled  bool   `json:"enabled"`
+	Mode     string `json:"mode"`
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url"`
+	Model    string `json:"model"`
+	ProxyID  *int64 `json:"proxy_id"`
 	// 阿里云/腾讯云凭据只回掩码 + configured 布尔 + 非密的 region/endpoint。
-	AliyunConfigured        bool   `json:"aliyun_configured"`
-	AliyunAccessKeyIDMasked string `json:"aliyun_access_key_id_masked"`
-	AliyunRegion            string `json:"aliyun_region"`
-	AliyunEndpoint          string `json:"aliyun_endpoint"`
-	AliyunService           string `json:"aliyun_service"`
-	TencentConfigured       bool   `json:"tencent_configured"`
-	TencentSecretIDMasked   string `json:"tencent_secret_id_masked"`
-	TencentRegion           string `json:"tencent_region"`
-	TencentBizType          string `json:"tencent_biz_type"`
+	AliyunConfigured               bool                            `json:"aliyun_configured"`
+	AliyunAccessKeyIDMasked        string                          `json:"aliyun_access_key_id_masked"`
+	AliyunRegion                   string                          `json:"aliyun_region"`
+	AliyunEndpoint                 string                          `json:"aliyun_endpoint"`
+	AliyunService                  string                          `json:"aliyun_service"`
+	TencentConfigured              bool                            `json:"tencent_configured"`
+	TencentSecretIDMasked          string                          `json:"tencent_secret_id_masked"`
+	TencentRegion                  string                          `json:"tencent_region"`
+	TencentBizType                 string                          `json:"tencent_biz_type"`
 	APIKeyConfigured               bool                            `json:"api_key_configured"`
 	APIKeyMasked                   string                          `json:"api_key_masked"`
 	APIKeyCount                    int                             `json:"api_key_count"`
@@ -316,23 +319,23 @@ type ContentModerationTestAuditResult struct {
 }
 
 type UpdateContentModerationConfigInput struct {
-	Enabled                        *bool                         `json:"enabled"`
-	Mode                           *string                       `json:"mode"`
-	Provider                       *string                       `json:"provider"`
-	BaseURL                        *string                       `json:"base_url"`
-	Model                          *string                       `json:"model"`
+	Enabled  *bool   `json:"enabled"`
+	Mode     *string `json:"mode"`
+	Provider *string `json:"provider"`
+	BaseURL  *string `json:"base_url"`
+	Model    *string `json:"model"`
 	// ProxyID nil 表示不修改；<=0 表示清除代理（恢复直连）；>0 表示指定代理。
-	ProxyID                        *int64                        `json:"proxy_id"`
+	ProxyID *int64 `json:"proxy_id"`
 	// 阿里云/腾讯云凭据更新（nil=不改；空串=清空）。
-	AliyunAccessKeyID     *string `json:"aliyun_access_key_id"`
-	AliyunAccessKeySecret *string `json:"aliyun_access_key_secret"`
-	AliyunRegion          *string `json:"aliyun_region"`
-	AliyunEndpoint        *string `json:"aliyun_endpoint"`
-	AliyunService         *string `json:"aliyun_service"`
-	TencentSecretID       *string `json:"tencent_secret_id"`
-	TencentSecretKey      *string `json:"tencent_secret_key"`
-	TencentRegion         *string `json:"tencent_region"`
-	TencentBizType        *string `json:"tencent_biz_type"`
+	AliyunAccessKeyID              *string                       `json:"aliyun_access_key_id"`
+	AliyunAccessKeySecret          *string                       `json:"aliyun_access_key_secret"`
+	AliyunRegion                   *string                       `json:"aliyun_region"`
+	AliyunEndpoint                 *string                       `json:"aliyun_endpoint"`
+	AliyunService                  *string                       `json:"aliyun_service"`
+	TencentSecretID                *string                       `json:"tencent_secret_id"`
+	TencentSecretKey               *string                       `json:"tencent_secret_key"`
+	TencentRegion                  *string                       `json:"tencent_region"`
+	TencentBizType                 *string                       `json:"tencent_biz_type"`
 	APIKey                         *string                       `json:"api_key"`
 	APIKeys                        *[]string                     `json:"api_keys"`
 	APIKeysMode                    string                        `json:"api_keys_mode"`
