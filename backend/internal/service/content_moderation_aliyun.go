@@ -105,6 +105,8 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 			}
 			return nil, fmt.Errorf("aliyun moderation code %d: %s", *resp.Body.Code, msg)
 		}
+		// 护栏 query_security_check：任何非无风险标签都判命中（fail-closed，不依赖穷举 label）。
+		guardrail := strings.Contains(strings.ToLower(svc), "security_check")
 		if resp.Body.Data != nil {
 			for _, r := range resp.Body.Data.Result {
 				if r == nil || r.Label == nil {
@@ -112,11 +114,15 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 				}
 				cat := aliyunLabelToCategory(*r.Label)
 				if cat == "" {
-					// 未识别的非空标签（排除无风险标记）打点，便于补映射（如护栏提示词攻击的确切 label）。
-					if ll := strings.ToLower(strings.TrimSpace(*r.Label)); ll != "" && ll != "nonlabel" && ll != "0" && ll != "none" {
-						slog.Info("content_moderation.aliyun_unmapped_label", "service", svc, "label", *r.Label)
+					ll := strings.ToLower(strings.TrimSpace(*r.Label))
+					if ll == "" || ll == "nonlabel" || ll == "0" || ll == "none" {
+						continue // 无风险
 					}
-					continue
+					slog.Info("content_moderation.aliyun_unmapped_label", "service", svc, "label", *r.Label)
+					if !guardrail {
+						continue
+					}
+					cat = ContentModerationCategoryPromptAttack
 				}
 				score := 1.0
 				if r.Confidence != nil {
