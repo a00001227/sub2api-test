@@ -416,6 +416,11 @@
                   <label class="input-label">{{ t('admin.riskControl.model') }}</label>
                   <input v-model.trim="configForm.model" type="text" class="input" placeholder="omni-moderation-latest" />
                 </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.proxy') }}</label>
+                  <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" />
+                  <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.proxyHint') }}</p>
+                </div>
               </template>
               <!-- 阿里云内容安全 -->
               <template v-else-if="configForm.provider === 'aliyun'">
@@ -1190,6 +1195,7 @@ import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import ProxySelector from '@/components/common/ProxySelector.vue'
 import { adminAPI } from '@/api/admin'
 import type {
   ContentModerationAPIKeyLoad,
@@ -1205,7 +1211,7 @@ import type {
   ModerationProvider,
   UpdateContentModerationConfig,
 } from '@/api/admin/riskControl'
-import type { AdminGroup, SelectOption } from '@/types'
+import type { AdminGroup, Proxy, SelectOption } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'
@@ -1273,6 +1279,7 @@ const activeSettingsTab = ref<SettingsTab>('basic')
 const groupSearch = ref('')
 const flaggedHashInput = ref('')
 const groups = ref<AdminGroup[]>([])
+const proxies = ref<Proxy[]>([])
 const logs = ref<ContentModerationLog[]>([])
 const status = ref<ContentModerationRuntimeStatus | null>(null)
 const testedApiKeyStatuses = ref<ContentModerationAPIKeyStatus[]>([])
@@ -1304,6 +1311,7 @@ const configForm = reactive({
   tencent_biz_type: '',
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
+  proxy_id: null as number | null,
   api_keys_text: '',
   api_key_configured: false,
   api_key_masked: '',
@@ -1798,6 +1806,7 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.tencent_biz_type = config.tencent_biz_type || ''
   configForm.base_url = config.base_url || 'https://api.openai.com'
   configForm.model = config.model || 'omni-moderation-latest'
+  configForm.proxy_id = config.proxy_id ?? null
   configForm.api_keys_text = ''
   configForm.api_key_configured = config.api_key_configured
   configForm.api_key_masked = config.api_key_masked || ''
@@ -1838,13 +1847,15 @@ function applyConfig(config: ContentModerationConfig) {
 async function loadAll() {
   loading.value = true
   try {
-    const [config, groupItems, runtimeStatus] = await Promise.all([
+    const [config, groupItems, runtimeStatus, proxyItems] = await Promise.all([
       adminAPI.riskControl.getConfig(),
       adminAPI.groups.getAll(),
       adminAPI.riskControl.getStatus(),
+      adminAPI.proxies.getAll().catch(() => [] as Proxy[]),
     ])
     applyConfig(config)
     groups.value = groupItems
+    proxies.value = proxyItems
     status.value = runtimeStatus
     if (Array.isArray(runtimeStatus.api_key_statuses)) {
       configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
@@ -1917,6 +1928,8 @@ async function saveConfig() {
       provider: configForm.provider,
       base_url: configForm.base_url,
       model: configForm.model,
+      // <=0 清除代理（恢复直连）；>0 指定代理。
+      proxy_id: configForm.proxy_id ?? 0,
       // 非密的区域/端点/服务/业务号始终回传;id/secret 仅在用户新填时回传(留空=不改)。
       aliyun_region: configForm.aliyun_region.trim(),
       aliyun_endpoint: configForm.aliyun_endpoint.trim(),
@@ -2134,6 +2147,8 @@ async function testApiKeys(useInputKeys: boolean) {
       base_url: configForm.base_url,
       model: configForm.model,
       timeout_ms: Number(configForm.timeout_ms) || 3000,
+      // <=0 强制直连测试；>0 用当前选中的代理测试。
+      proxy_id: configForm.proxy_id ?? 0,
       prompt: moderationTestPrompt.value,
       images: moderationTestImages.value,
     })

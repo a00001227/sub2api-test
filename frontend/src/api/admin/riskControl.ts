@@ -16,6 +16,8 @@ export interface ContentModerationConfig {
   provider: ModerationProvider
   base_url: string
   model: string
+  // 审核请求走的代理（仅 OpenAI 形态审核路径生效），null 表示直连。
+  proxy_id: number | null
   // 阿里云 / 腾讯云凭据只回掩码 + configured + 非密 region/endpoint。
   aliyun_configured: boolean
   aliyun_access_key_id_masked: string
@@ -78,6 +80,8 @@ export interface TestContentModerationAPIKeysPayload {
   base_url?: string
   model?: string
   timeout_ms?: number
+  // <=0 强制直连测试；>0 指定代理；省略=沿用已保存配置。
+  proxy_id?: number
   prompt?: string
   images?: string[]
 }
@@ -103,6 +107,8 @@ export interface UpdateContentModerationConfig {
   provider?: ModerationProvider
   base_url?: string
   model?: string
+  // <=0 清除代理（恢复直连）；>0 指定代理；省略=不改。
+  proxy_id?: number
   // 阿里云 / 腾讯云凭据（省略=不改；空串=清空）。
   aliyun_access_key_id?: string
   aliyun_access_key_secret?: string

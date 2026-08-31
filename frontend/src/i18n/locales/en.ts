@@ -2572,6 +2572,8 @@ export default {
       tencentBizTypePlaceholder: 'Optional, uses default policy',
       baseUrl: 'OpenAI Base URL',
       model: 'Model',
+      proxy: 'Proxy Server',
+      proxyHint: 'Applies only to OpenAI-form moderation requests (/v1/moderations); direct connection when unset. Moderation fails (no fallback to direct) if the proxy is unavailable or expired. Aliyun / Tencent moderation uses their own SDKs and bypasses this proxy.',
       apiKey: 'OpenAI API Key',
       apiKeys: 'OpenAI API Keys',
       apiKeyCount: '{count} keys',

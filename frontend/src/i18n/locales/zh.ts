@@ -2649,6 +2649,8 @@ export default {
       tencentBizTypePlaceholder: '可留空，使用默认策略',
       baseUrl: 'OpenAI Base URL',
       model: '模型名',
+      proxy: '代理服务器',
+      proxyHint: '仅作用于 OpenAI 形态审核请求（/v1/moderations）；不选则直连。代理不可用或已过期时审核请求将失败（不回退直连）。阿里云 / 腾讯云审核走各自 SDK，不经此代理。',
       apiKey: 'OpenAI API Key',
       apiKeys: 'OpenAI API Keys',
       apiKeyCount: '{count} 个 Key',

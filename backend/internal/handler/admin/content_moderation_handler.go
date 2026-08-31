@@ -25,6 +25,8 @@ type contentModerationConfigRequest struct {
 	Provider             *string             `json:"provider"`
 	BaseURL              *string             `json:"base_url"`
 	Model                *string             `json:"model"`
+	// ProxyID 审核请求走的代理（仅作用于 OpenAI 形态审核路径）；<=0 清除，>0 指定，nil 不改。
+	ProxyID              *int64              `json:"proxy_id"`
 	// 阿里云 / 腾讯云云审凭据（provider=aliyun/tencent 时使用）。
 	AliyunAccessKeyID     *string `json:"aliyun_access_key_id"`
 	AliyunAccessKeySecret *string `json:"aliyun_access_key_secret"`
@@ -71,6 +73,7 @@ type contentModerationAPIKeyTestRequest struct {
 	BaseURL   string   `json:"base_url"`
 	Model     string   `json:"model"`
 	TimeoutMS int      `json:"timeout_ms"`
+	ProxyID   *int64   `json:"proxy_id"`
 	Prompt    string   `json:"prompt"`
 	Images    []string `json:"images"`
 }
@@ -100,6 +103,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		Provider:                       req.Provider,
 		BaseURL:                        req.BaseURL,
 		Model:                          req.Model,
+		ProxyID:                        req.ProxyID,
 		AliyunAccessKeyID:              req.AliyunAccessKeyID,
 		AliyunAccessKeySecret:          req.AliyunAccessKeySecret,
 		AliyunRegion:                   req.AliyunRegion,
@@ -165,6 +169,7 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 		BaseURL:   req.BaseURL,
 		Model:     req.Model,
 		TimeoutMS: req.TimeoutMS,
+		ProxyID:   req.ProxyID,
 		Prompt:    req.Prompt,
 		Images:    req.Images,
 	})
