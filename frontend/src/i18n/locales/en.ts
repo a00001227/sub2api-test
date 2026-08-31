@@ -2526,6 +2526,7 @@ export default {
 
     riskControl: {
       title: 'Risk Control',
+      matchedKeyword: 'Matched Keyword',
       description: 'Configure content moderation and review audit records',
       loadFailed: 'Failed to load risk control',
       saveFailed: 'Failed to save content moderation config',

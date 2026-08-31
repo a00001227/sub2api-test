@@ -2603,6 +2603,7 @@ export default {
 
     riskControl: {
       title: '风控中心',
+      matchedKeyword: '命中关键词',
       description: '配置内容审计策略并查看审核记录',
       loadFailed: '加载风控中心失败',
       saveFailed: '保存内容审计配置失败',
