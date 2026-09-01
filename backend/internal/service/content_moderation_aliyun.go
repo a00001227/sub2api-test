@@ -105,30 +105,48 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 			}
 			return nil, fmt.Errorf("aliyun moderation code %d: %s", *resp.Body.Code, msg)
 		}
-		// 护栏 query_security_check：任何非无风险标签都判命中（fail-closed，不依赖穷举 label）。
-		guardrail := strings.Contains(strings.ToLower(svc), "security_check")
 		if resp.Body.Data != nil {
+			// 内容合规（Result[]）：映射到内容分类；未识别的非空标签仅打点。
 			for _, r := range resp.Body.Data.Result {
 				if r == nil || r.Label == nil {
 					continue
 				}
 				cat := aliyunLabelToCategory(*r.Label)
 				if cat == "" {
-					ll := strings.ToLower(strings.TrimSpace(*r.Label))
-					if ll == "" || ll == "nonlabel" || ll == "0" || ll == "none" {
-						continue // 无风险
+					if ll := strings.ToLower(strings.TrimSpace(*r.Label)); ll != "" && ll != "nonlabel" && ll != "0" && ll != "none" {
+						slog.Info("content_moderation.aliyun_unmapped_label", "service", svc, "label", *r.Label)
 					}
-					slog.Info("content_moderation.aliyun_unmapped_label", "service", svc, "label", *r.Label)
-					if !guardrail {
-						continue
-					}
-					cat = ContentModerationCategoryPromptAttack
+					continue
 				}
 				score := 1.0
 				if r.Confidence != nil {
 					score = float64(*r.Confidence) / 100.0
 				}
 				putMaxScore(scores, cat, score)
+			}
+			// 提示词攻击在独立的 AttackResult[]（护栏 query/response_security_check 返回；
+			// 其它服务为空，循环空转）。AttackLevel != none 即命中，置信度作分值。
+			for _, a := range resp.Body.Data.AttackResult {
+				if a == nil {
+					continue
+				}
+				lvl := ""
+				if a.AttackLevel != nil {
+					lvl = strings.ToLower(strings.TrimSpace(*a.AttackLevel))
+				}
+				if lvl == "" || lvl == "none" {
+					continue
+				}
+				score := 1.0
+				if a.Confidence != nil {
+					score = float64(*a.Confidence) / 100.0
+				}
+				label := ""
+				if a.Label != nil {
+					label = *a.Label
+				}
+				slog.Info("content_moderation.aliyun_attack_hit", "service", svc, "label", label, "level", lvl)
+				putMaxScore(scores, ContentModerationCategoryPromptAttack, score)
 			}
 		}
 		return vendorCategoryScores(scores), nil
