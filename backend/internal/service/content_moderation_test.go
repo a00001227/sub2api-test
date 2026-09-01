@@ -876,11 +876,12 @@ func TestExtractContentModerationInput_AnthropicImageSourceOnlyParticipatesInMem
 	}`)
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
-	require.Equal(t, "检查这张图", input.Text)
+	// 审核全部 user 消息：历史 "old" 与最新 "检查这张图" 都参与。
+	require.Equal(t, "old 检查这张图", input.Text)
 	require.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, input.Images)
 
 	log := (&ContentModerationService{}).buildLog(ContentModerationCheckInput{}, defaultContentModerationConfig(), ContentModerationActionAllow, false, "", 0, nil, input.ExcerptText(), nil, nil, "")
-	require.Equal(t, "检查这张图", log.InputExcerpt)
+	require.Equal(t, "old 检查这张图", log.InputExcerpt)
 	require.NotContains(t, log.InputExcerpt, "aGVsbG8=")
 }
 
@@ -917,9 +918,10 @@ func TestExtractContentModerationInput_OpenAIChatUsesLastUserMessage(t *testing.
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
-	require.Equal(t, "latest user", input.Text)
+	// 现在审核全部 user 消息（防历史夹带）：历史 user 与最新 user 都在，系统消息不计入。
+	require.Equal(t, "old user latest user", input.Text)
 	require.Equal(t, []string{"https://example.com/a.png"}, input.Images)
-	require.NotContains(t, input.Text, "old user")
+	require.Contains(t, input.Text, "old user")
 	require.NotContains(t, input.Text, "system prompt")
 }
 

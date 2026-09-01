@@ -21,9 +21,9 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	var images []string
 	switch protocol {
 	case ContentModerationProtocolAnthropicMessages:
-		collectLastAnthropicUserMessage(gjson.GetBytes(body, "messages"), &parts, &images)
+		collectAllAnthropicUserMessages(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIChat:
-		collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)
+		collectAllRoleMessages(gjson.GetBytes(body, "messages"), "user", &parts, &images)
 	case ContentModerationProtocolOpenAIResponses:
 		collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
 	case ContentModerationProtocolGemini:
@@ -86,6 +86,35 @@ func collectLastAnthropicUserMessage(messages gjson.Result, parts *[]string, ima
 	}
 	*parts = append(*parts, candidate...)
 	*images = append(*images, candidateImages...)
+}
+
+// collectAllAnthropicUserMessages 收集会话中全部 user 消息文本（不止最后一条）。
+// 越狱/提示词攻击常沉在历史里；且 Claude Code 末条 user 消息可能全是 <system-reminder>
+// （被过滤成空）导致只审最后一条时 skip_empty_input 整条放行。遍历全部 user 消息，
+// 按顺序拼接；截断保留开头（trimRunes 取前缀），开场白式越狱历史再长也裁不掉。
+func collectAllAnthropicUserMessages(messages gjson.Result, parts *[]string, images *[]string) {
+	if !messages.IsArray() {
+		return
+	}
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		if strings.ToLower(strings.TrimSpace(msg.Get("role").String())) == "user" {
+			collectAnthropicUserContentValue(msg.Get("content"), parts, images)
+		}
+		return true
+	})
+}
+
+// collectAllRoleMessages 收集全部指定 role 的消息文本（OpenAI Chat 历史夹带同理）。
+func collectAllRoleMessages(messages gjson.Result, role string, parts *[]string, images *[]string) {
+	if !messages.IsArray() {
+		return
+	}
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		if strings.ToLower(strings.TrimSpace(msg.Get("role").String())) == role {
+			collectContentValue(msg.Get("content"), parts, images)
+		}
+		return true
+	})
 }
 
 func collectAnthropicUserContentValue(value gjson.Result, parts *[]string, images *[]string) {

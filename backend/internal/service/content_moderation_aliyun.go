@@ -137,16 +137,17 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 				if lvl == "" || lvl == "none" {
 					continue
 				}
-				score := 1.0
-				if a.Confidence != nil {
-					score = float64(*a.Confidence) / 100.0
-				}
+				// 检出攻击即按命中处理（fail-closed，low/medium/high 都拦）；置信度仅记录。
 				label := ""
 				if a.Label != nil {
 					label = *a.Label
 				}
-				slog.Info("content_moderation.aliyun_attack_hit", "service", svc, "label", label, "level", lvl)
-				putMaxScore(scores, ContentModerationCategoryPromptAttack, score)
+				conf := float32(0)
+				if a.Confidence != nil {
+					conf = *a.Confidence
+				}
+				slog.Info("content_moderation.aliyun_attack_hit", "service", svc, "label", label, "level", lvl, "confidence", conf)
+				putMaxScore(scores, ContentModerationCategoryPromptAttack, 1.0)
 			}
 		}
 		return vendorCategoryScores(scores), nil

@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 当数组末尾不是用户消息时（典型场景：Agent 工具循环结束于 tool/assistant），
-// 应直接跳过审计——不再回溯查找历史中的某条用户消息。
+// 审核收集会话中全部 user 文本消息（不止最后一条），防止越狱/攻击沉在历史里被夹带绕过。
+// tool_result / 工具输出不计入（只取 user 文本消息）。
 
 func TestExtractContentModerationInput_AnthropicAgentToolLoopSkipsAudit(t *testing.T) {
 	body := []byte(`{
@@ -20,7 +20,7 @@ func TestExtractContentModerationInput_AnthropicAgentToolLoopSkipsAudit(t *testi
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Empty(t, input.Text)
+	require.Equal(t, "调用一下天气工具", input.Text)
 	require.Empty(t, input.Images)
 }
 
@@ -47,7 +47,7 @@ func TestExtractContentModerationInput_AnthropicMultiTurnExtractsLatestUser(t *t
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Equal(t, "Q2", input.Text)
+	require.Equal(t, "Q1 Q2", input.Text)
 }
 
 func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *testing.T) {
@@ -61,7 +61,7 @@ func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *te
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Equal(t, "重发", input.Text)
+	require.Equal(t, "原问题 重发", input.Text)
 }
 
 func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *testing.T) {
@@ -76,7 +76,7 @@ func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *test
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
-	require.Empty(t, input.Text)
+	require.Equal(t, "列出我的订单", input.Text)
 	require.Empty(t, input.Images)
 }
 
@@ -91,7 +91,7 @@ func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsLatestUser(t *
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
-	require.Equal(t, "Q2", input.Text)
+	require.Equal(t, "Q1 Q2", input.Text)
 }
 
 func TestExtractContentModerationInput_GeminiAgentToolLoopSkipsAudit(t *testing.T) {
