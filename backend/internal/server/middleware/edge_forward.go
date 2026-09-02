@@ -150,6 +150,16 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			c.Next()
 			return
 		}
+		// 只读元数据端点(列模型 /v1/models、查用量 /v1/usage)由中央直接服务,不转发到 cell:
+		// 这类请求不调用模型、请求体无 model,若走转发+模型白名单会被误判 403 model not allowed。
+		// 列模型菜单归中央(受分组「自定义 /v1/models 列表」等展示配置控制),与调用/调度无关。
+		if c.Request.Method == http.MethodGet {
+			if p := c.Request.URL.Path; strings.HasSuffix(p, "/models") || strings.HasSuffix(p, "/usage") {
+				c.Next()
+				return
+			}
+		}
+
 		// 消费者工作道(护号):优先读组自身的 lane(后台可视化、免重启、近实时生效);
 		// 为 normal/空时再退回 env 映射 EDGE_FORWARD_GROUP_LANES(过渡期兼容,迁完可删)。
 		consumerLane := normalizeLane(apiKey.Group.Lane)
@@ -217,9 +227,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 不转发 cell(从源头避免未配价模型下游/Portal 失败)。
 		if modelAllowed != nil {
 			reqModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-			// 仅对真正带 model 的请求做白名单校验;/v1/models、/usage 等无请求体模型的
-			// 端点 reqModel 为空 → 跳过,照常转发(否则列模型等接口被误判 403 model not allowed)。
-			if reqModel != "" && !modelAllowed(c.Request.Context(), reqModel) {
+			if !modelAllowed(c.Request.Context(), reqModel) {
 				slog.Info("edge_forward: 模型不在白名单,拒绝转发", "model", reqModel, "path", c.Request.URL.Path)
 				c.Header("Content-Type", "application/json")
 				c.String(http.StatusForbidden, `{"type":"error","error":{"type":"permission_error","message":"model not allowed"}}`)
