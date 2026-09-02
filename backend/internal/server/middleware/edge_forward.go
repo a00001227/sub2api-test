@@ -217,7 +217,9 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 不转发 cell(从源头避免未配价模型下游/Portal 失败)。
 		if modelAllowed != nil {
 			reqModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-			if !modelAllowed(c.Request.Context(), reqModel) {
+			// 仅对真正带 model 的请求做白名单校验;/v1/models、/usage 等无请求体模型的
+			// 端点 reqModel 为空 → 跳过,照常转发(否则列模型等接口被误判 403 model not allowed)。
+			if reqModel != "" && !modelAllowed(c.Request.Context(), reqModel) {
 				slog.Info("edge_forward: 模型不在白名单,拒绝转发", "model", reqModel, "path", c.Request.URL.Path)
 				c.Header("Content-Type", "application/json")
 				c.String(http.StatusForbidden, `{"type":"error","error":{"type":"permission_error","message":"model not allowed"}}`)
