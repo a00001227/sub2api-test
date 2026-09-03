@@ -57,13 +57,14 @@ func (h *AccountAPIHandler) accountKeyFromContext(c *gin.Context) *service.APIKe
 // GET /balance
 // Authorization: Bearer <account_key>
 func (h *AccountAPIHandler) Balance(c *gin.Context) {
-	subject, ok := middleware.GetAuthSubjectFromContext(c)
-	if !ok {
-		middleware.AbortWithError(c, 401, "USER_NOT_FOUND", "Could not resolve user from API key")
+	// 账户余额是账号级信息(总额/锁定/可用)——必须是账号密钥。客户密钥(ParentKeyID != nil)
+	// 会被 accountKeyFromContext 以 403 拦掉,否则下游客户能读到上游经销商的整个账户家底。
+	accountKey := h.accountKeyFromContext(c)
+	if accountKey == nil {
 		return
 	}
 
-	user, err := h.userService.GetByID(c.Request.Context(), subject.UserID)
+	user, err := h.userService.GetByID(c.Request.Context(), accountKey.UserID)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			middleware.AbortWithError(c, 401, "USER_NOT_FOUND", "User not found")
@@ -83,7 +84,7 @@ func (h *AccountAPIHandler) Balance(c *gin.Context) {
 		balance = 0
 	}
 
-	locked, err := h.apiKeyService.GetLockedBalance(c.Request.Context(), subject.UserID)
+	locked, err := h.apiKeyService.GetLockedBalance(c.Request.Context(), accountKey.UserID)
 	if err != nil {
 		middleware.AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to compute locked balance")
 		return
