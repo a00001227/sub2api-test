@@ -95,6 +95,7 @@ const (
 	maxContentModerationTestImageDataURLBytes    = 12 * 1024 * 1024
 	maxContentModerationBlockedKeywords          = 10000
 	maxContentModerationBlockedKeywordRunes      = 200
+	maxContentModerationAllowedInputHashes       = 10000
 	maxContentModerationModelFilterModels        = 1000
 	maxContentModerationModelFilterRunes         = 200
 
@@ -212,6 +213,10 @@ type ContentModerationConfig struct {
 	NonHitRetentionDays  int                          `json:"non_hit_retention_days"`
 	PreHashCheckEnabled  bool                         `json:"pre_hash_check_enabled"`
 	BlockedKeywords      []string                     `json:"blocked_keywords"`
+	// AllowedInputHashes 放行白名单：命中的输入哈希在审核最前端直接放行，不进关键词/预哈希/LLM，
+	// 且不记录（因此永不会被再次收进 flagged_hashes，根治「删哈希→复审→再收录」的打地鼠）。
+	// 口径与 ContentModerationInput.Hash() 一致（sha256 小写 hex）。
+	AllowedInputHashes  []string                     `json:"allowed_input_hashes"`
 	KeywordBlockingMode  string                       `json:"keyword_blocking_mode"`
 	ModelFilter          ContentModerationModelFilter `json:"model_filter"`
 	// CyberPolicyExcludeFromBanCount 为 true 时，cyber_policy 命中不参与自动封号计数：
@@ -261,6 +266,7 @@ type ContentModerationConfigView struct {
 	NonHitRetentionDays            int                             `json:"non_hit_retention_days"`
 	PreHashCheckEnabled            bool                            `json:"pre_hash_check_enabled"`
 	BlockedKeywords                []string                        `json:"blocked_keywords"`
+	AllowedInputHashes             []string                        `json:"allowed_input_hashes"`
 	KeywordBlockingMode            string                          `json:"keyword_blocking_mode"`
 	ModelFilter                    ContentModerationModelFilter    `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount bool                            `json:"cyber_policy_exclude_from_ban_count"`
@@ -364,6 +370,7 @@ type UpdateContentModerationConfigInput struct {
 	NonHitRetentionDays            *int                          `json:"non_hit_retention_days"`
 	PreHashCheckEnabled            *bool                         `json:"pre_hash_check_enabled"`
 	BlockedKeywords                *[]string                     `json:"blocked_keywords"`
+	AllowedInputHashes             *[]string                     `json:"allowed_input_hashes"`
 	KeywordBlockingMode            *string                       `json:"keyword_blocking_mode"`
 	ModelFilter                    *ContentModerationModelFilter `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount *bool                         `json:"cyber_policy_exclude_from_ban_count"`
@@ -770,6 +777,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.BlockedKeywords != nil {
 		cfg.BlockedKeywords = normalizeBlockedKeywords(*input.BlockedKeywords)
 	}
+	if input.AllowedInputHashes != nil {
+		cfg.AllowedInputHashes = normalizeInputHashes(*input.AllowedInputHashes)
+	}
 	if input.KeywordBlockingMode != nil {
 		cfg.KeywordBlockingMode = strings.TrimSpace(*input.KeywordBlockingMode)
 	}
@@ -1017,6 +1027,19 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		"text_runes", len([]rune(content.Text)),
 		"image_count", len(content.Images))
 	hashText := content.Hash()
+	// 放行白名单：命中即在最前端直接放行，不进关键词/预哈希/LLM，也不记录 —— 因此这条输入
+	// 永远不会再被收进 flagged_hashes，根治「删哈希→复审→再收录」的打地鼠。放在预哈希拦截之前，
+	// 所以即便旧哈希还残留在 flagged 集里也拦不住（放行先短路）。
+	if len(cfg.AllowedInputHashes) > 0 && containsInputHash(cfg.AllowedInputHashes, hashText) {
+		slog.Info("content_moderation.allow_hash",
+			"user_id", input.UserID,
+			"api_key_id", input.APIKeyID,
+			"group_id", contentModerationLogGroupID(input.GroupID),
+			"endpoint", input.Endpoint,
+			"protocol", input.Protocol,
+			"input_hash", hashText)
+		return allow, nil
+	}
 	if cfg.Mode == ContentModerationModePreBlock {
 		if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
 			if keyword, hit := matchBlockedKeyword(content.Text, cfg.BlockedKeywords); hit {
@@ -2069,6 +2092,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		NonHitRetentionDays:  defaultContentModerationNonHitRetentionDays,
 		PreHashCheckEnabled:  false,
 		BlockedKeywords:      []string{},
+		AllowedInputHashes:   []string{},
 		KeywordBlockingMode:  ContentModerationKeywordModeKeywordAndAPI,
 		ModelFilter: ContentModerationModelFilter{
 			Type:   ContentModerationModelFilterAll,
@@ -2087,6 +2111,7 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 	clone.APIKeys = append([]string(nil), cfg.APIKeys...)
 	clone.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	clone.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
+	clone.AllowedInputHashes = append([]string(nil), cfg.AllowedInputHashes...)
 	clone.Thresholds = cloneFloatMap(cfg.Thresholds)
 	clone.ModelFilter = ContentModerationModelFilter{
 		Type:   cfg.ModelFilter.Type,
@@ -2190,6 +2215,7 @@ func (cfg *ContentModerationConfig) normalize() {
 	cfg.GroupIDs = normalizeInt64IDs(cfg.GroupIDs)
 	cfg.Thresholds = mergeContentModerationThresholds(ContentModerationDefaultThresholds(), cfg.Thresholds)
 	cfg.BlockedKeywords = normalizeBlockedKeywords(cfg.BlockedKeywords)
+	cfg.AllowedInputHashes = normalizeInputHashes(cfg.AllowedInputHashes)
 	cfg.KeywordBlockingMode = normalizeKeywordBlockingMode(cfg.KeywordBlockingMode)
 	cfg.ModelFilter = normalizeContentModerationModelFilter(cfg.ModelFilter)
 }
@@ -2430,6 +2456,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		NonHitRetentionDays:            cfg.NonHitRetentionDays,
 		PreHashCheckEnabled:            cfg.PreHashCheckEnabled,
 		BlockedKeywords:                append([]string(nil), cfg.BlockedKeywords...),
+		AllowedInputHashes:             append([]string(nil), cfg.AllowedInputHashes...),
 		KeywordBlockingMode:            cfg.KeywordBlockingMode,
 		ModelFilter:                    cloneContentModerationModelFilter(cfg.ModelFilter),
 		CyberPolicyExcludeFromBanCount: cfg.CyberPolicyExcludeFromBanCount,
@@ -2760,6 +2787,45 @@ func normalizeBlockedKeywords(in []string) []string {
 		}
 	}
 	return out
+}
+
+// normalizeInputHashes 归一化放行哈希集：去空格、转小写(与 Hash() 的 sha256 小写 hex 对齐)、
+// 去重、封顶。宽松处理:不校验是否合法 hex —— 非法值只是永不命中，无害。
+func normalizeInputHashes(in []string) []string {
+	if len(in) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, raw := range in {
+		h := strings.ToLower(strings.TrimSpace(raw))
+		if h == "" {
+			continue
+		}
+		if _, ok := seen[h]; ok {
+			continue
+		}
+		seen[h] = struct{}{}
+		out = append(out, h)
+		if len(out) >= maxContentModerationAllowedInputHashes {
+			break
+		}
+	}
+	return out
+}
+
+// containsInputHash 判断哈希是否在放行集内(调用方保证 set 已 normalize 为小写)。
+func containsInputHash(set []string, hashText string) bool {
+	hashText = strings.ToLower(strings.TrimSpace(hashText))
+	if hashText == "" {
+		return false
+	}
+	for _, h := range set {
+		if h == hashText {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeKeywordBlockingMode(mode string) string {

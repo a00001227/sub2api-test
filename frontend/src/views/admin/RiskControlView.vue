@@ -1093,6 +1093,23 @@
                 {{ t('admin.riskControl.blockedKeywordsLimit', { max: blockedKeywordMax }) }}
               </p>
             </div>
+
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <label class="input-label mb-0">{{ t('admin.riskControl.allowedHashes') }}</label>
+                <span class="inline-flex rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300">
+                  {{ t('admin.riskControl.allowedHashCount', { count: allowedHashCount }) }}
+                </span>
+              </div>
+              <textarea
+                v-model="configForm.allowed_input_hashes_text"
+                class="input min-h-32 resize-y font-mono text-sm"
+                :placeholder="t('admin.riskControl.allowedHashesPlaceholder')"
+              ></textarea>
+              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.riskControl.allowedHashesHint') }}
+              </p>
+            </div>
           </div>
 
           <div v-else class="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -1340,6 +1357,7 @@ const configForm = reactive({
   pre_hash_check_enabled: false,
   thresholds: { ...riskThresholdDefaults } as Record<string, number>,
   blocked_keywords_text: '',
+  allowed_input_hashes_text: '',
   keyword_blocking_mode: 'keyword_and_api' as KeywordBlockingMode,
   model_filter_type: 'all' as ContentModerationModelFilterType,
   model_filter_models: [] as string[],
@@ -1530,6 +1548,10 @@ const inputApiKeyCount = computed(() => parseApiKeys(configForm.api_keys_text).l
 const blockedKeywordList = computed(() => parseBlockedKeywords(configForm.blocked_keywords_text))
 
 const blockedKeywordCount = computed(() => blockedKeywordList.value.length)
+
+const allowedHashList = computed(() => parseAllowedHashes(configForm.allowed_input_hashes_text))
+
+const allowedHashCount = computed(() => allowedHashList.value.length)
 
 const pendingDeletedApiKeyCount = computed(() => pendingDeleteApiKeyHashes.value.length)
 
@@ -1838,6 +1860,7 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.pre_hash_check_enabled = config.pre_hash_check_enabled ?? false
   configForm.thresholds = riskThresholdsFromConfig(config.thresholds)
   configForm.blocked_keywords_text = Array.isArray(config.blocked_keywords) ? config.blocked_keywords.join('\n') : ''
+  configForm.allowed_input_hashes_text = Array.isArray(config.allowed_input_hashes) ? config.allowed_input_hashes.join('\n') : ''
   configForm.keyword_blocking_mode = normalizeKeywordBlockingMode(config.keyword_blocking_mode)
   const modelFilter = normalizeModelFilter(config.model_filter)
   configForm.model_filter_type = modelFilter.type
@@ -1957,6 +1980,7 @@ async function saveConfig() {
       pre_hash_check_enabled: configForm.pre_hash_check_enabled,
       thresholds: buildRiskThresholdPayload(),
       blocked_keywords: blockedKeywordList.value,
+      allowed_input_hashes: allowedHashList.value,
       keyword_blocking_mode: configForm.keyword_blocking_mode,
       model_filter: modelFilterPayload,
     }
@@ -2481,6 +2505,20 @@ function parseBlockedKeywords(value: string): string[] {
     if (seen.has(key)) continue
     seen.add(key)
     out.push(kw)
+  }
+  return out
+}
+
+// 放行哈希:每行一个 sha256(小写 hex)，去空格/小写/去重。与后端 normalizeInputHashes 对齐。
+function parseAllowedHashes(value: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const line of value.split(/\r?\n/)) {
+    const h = line.trim().toLowerCase()
+    if (!h) continue
+    if (seen.has(h)) continue
+    seen.add(h)
+    out.push(h)
   }
   return out
 }
