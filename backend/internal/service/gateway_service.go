@@ -1419,13 +1419,17 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	// temperature：旧版 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
 	// 新版 CLI 对"已弃用 temperature 的模型"不再发送该字段，否则上游 400。
 	// 策略由开关控制：
-	//   stripTemperature=false(默认，旧行为)：客户端传了透传；没传补默认 1。
-	//   stripTemperature=true：剥离 temperature（含客户端自带），保证不发到上游。
+	//   stripTemperature=false(默认注入/旧行为)：客户端传了透传；没传补默认 1。
+	//   stripTemperature=true(现默认)：剥离 temperature/top_p/top_k（含客户端自带），
+	//     保证不发到上游——与 new-api 剥离采样参数对齐（context_management 交由本函数
+	//     下方按 thinking 模式管理，不在此剥离）。
 	if opts.stripTemperature {
-		if gjson.GetBytes(out, "temperature").Exists() {
-			if next, ok := deleteJSONPathBytes(out, "temperature"); ok {
-				out = next
-				modified = true
+		for _, p := range []string{"temperature", "top_p", "top_k"} {
+			if gjson.GetBytes(out, p).Exists() {
+				if next, ok := deleteJSONPathBytes(out, p); ok {
+					out = next
+					modified = true
+				}
 			}
 		}
 	} else if !gjson.GetBytes(out, "temperature").Exists() {
@@ -5189,15 +5193,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	// 兜底(与上面伪装分支互补):开关关闭时,无论账号类型(APIKey/ServiceAccount/
-	// OAuth)或客户端类型,都确保上游请求不带 temperature——伪装分支只覆盖 OAuth+非CC,
-	// 而客户端(如 Go-http-client)对 APIKey 账号自带 temperature 时不会被剥离。
-	// 目标:让"已弃用 temperature 的模型"永远收不到 temperature,消除 400。幂等:
+	// OAuth)或客户端类型,都确保上游请求不带 temperature/top_p/top_k——伪装分支只覆盖
+	// OAuth+非CC,而客户端(如 Go-http-client)对 APIKey 账号自带这些采样参数时不会被剥离。
+	// 目标:让"已弃用 temperature 的模型"永远收不到这些字段,消除 400。幂等:
 	// 伪装分支已剥离时这里是 no-op。
 	if s.settingService != nil && !s.settingService.IsClaudeOAuthTemperatureInjectionEnabled(ctx) {
-		if gjson.GetBytes(body, "temperature").Exists() {
-			if next, ok := deleteJSONPathBytes(body, "temperature"); ok {
-				if err := replaceBody(next); err != nil {
-					return nil, err
+		for _, p := range []string{"temperature", "top_p", "top_k"} {
+			if gjson.GetBytes(body, p).Exists() {
+				if next, ok := deleteJSONPathBytes(body, p); ok {
+					if err := replaceBody(next); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
@@ -5861,13 +5867,15 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
 	input.Body = StripEmptyTextBlocks(input.Body)
-	// 透传分支同样剥离 temperature：Forward 主路径的剥离(5196 附近)在本分支提前 return 之前
-	// 无法到达，导致 API Key 透传账号把客户端自带的 temperature 原样发给上游，对"已弃用
-	// temperature 的模型"报 400。开关关闭(默认注入=旧行为)时才剥离，与主路径口径一致。幂等。
+	// 透传分支同样剥离 temperature/top_p/top_k：Forward 主路径的剥离(5196 附近)在本分支
+	// 提前 return 之前无法到达，导致 API Key 透传账号把客户端自带的采样参数原样发给上游，
+	// 对"已弃用 temperature 的模型"报 400。开关关闭(现默认剥离)时才剥离，与主路径口径一致。幂等。
 	if s.settingService != nil && !s.settingService.IsClaudeOAuthTemperatureInjectionEnabled(ctx) {
-		if gjson.GetBytes(input.Body, "temperature").Exists() {
-			if next, ok := deleteJSONPathBytes(input.Body, "temperature"); ok {
-				input.Body = next
+		for _, p := range []string{"temperature", "top_p", "top_k"} {
+			if gjson.GetBytes(input.Body, p).Exists() {
+				if next, ok := deleteJSONPathBytes(input.Body, p); ok {
+					input.Body = next
+				}
 			}
 		}
 	}

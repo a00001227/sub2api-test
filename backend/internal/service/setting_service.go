@@ -2408,12 +2408,12 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				metadataPassthrough:              false,
 				cchSigning:                       false,
 				claudeOAuthSystemPromptInjection: true,
-				claudeOAuthTemperatureInjection:  true,
+				claudeOAuthTemperatureInjection:  false, // 默认剥离 temperature（弃用 temperature 的模型会 400）
 				anthropicCacheTTL1hInjection:     false,
 				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, claudeOAuthTemperatureInjection: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl()}, nil
+			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, claudeOAuthTemperatureInjection: false, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl()}, nil
 		}
 		fp := true
 		if v, ok := values[SettingKeyEnableFingerprintUnification]; ok && v != "" {
@@ -2425,7 +2425,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if v, ok := values[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
 			systemPromptInjection = v == "true"
 		}
-		temperatureInjection := true
+		temperatureInjection := false // 默认剥离 temperature/top_p/top_k（弃用 temperature 的模型会 400）
 		if v, ok := values[SettingKeyEnableClaudeOAuthTemperatureInjection]; ok && v != "" {
 			temperatureInjection = v == "true"
 		}
@@ -2463,7 +2463,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, claudeOAuthTemperatureInjection: true}
+	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, claudeOAuthTemperatureInjection: false}
 }
 
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.
@@ -2492,8 +2492,9 @@ func (s *SettingService) GetClaudeOAuthSystemPromptInjectionSettings(ctx context
 	return result.claudeOAuthSystemPromptInjection, result.claudeOAuthSystemPrompt, result.claudeOAuthSystemPromptBlocks
 }
 
-// IsClaudeOAuthTemperatureInjectionEnabled 是否对 Claude OAuth mimic 路径注入 temperature=1（默认 true=旧行为）。
-// 关闭后网关会剥离请求中的 temperature，避免"已弃用 temperature 的模型"报 400。
+// IsClaudeOAuthTemperatureInjectionEnabled 是否对 Claude OAuth mimic 路径注入 temperature=1（默认 false=剥离）。
+// 默认关闭：网关会剥离请求中的 temperature/top_p/top_k，避免"已弃用 temperature 的模型"报 400。
+// 打开则恢复旧行为（补 temperature=1、不剥离采样参数）——仅作回退阀门用。
 func (s *SettingService) IsClaudeOAuthTemperatureInjectionEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).claudeOAuthTemperatureInjection
 }
@@ -3549,7 +3550,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	if v, ok := settings[SettingKeyEnableClaudeOAuthTemperatureInjection]; ok && v != "" {
 		result.EnableClaudeOAuthTemperatureInjection = v == "true"
 	} else {
-		result.EnableClaudeOAuthTemperatureInjection = true // default: 保持旧行为(注入);需修复在后台关掉即剥离
+		result.EnableClaudeOAuthTemperatureInjection = false // default: 默认剥离 temperature/top_p/top_k;打开才恢复旧行为(注入)
 	}
 	result.ClaudeOAuthSystemPrompt = settings[SettingKeyClaudeOAuthSystemPrompt]
 	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]
