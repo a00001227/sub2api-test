@@ -5188,6 +5188,21 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
+	// 兜底(与上面伪装分支互补):开关关闭时,无论账号类型(APIKey/ServiceAccount/
+	// OAuth)或客户端类型,都确保上游请求不带 temperature——伪装分支只覆盖 OAuth+非CC,
+	// 而客户端(如 Go-http-client)对 APIKey 账号自带 temperature 时不会被剥离。
+	// 目标:让"已弃用 temperature 的模型"永远收不到 temperature,消除 400。幂等:
+	// 伪装分支已剥离时这里是 no-op。
+	if s.settingService != nil && !s.settingService.IsClaudeOAuthTemperatureInjectionEnabled(ctx) {
+		if gjson.GetBytes(body, "temperature").Exists() {
+			if next, ok := deleteJSONPathBytes(body, "temperature"); ok {
+				if err := replaceBody(next); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
 	// 强制执行 cache_control 块数量限制（最多 4 个）
 	if err := replaceBody(enforceCacheControlLimit(body)); err != nil {
 		return nil, err
