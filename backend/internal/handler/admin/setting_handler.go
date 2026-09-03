@@ -257,6 +257,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableMetadataPassthrough:              settings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       settings.EnableCCHSigning,
 		EnableClaudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
+		EnableClaudeOAuthTemperatureInjection:  settings.EnableClaudeOAuthTemperatureInjection,
 		ClaudeOAuthSystemPrompt:                settings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:          settings.ClaudeOAuthSystemPromptBlocks,
 		EnableAnthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
@@ -595,6 +596,7 @@ type UpdateSettingsRequest struct {
 	EnableMetadataPassthrough              *bool   `json:"enable_metadata_passthrough"`
 	EnableCCHSigning                       *bool   `json:"enable_cch_signing"`
 	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
+	EnableClaudeOAuthTemperatureInjection  *bool   `json:"enable_claude_oauth_temperature_injection"`
 	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
@@ -1675,6 +1677,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableClaudeOAuthSystemPromptInjection
 		}(),
+		EnableClaudeOAuthTemperatureInjection: func() bool {
+			if req.EnableClaudeOAuthTemperatureInjection != nil {
+				return *req.EnableClaudeOAuthTemperatureInjection
+			}
+			return previousSettings.EnableClaudeOAuthTemperatureInjection
+		}(),
 		ClaudeOAuthSystemPrompt: func() string {
 			if req.ClaudeOAuthSystemPrompt != nil {
 				return *req.ClaudeOAuthSystemPrompt
@@ -2104,6 +2112,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableMetadataPassthrough:              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       updatedSettings.EnableCCHSigning,
 		EnableClaudeOAuthSystemPromptInjection: updatedSettings.EnableClaudeOAuthSystemPromptInjection,
+		EnableClaudeOAuthTemperatureInjection:  updatedSettings.EnableClaudeOAuthTemperatureInjection,
 		ClaudeOAuthSystemPrompt:                updatedSettings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:          updatedSettings.ClaudeOAuthSystemPromptBlocks,
 		EnableAnthropicCacheTTL1hInjection:     updatedSettings.EnableAnthropicCacheTTL1hInjection,
@@ -2585,6 +2594,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.EnableClaudeOAuthSystemPromptInjection != after.EnableClaudeOAuthSystemPromptInjection {
 		changed = append(changed, "enable_claude_oauth_system_prompt_injection")
+	}
+	if before.EnableClaudeOAuthTemperatureInjection != after.EnableClaudeOAuthTemperatureInjection {
+		changed = append(changed, "enable_claude_oauth_temperature_injection")
 	}
 	if before.ClaudeOAuthSystemPrompt != after.ClaudeOAuthSystemPrompt {
 		changed = append(changed, "claude_oauth_system_prompt")
