@@ -50,6 +50,9 @@ func (s *ContentModerationService) callAliyunModeration(ctx context.Context, cfg
 	if strings.TrimSpace(text) == "" {
 		return vendorCategoryScores(map[string]float64{}), nil
 	}
+	// 阿里云单条 content 上限 2000 字，超过直接 400。截到 ≤1900 并保留结尾（审最新内容）。
+	// 超长会话（如 Claude Code 续接摘要）之前正是在这里撞上限、被记成「异常」。
+	text = trimRunesTail(text, maxAliyunModerationContentRunes)
 	if cfg.AliyunAccessKeyID == "" || cfg.AliyunAccessKeySecret == "" {
 		return nil, errors.New("aliyun moderation credentials not configured")
 	}

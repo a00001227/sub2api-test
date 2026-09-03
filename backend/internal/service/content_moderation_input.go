@@ -89,9 +89,11 @@ func collectLastAnthropicUserMessage(messages gjson.Result, parts *[]string, ima
 }
 
 // collectAllAnthropicUserMessages 收集会话中全部 user 消息文本（不止最后一条）。
-// 越狱/提示词攻击常沉在历史里；且 Claude Code 末条 user 消息可能全是 <system-reminder>
-// （被过滤成空）导致只审最后一条时 skip_empty_input 整条放行。遍历全部 user 消息，
-// 按顺序拼接；截断保留开头（trimRunes 取前缀），开场白式越狱历史再长也裁不掉。
+// Claude Code 末条 user 消息可能全是 <system-reminder>（被过滤成空）导致只审最后一条时
+// skip_empty_input 整条放行，故遍历全部 user 消息按顺序拼接。超长时截断保留“结尾”
+// （Normalize 用 trimRunesTail），因为最新内容在末尾、更早历史已在各自轮次审过；
+// 残余缺口：单条请求里伪造的假历史（越狱塞在前、正常内容垫后）只审结尾会漏，
+// 要彻底堵需分片全审（成倍审核费），当前按性价比取截断。
 func collectAllAnthropicUserMessages(messages gjson.Result, parts *[]string, images *[]string) {
 	if !messages.IsArray() {
 		return
@@ -338,6 +340,11 @@ func addModerationText(parts *[]string, text string) {
 		return
 	}
 	if strings.Contains(text, "<system-reminder>") {
+		return
+	}
+	// Claude Code 客户端启动时拼接的工具探测样板（仅一串工具名，无用户内容），审它纯浪费
+	// 审核费。整条只剩它时会走 skip_empty_input 静默放行，不调审核上游、不进审计列表。
+	if strings.HasPrefix(text, "<available-deferred-tools>") {
 		return
 	}
 	*parts = append(*parts, text)

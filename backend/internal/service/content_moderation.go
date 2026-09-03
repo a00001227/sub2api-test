@@ -67,6 +67,10 @@ const (
 	maxContentModerationTimeoutMS     = 30000
 	maxModerationInputRunes           = 12000
 	maxModerationExcerptRunes         = 240
+	// 阿里云文本审核（chat_detection 等经典服务）单条 content 上限 2000 字，超过直接 400
+	// "content is too long(>2,000)"。留 100 字余量防边界/计数口径差异。仅约束阿里云路径，
+	// 不影响 OpenAI moderations / 腾讯云（各自上限不同）。
+	maxAliyunModerationContentRunes = 1900
 
 	defaultContentModerationWorkerCount          = 4
 	maxContentModerationWorkerCount              = 32
@@ -394,7 +398,8 @@ func (in *ContentModerationInput) Normalize() {
 	if in == nil {
 		return
 	}
-	in.Text = trimRunes(normalizeContentModerationText(in.Text), maxModerationInputRunes)
+	// 保留结尾：多轮对话最新内容在末尾，老历史已在各自轮次审过（见 trimRunesTail 注释）。
+	in.Text = trimRunesTail(normalizeContentModerationText(in.Text), maxModerationInputRunes)
 	in.Images = normalizeModerationImages(in.Images)
 }
 
@@ -2943,6 +2948,20 @@ func trimRunes(text string, max int) string {
 		return text
 	}
 	return string(runes[:max])
+}
+
+// trimRunesTail 与 trimRunes 相反，超长时保留“结尾” max 个字符（丢开头）。
+// 审计场景用它：多轮对话里最新一条 user 消息在末尾，且更早的历史在其各自轮次已审过，
+// 所以截断时优先保住“本次新增内容”，而不是重复审早就审过的老历史。
+func trimRunesTail(text string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[len(runes)-max:])
 }
 
 func maskSecretTail(secret string) string {
