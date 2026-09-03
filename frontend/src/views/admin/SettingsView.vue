@@ -3897,6 +3897,31 @@
                 />
               </div>
 
+              <!-- Claude OAuth Temperature Injection -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeOAuthTemperatureInjection",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeOAuthTemperatureInjectionHint",
+                      )
+                    }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.enable_claude_oauth_temperature_injection"
+                />
+              </div>
+
               <div>
                 <label
                   class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -7864,6 +7889,7 @@ const form = reactive<SettingsForm>({
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
   enable_claude_oauth_system_prompt_injection: true,
+  enable_claude_oauth_temperature_injection: true,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: defaultClaudeOAuthSystemPromptBlocks,
   enable_anthropic_cache_ttl_1h_injection: false,
@@ -8989,6 +9015,8 @@ async function saveSettings() {
       enable_cch_signing: form.enable_cch_signing,
       enable_claude_oauth_system_prompt_injection:
         form.enable_claude_oauth_system_prompt_injection,
+      enable_claude_oauth_temperature_injection:
+        form.enable_claude_oauth_temperature_injection,
       claude_oauth_system_prompt: form.claude_oauth_system_prompt?.trim()
         ? form.claude_oauth_system_prompt
         : "",

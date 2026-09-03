@@ -1197,6 +1197,9 @@ type claudeOAuthNormalizeOptions struct {
 	injectMetadata          bool
 	metadataUserID          string
 	stripSystemCacheControl bool
+	// stripTemperature=true 时不注入 temperature 且剥离请求中已有的 temperature（含客户端自带），
+	// 对齐新版 Claude Code 对"已弃用 temperature 的模型"不发该字段的行为。false=旧行为(缺失补 1)。
+	stripTemperature bool
 }
 
 // sanitizeSystemText rewrites only the fixed OpenCode identity sentence (if present).
@@ -1413,10 +1416,19 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// temperature：真实 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
-	// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
-	// 策略：客户端传了什么就透传；没传则补默认 1。
-	if !gjson.GetBytes(out, "temperature").Exists() {
+	// temperature：旧版 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
+	// 新版 CLI 对"已弃用 temperature 的模型"不再发送该字段，否则上游 400。
+	// 策略由开关控制：
+	//   stripTemperature=false(默认，旧行为)：客户端传了透传；没传补默认 1。
+	//   stripTemperature=true：剥离 temperature（含客户端自带），保证不发到上游。
+	if opts.stripTemperature {
+		if gjson.GetBytes(out, "temperature").Exists() {
+			if next, ok := deleteJSONPathBytes(out, "temperature"); ok {
+				out = next
+				modified = true
+			}
+		}
+	} else if !gjson.GetBytes(out, "temperature").Exists() {
 		if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
 			out = next
 			modified = true
@@ -1548,6 +1560,9 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	}
 
 	normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: !systemRewritten}
+	if s.settingService != nil {
+		normalizeOpts.stripTemperature = !s.settingService.IsClaudeOAuthTemperatureInjectionEnabled(ctx)
+	}
 
 	if s.identityService != nil && c != nil && c.Request != nil {
 		if fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header); err == nil && fp != nil {
@@ -5132,6 +5147,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// 未重写时（haiku / 注入开关关闭）剥离客户端 cache_control，与原有行为一致。
 		// 两种情况下 enforceCacheControlLimit 都会兜底处理上限。
 		normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: !systemRewritten}
+		if s.settingService != nil {
+			normalizeOpts.stripTemperature = !s.settingService.IsClaudeOAuthTemperatureInjectionEnabled(ctx)
+		}
 		if s.identityService != nil {
 			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
 			if err == nil && fp != nil {
@@ -10236,6 +10254,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 
 	if shouldMimicClaudeCode {
 		normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: true}
+		if s.settingService != nil {
+			normalizeOpts.stripTemperature = !s.settingService.IsClaudeOAuthTemperatureInjectionEnabled(ctx)
+		}
 		var normalizedBody []byte
 		normalizedBody, reqModel = normalizeClaudeOAuthRequestBody(body, reqModel, normalizeOpts)
 		if err := replaceBody(normalizedBody); err != nil {

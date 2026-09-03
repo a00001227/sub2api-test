@@ -431,6 +431,9 @@ const (
 	SettingKeyEnableCCHSigning = "enable_cch_signing"
 	// SettingKeyEnableClaudeOAuthSystemPromptInjection 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
 	SettingKeyEnableClaudeOAuthSystemPromptInjection = "enable_claude_oauth_system_prompt_injection"
+	// SettingKeyEnableClaudeOAuthTemperatureInjection 是否对 Claude OAuth mimic 路径注入 temperature=1（默认 true=旧 CLI 行为）。
+	// 关闭后会剥离请求中的 temperature（含客户端自带），对齐新版 Claude Code 对"已弃用 temperature 的模型"不发该字段的行为，避免上游 400。
+	SettingKeyEnableClaudeOAuthTemperatureInjection = "enable_claude_oauth_temperature_injection"
 	// SettingKeyClaudeOAuthSystemPrompt Claude OAuth mimic 路径注入的通用扩展 system prompt（空值使用内置默认）
 	SettingKeyClaudeOAuthSystemPrompt = "claude_oauth_system_prompt"
 	// SettingKeyClaudeOAuthSystemPromptBlocks Claude OAuth mimic 路径注入的 system blocks JSON 配置（空值使用内置默认）

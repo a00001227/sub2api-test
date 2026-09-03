@@ -116,6 +116,7 @@ type cachedGatewayForwardingSettings struct {
 	metadataPassthrough              bool
 	cchSigning                       bool
 	claudeOAuthSystemPromptInjection bool
+	claudeOAuthTemperatureInjection  bool
 	claudeOAuthSystemPrompt          string
 	claudeOAuthSystemPromptBlocks    string
 	anthropicCacheTTL1hInjection     bool
@@ -2001,6 +2002,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableMetadataPassthrough] = strconv.FormatBool(settings.EnableMetadataPassthrough)
 	updates[SettingKeyEnableCCHSigning] = strconv.FormatBool(settings.EnableCCHSigning)
 	updates[SettingKeyEnableClaudeOAuthSystemPromptInjection] = strconv.FormatBool(settings.EnableClaudeOAuthSystemPromptInjection)
+	updates[SettingKeyEnableClaudeOAuthTemperatureInjection] = strconv.FormatBool(settings.EnableClaudeOAuthTemperatureInjection)
 	updates[SettingKeyClaudeOAuthSystemPrompt] = settings.ClaudeOAuthSystemPrompt
 	if err := ValidateClaudeOAuthSystemPromptBlocksConfig(settings.ClaudeOAuthSystemPromptBlocks); err != nil {
 		return nil, err
@@ -2141,6 +2143,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		metadataPassthrough:              settings.EnableMetadataPassthrough,
 		cchSigning:                       settings.EnableCCHSigning,
 		claudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
+		claudeOAuthTemperatureInjection:  settings.EnableClaudeOAuthTemperatureInjection,
 		claudeOAuthSystemPrompt:          settings.ClaudeOAuthSystemPrompt,
 		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
 		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
@@ -2350,6 +2353,7 @@ func (s *SettingService) IsBackendModeEnabled(ctx context.Context) bool {
 
 type gatewayForwardingSettingsResult struct {
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
+	claudeOAuthTemperatureInjection                                                       bool
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
 
@@ -2376,6 +2380,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					mp:                               cached.metadataPassthrough,
 					cch:                              cached.cchSigning,
 					claudeOAuthSystemPromptInjection: cached.claudeOAuthSystemPromptInjection,
+					claudeOAuthTemperatureInjection:  cached.claudeOAuthTemperatureInjection,
 					claudeOAuthSystemPrompt:          cached.claudeOAuthSystemPrompt,
 					claudeOAuthSystemPromptBlocks:    cached.claudeOAuthSystemPromptBlocks,
 					cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
@@ -2390,6 +2395,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableMetadataPassthrough,
 			SettingKeyEnableCCHSigning,
 			SettingKeyEnableClaudeOAuthSystemPromptInjection,
+			SettingKeyEnableClaudeOAuthTemperatureInjection,
 			SettingKeyClaudeOAuthSystemPrompt,
 			SettingKeyClaudeOAuthSystemPromptBlocks,
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
@@ -2402,11 +2408,12 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				metadataPassthrough:              false,
 				cchSigning:                       false,
 				claudeOAuthSystemPromptInjection: true,
+				claudeOAuthTemperatureInjection:  true,
 				anthropicCacheTTL1hInjection:     false,
 				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl()}, nil
+			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, claudeOAuthTemperatureInjection: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl()}, nil
 		}
 		fp := true
 		if v, ok := values[SettingKeyEnableFingerprintUnification]; ok && v != "" {
@@ -2417,6 +2424,10 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		systemPromptInjection := true
 		if v, ok := values[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
 			systemPromptInjection = v == "true"
+		}
+		temperatureInjection := true
+		if v, ok := values[SettingKeyEnableClaudeOAuthTemperatureInjection]; ok && v != "" {
+			temperatureInjection = v == "true"
 		}
 		systemPrompt := values[SettingKeyClaudeOAuthSystemPrompt]
 		systemPromptBlocks := values[SettingKeyClaudeOAuthSystemPromptBlocks]
@@ -2430,6 +2441,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			metadataPassthrough:              mp,
 			cchSigning:                       cch,
 			claudeOAuthSystemPromptInjection: systemPromptInjection,
+			claudeOAuthTemperatureInjection:  temperatureInjection,
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
@@ -2441,6 +2453,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			mp:                               mp,
 			cch:                              cch,
 			claudeOAuthSystemPromptInjection: systemPromptInjection,
+			claudeOAuthTemperatureInjection:  temperatureInjection,
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
 			cacheTTL1h:                       cacheTTL1h,
@@ -2450,7 +2463,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true}
+	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, claudeOAuthTemperatureInjection: true}
 }
 
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.
@@ -2477,6 +2490,12 @@ func (s *SettingService) IsRewriteMessageCacheControlEnabled(ctx context.Context
 func (s *SettingService) GetClaudeOAuthSystemPromptInjectionSettings(ctx context.Context) (enabled bool, prompt string, blocks string) {
 	result := s.getGatewayForwardingSettingsCached(ctx)
 	return result.claudeOAuthSystemPromptInjection, result.claudeOAuthSystemPrompt, result.claudeOAuthSystemPromptBlocks
+}
+
+// IsClaudeOAuthTemperatureInjectionEnabled 是否对 Claude OAuth mimic 路径注入 temperature=1（默认 true=旧行为）。
+// 关闭后网关会剥离请求中的 temperature，避免"已弃用 temperature 的模型"报 400。
+func (s *SettingService) IsClaudeOAuthTemperatureInjectionEnabled(ctx context.Context) bool {
+	return s.getGatewayForwardingSettingsCached(ctx).claudeOAuthTemperatureInjection
 }
 
 // IsEmailVerifyEnabled 检查是否开启邮件验证
@@ -3526,6 +3545,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.EnableClaudeOAuthSystemPromptInjection = v == "true"
 	} else {
 		result.EnableClaudeOAuthSystemPromptInjection = true
+	}
+	if v, ok := settings[SettingKeyEnableClaudeOAuthTemperatureInjection]; ok && v != "" {
+		result.EnableClaudeOAuthTemperatureInjection = v == "true"
+	} else {
+		result.EnableClaudeOAuthTemperatureInjection = true // default: 保持旧行为(注入);需修复在后台关掉即剥离
 	}
 	result.ClaudeOAuthSystemPrompt = settings[SettingKeyClaudeOAuthSystemPrompt]
 	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]

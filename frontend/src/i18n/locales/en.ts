@@ -5851,6 +5851,8 @@ export default {
         cchSigningHint: 'Sign the billing header in forwarded requests with CCH hash. When disabled, the placeholder is preserved.',
         claudeOAuthSystemPromptInjection: 'Claude OAuth System Blocks',
         claudeOAuthSystemPromptInjectionHint: 'Inject Claude Code-like system blocks for Claude OAuth requests from non-Claude-Code clients. Enabled by default.',
+        claudeOAuthTemperatureInjection: 'Claude OAuth temperature injection',
+        claudeOAuthTemperatureInjectionHint: 'Inject temperature=1 for Claude OAuth requests (old Claude Code behavior). Turn OFF to strip temperature entirely — newer models that deprecated temperature would otherwise return 400.',
         claudeOAuthSystemPrompt: 'Claude OAuth Expansion Prompt',
         claudeOAuthSystemPromptPlaceholder: 'Leave empty to use the built-in Claude Code expansion prompt.',
         claudeOAuthSystemPromptHint: 'Legacy compatibility: controls only the third injected system block.',
