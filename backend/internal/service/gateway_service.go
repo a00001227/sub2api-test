@@ -5861,6 +5861,16 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
 	input.Body = StripEmptyTextBlocks(input.Body)
+	// 透传分支同样剥离 temperature：Forward 主路径的剥离(5196 附近)在本分支提前 return 之前
+	// 无法到达，导致 API Key 透传账号把客户端自带的 temperature 原样发给上游，对"已弃用
+	// temperature 的模型"报 400。开关关闭(默认注入=旧行为)时才剥离，与主路径口径一致。幂等。
+	if s.settingService != nil && !s.settingService.IsClaudeOAuthTemperatureInjectionEnabled(ctx) {
+		if gjson.GetBytes(input.Body, "temperature").Exists() {
+			if next, ok := deleteJSONPathBytes(input.Body, "temperature"); ok {
+				input.Body = next
+			}
+		}
+	}
 	if input.Parsed != nil {
 		// 透传分支也会改写实际 wire body，成功 usage hash 依赖这里同步当前 body。
 		if err := input.Parsed.ReplaceBody(input.Body); err != nil {
