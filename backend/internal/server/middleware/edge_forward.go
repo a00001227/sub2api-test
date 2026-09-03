@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -121,11 +122,45 @@ func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelA
 	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture)
 }
 
+// edgeCellDialTimeout 是 central→cell 转发的连接建立(dial)超时。内部机房跳,健康 cell
+// 毫秒级连上;设短是为了让「刚死但仍在缓存」的 cell 快速失败、快速失败转移,而不是拖满
+// DefaultTransport 默认的 30s。只收紧连接阶段,不影响已建立连接后的流式回传。
+const edgeCellDialTimeout = 5 * time.Second
+
+// newEdgeCellTransport 克隆 http.DefaultTransport,仅把 dial 超时收紧到 edgeCellDialTimeout。
+// 其余(连接池、keep-alive、代理、TLS、HTTP/2 等)沿用默认;刻意不设 ResponseHeaderTimeout /
+// 整体超时,以免截断慢首字/长 SSE。
+func newEdgeCellTransport() *http.Transport {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		// 理论不可达(标准库 DefaultTransport 恒为 *http.Transport);兜底给一个等价实现。
+		return &http.Transport{
+			DialContext:           (&net.Dialer{Timeout: edgeCellDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}
+	}
+	t := base.Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout:   edgeCellDialTimeout,
+		KeepAlive: 30 * time.Second,
+	}).DialContext
+	return t
+}
+
 // newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
 // 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
 func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
-	client := &http.Client{Transport: http.DefaultTransport}
+	// 但把 central→cell 的 dial(连接建立)超时从 DefaultTransport 的 30s 收紧到
+	// edgeCellDialTimeout:cell 池每 15s 才从 Portal 刷新一次 routable,存在「cell 刚死、
+	// 缓存未刷掉」的陈旧窗口;若选中刚死的 cell,30s dial 会拖满才失败转移,多个死 cell
+	// 叠加逼近 CF 100s 会话窗、把本可在后续 cell 成功的请求拖成 502。健康 cell 是机房内
+	// 毫秒级连上,收紧 dial 不误伤,只影响连接阶段(response/读侧不设超时,长 SSE 不受影响)。
+	client := &http.Client{Transport: newEdgeCellTransport()}
 	// 会话→cell 亲和(P3-3c),处理函数生命周期内共享。
 	affinity := newSessionAffinity(stickyAffinityTTL)
 
