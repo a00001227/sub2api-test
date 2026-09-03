@@ -164,15 +164,20 @@ func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(
 	assert.Equal(t, "upstream gone", errObj["message"])
 }
 
-// Gateway handler: /v1/messages preserves the legacy data:{type:error,...} format
-// (Anthropic spec accepts a type:"error" stream event).
-func TestGatewayHandleStreamingAwareError_MessagesStreamingKeepsLegacy(t *testing.T) {
+// Gateway handler: /v1/messages streaming error must carry the `event: error` line,
+// byte-matching real Anthropic (`event: error\ndata: {...}`). A bare `data:` frame
+// (SSE default event name "message") is NOT dispatched as a terminal error by the
+// client SDK — it looks like a broken stream, triggering reconnect loops that keep
+// re-hitting the same sticky account → the "stuck api_error, only a new client fixes
+// it" death-loop. See streaming_error_frame_dump_test.go for the raw-byte comparison.
+func TestGatewayHandleStreamingAwareError_MessagesStreamingHasEventErrorLine(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointMessages)
 	h := &GatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, `data: {"type":"error"`), "got: %q", body)
+	assert.True(t, strings.HasPrefix(body, "event: error\n"), "got: %q", body)
+	assert.Contains(t, body, `data: {"type":"error"`, "data frame payload must be preserved, got: %q", body)
 }
 
 // 项目里 /responses 注册在多组路由：/v1/responses（gateway）、裸 /responses（top-level）、
