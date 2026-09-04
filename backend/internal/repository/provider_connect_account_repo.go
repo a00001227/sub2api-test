@@ -174,14 +174,19 @@ func defaultProviderAccountConfig(platform string) (extra map[string]any, creds 
 	creds["intercept_warmup_requests"] = true
 	// 临时不可调度:错误码 + 关键词同时命中 → 临时禁用 5 分钟(见 ratelimit_service
 	// tryTempUnschedulable:rule.ErrorCode==statusCode 且关键词是响应体小写子串)。
-	// 关键词与时长均沿用 sub2api admin 原预设(EditAccountModal.vue tempUnschedPresets):
-	//   529 "overloaded, too many" 60min / 429 "rate limit, too many requests" 10min /
-	//   503 "unavailable, maintenance" 30min。
+	// 关键词沿用 sub2api admin 原预设(EditAccountModal.vue tempUnschedPresets);时长按实测调整:
+	//   529 "overloaded, too many" 2min / 429 "rate_limit_error, rate limit, too many requests" 10min /
+	//   503 "unavailable, maintenance" 2min。
+	// 429 首个关键词 rate_limit_error 是 Anthropic 真实错误体的 type
+	// ({"error":{"type":"rate_limit_error",...}});老预设只有带空格的 "rate limit",
+	// 对下划线写法做子串匹配永远不命中,导致 anthropic 号被限流却不摘号、被反复调度。
+	// 529(overload)通常短暂且全局,摘 2min 做削峰退避即可,长冷却只会白白减容;
+	// 503 视作账号临时不可用,摘 2min 后放回再探,真·永久失效会走 SetError,不归这条管。
 	creds["temp_unschedulable_enabled"] = true
 	creds["temp_unschedulable_rules"] = []any{
-		map[string]any{"error_code": 529, "keywords": []any{"overloaded", "too many"}, "duration_minutes": 60, "description": "过载"},
-		map[string]any{"error_code": 429, "keywords": []any{"rate limit", "too many requests"}, "duration_minutes": 10, "description": "限流"},
-		map[string]any{"error_code": 503, "keywords": []any{"unavailable", "maintenance"}, "duration_minutes": 30, "description": "维护"},
+		map[string]any{"error_code": 529, "keywords": []any{"overloaded", "too many"}, "duration_minutes": 2, "description": "过载"},
+		map[string]any{"error_code": 429, "keywords": []any{"rate_limit_error", "rate limit", "too many requests"}, "duration_minutes": 10, "description": "限流"},
+		map[string]any{"error_code": 503, "keywords": []any{"unavailable", "maintenance"}, "duration_minutes": 2, "description": "维护"},
 	}
 	// —— 反封面(业务方自负),本项目不设置;若要默认开启,你自行在此填 ——
 	// extra["enable_tls_fingerprint"] = true
