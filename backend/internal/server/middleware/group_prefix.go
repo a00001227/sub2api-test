@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -92,6 +93,13 @@ func GroupPrefixRewrite(engine *gin.Engine, resolver *service.GroupSlugResolver)
 				c.Request.URL.RawPath = ""
 			}
 		}
+
+		// 清除 gin 首轮无匹配（/{slug}/... 未注册路由 → serveError）预置的 404 状态。
+		// 本请求即将改写路径重新分发，预置 404 不应被继承；否则重分发后的处理器若
+		// 首个写操作未显式设状态（典型：流式排队时先落地 keep-alive ping），会把 404
+		// 冻结到线上，尽管随后返回完整正确的 SSE。此处尚未写 body（Written()==false），
+		// c.Status 仅改挂起状态、不刷头；重分发后的处理器可正常覆盖为真实状态码。
+		c.Status(http.StatusOK)
 
 		engine.HandleContext(c)
 		c.Abort()
