@@ -1547,6 +1547,29 @@ func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, su
 	return min
 }
 
+// AcquireForwardUserSlot 在中央 edge 转发路径上获取消费者的「用户级并发槽位」。
+//
+// EdgeForward 命中转发时会 c.Abort() 短路本 handler,handler 里第 1 步的
+// AcquireUserSlotWithWait 走不到;而转发到 cell 的流量在 cell 侧是无限并发的可信占位
+// 身份——两头都不限,edge 模式下用户并发上限失效。故由 EdgeForward 在转发前调用本方法
+// 补上,逻辑与本地路径第 1 步完全一致:等待+SSE ping、断开释放、失败按协议写错误帧。
+//
+// 返回 (release, true) 成功持槽;(nil, false) 表示已写好并发超限错误响应,调用方收尾。
+func (h *GatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream bool) (func(), bool) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		// 理论不可达(转发路径已过 apiKeyAuth 鉴权);无身份则不阻塞。
+		return func() {}, true
+	}
+	streamStarted := false
+	releaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, isStream, &streamStarted)
+	if err != nil {
+		h.handleConcurrencyError(c, err, "user", streamStarted)
+		return nil, false
+	}
+	return wrapReleaseOnDone(c.Request.Context(), releaseFunc), true
+}
+
 // handleConcurrencyError handles concurrency-related acquire errors.
 func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
 	status, errType, message := concurrencyErrorResponse(err, slotType)

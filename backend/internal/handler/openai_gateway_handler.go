@@ -1042,6 +1042,18 @@ func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context,
 	return false
 }
 
+// AcquireForwardUserSlot 见 GatewayHandler.AcquireForwardUserSlot —— OpenAI 协议版:
+// 复用 acquireResponsesUserSlot(OpenAI 的 ping 格式与错误写法)。供中央 EdgeForward
+// 转发 OpenAI 组前调用,补上 cell 侧缺失的用户级并发限制。
+func (h *OpenAIGatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream bool) (func(), bool) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		return func() {}, true
+	}
+	streamStarted := false
+	return h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, isStream, &streamStarted, logger.L())
+}
+
 func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 	c *gin.Context,
 	userID int64,

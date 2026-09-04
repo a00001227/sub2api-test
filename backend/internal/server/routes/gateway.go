@@ -42,6 +42,14 @@ func RegisterGatewayRoutes(
 	// 中央“执行→转发”中间件建一次,复用到 /v1 组 + 无前缀别名 + codexDirect（默认关 = no-op）。
 	// #86b/#86a-2:转发成功后用 cell 带回的权威用量给消费者计费(占位号,不重复发 provider
 	// 用量)。按 envelope 平台分派到对应成本路径:openai → OpenAI,其余 → claude。
+	// 消费者用户级并发:转发前在中央获取用户并发槽位(cell 侧对转发流量不限并发,不在
+	// 这层限,edge 模式下用户并发上限就失效)。按分组平台选对协议的 ping/错误写法。
+	edgeUserSlot := func(c *gin.Context, isStream bool) (func(), bool) {
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			return h.OpenAIGateway.AcquireForwardUserSlot(c, isStream)
+		}
+		return h.Gateway.AcquireForwardUserSlot(c, isStream)
+	}
 	edgeForward := middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time) {
 		if env.IsOpenAI() {
 			h.OpenAIGateway.RecordForwardedConsumerUsage(c, env)
@@ -54,7 +62,7 @@ func RegisterGatewayRoutes(
 	}, h.PricingDisplay.IsModelEnabled, func(c *gin.Context, userID, apiKeyID int64, reqBody []byte) {
 		// 疑似蒸馏取证：命中捕获名单才记原文(内部零开销闸门)；与转发/计费解耦。
 		h.Admin.EvidenceCapture.Capture(c, userID, apiKeyID, reqBody)
-	})
+	}, edgeUserSlot)
 
 	// 前置内容审计中间件：挂在 enforcement 之后、edgeForward 之前 → 转发路径也覆盖
 	// （原本审核只在网关 handler 内，EdgeForward 命中转发时短路 handler，cell 流量绕过审核）。

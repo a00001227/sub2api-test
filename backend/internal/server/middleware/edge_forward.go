@@ -36,6 +36,19 @@ type EvidenceCaptureFunc func(c *gin.Context, userID, apiKeyID int64, reqBody []
 // 由 pricing_models 的"启用模型"集合驱动。nil = 不校验(白名单关)。
 type ModelAllowFunc func(ctx context.Context, model string) bool
 
+// EdgeUserSlotFunc 在转发到 cell 之前获取「消费者用户级并发槽位」。
+//
+// 为什么必须在中央这层限:转发到 cell 的流量在 cell 侧走的是无限并发的可信占位身份
+// (api_key_auth EDGE 分支 Concurrency=1<<20),cell 不会限消费者并发;而中央命中转发就
+// c.Abort() 短路了 gateway handler,handler 里的 AcquireUserSlotWithWait 也走不到——
+// 于是 edge 模式下给用户设的并发上限两头落空。由本回调在转发前补上这一层。
+//
+// 返回 (release, ok):ok=true → 已持槽,release 用于本次转发结束时释放(可能是 no-op
+// 空函数,如无身份/不限并发);ok=false → 已按客户端协议写好「并发超限」错误响应,调用方
+// 直接 c.Abort() 收尾。isStream 供排队等待时决定是否发 SSE ping 保活(与 handler 本地
+// 路径一致)。nil = 不接线(默认 no-op,不限并发)。
+type EdgeUserSlotFunc func(c *gin.Context, isStream bool) (release func(), ok bool)
+
 // EdgeForward 是中央网关“执行→转发”中间件。
 //
 // 开启且请求组 slug 命中配置列表时,把该 /v1 请求手动流式反向代理到边缘 cell(不带
@@ -49,7 +62,7 @@ type ModelAllowFunc func(ctx context.Context, model string) bool
 //
 // 用手写流式代理而非 httputil.ReverseProxy:后者会触碰 gin 的 CloseNotify(在某些
 // ResponseWriter / h2c 下会 panic),且手写更利于逐块 flush SSE。
-func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc) gin.HandlerFunc {
+func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc) gin.HandlerFunc {
 	noop := func(c *gin.Context) { c.Next() }
 	if !cfg.Enabled || len(cfg.Groups) == 0 {
 		return noop
@@ -119,7 +132,7 @@ func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelA
 		slog.Info("edge_forward: 组→工作道路由启用", "group_lanes", groupLanes)
 	}
 
-	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture)
+	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture, acquireUserSlot)
 }
 
 // edgeCellDialTimeout 是 central→cell 转发的连接建立(dial)超时。内部机房跳,健康 cell
@@ -153,7 +166,7 @@ func newEdgeCellTransport() *http.Transport {
 
 // newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
 // 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
-func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc) gin.HandlerFunc {
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	// 但把 central→cell 的 dial(连接建立)超时从 DefaultTransport 的 30s 收紧到
 	// edgeCellDialTimeout:cell 池每 15s 才从 Portal 刷新一次 routable,存在「cell 刚死、
@@ -271,6 +284,23 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			}
 		}
 
+		// 消费者用户级并发限制(中央职责):转发前获取消费者的用户并发槽位。cell 侧对
+		// 转发流量不限并发,不在这里限,edge 模式下用户并发上限就完全失效。槽位持有到本次
+		// 转发结束(defer 释放),客户端断开由 wrapReleaseOnDone 兜底。放在白名单校验之后、
+		// 选号/转发之前:被白名单/无可路由 cell 拒掉的请求不占槽。acquire 失败(队列满/超时)
+		// 时回调已按客户端协议写好错误响应,这里直接收尾。
+		if acquireUserSlot != nil {
+			isStream := gjson.GetBytes(body, "stream").Bool()
+			release, ok := acquireUserSlot(c, isStream)
+			if !ok {
+				c.Abort()
+				return
+			}
+			if release != nil {
+				defer release()
+			}
+		}
+
 		// 会话亲和(P3-3c):进行中会话固定回同一 cell —— sub2api 的号级粘性只有在
 		// 请求先落到同一 cell 时才生效,所以这层的 cell 亲和是整个 Sticky 的前提。
 		// 仅当绑定的 cell 仍在本轮候选池中(存活可路由)才生效,否则忽略陈旧绑定。
@@ -301,6 +331,17 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 
 			resp, err := client.Do(outReq)
 			if err != nil {
+				// 客户端已断开(用户按 ESC / 新一轮 / 客户端超时重试)→ 请求 Context 被取消,
+				// client.Do 对每个候选都会瞬间返回 context canceled。这不是 cell 的问题:
+				// 立即收尾,绝不再空跑其它候选,也不记 502 / 不打 ERROR「所有候选均不可达」
+				// (等价 nginx 499「客户端主动关闭」)。否则会灌满错误面板、淹没真实的
+				// cell 不可达告警。
+				if c.Request.Context().Err() != nil || errors.Is(err, context.Canceled) {
+					slog.Info("edge_forward: 客户端取消请求,停止转发",
+						"cell", target.Host, "idx", i)
+					c.Abort()
+					return
+				}
 				// 仅“写任何响应前”的传输错误才转移;一旦开始回传就不再转移
 				// (避免把非幂等请求重放到第二个号 → 双执行)。
 				lastErr = err

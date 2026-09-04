@@ -56,7 +56,7 @@ func engineWithHandler(resolver cellResolver, groupSlug string) *gin.Engine {
 			}
 			c.Next()
 		},
-		newEdgeForwardHandler(resolver, groupSet, nil, "cellkey", zeroRng, nil, nil, nil),
+		newEdgeForwardHandler(resolver, groupSet, nil, "cellkey", zeroRng, nil, nil, nil, nil),
 		func(c *gin.Context) {
 			c.Header("X-Handled-By", "local")
 			c.String(http.StatusOK, "local-ok")
