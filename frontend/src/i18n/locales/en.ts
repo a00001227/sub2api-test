@@ -420,6 +420,7 @@ export default {
     riskControl: 'Risk Control',
     riskV2Shadow: 'Distillation Detection',
     promptAudit: 'Prompt Audit',
+    auditCenter: 'Audit Center',
     pricingDisplay: 'Pricing Display',
   },
 

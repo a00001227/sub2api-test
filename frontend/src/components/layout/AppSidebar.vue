@@ -772,9 +772,18 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/feedbacks', label: t('nav.feedbacks'), icon: ChatIcon, hideInSimpleMode: true },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/regions', label: t('nav.regions'), icon: ServerIcon },
-    { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
+    {
+      path: '/admin/audit',
+      label: t('nav.auditCenter'),
+      icon: ShieldIcon,
+      hideInSimpleMode: true,
+      expandOnly: true,
+      children: [
+        { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, featureFlag: flagRiskControl },
+        { path: '/admin/prompt-audit', label: t('nav.promptAudit'), icon: DocumentTextIcon },
+      ],
+    },
     { path: '/admin/risk-v2', label: t('nav.riskV2Shadow'), icon: ShieldIcon, hideInSimpleMode: true },
-    { path: '/admin/prompt-audit', label: t('nav.promptAudit'), icon: DocumentTextIcon, hideInSimpleMode: true },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
     {

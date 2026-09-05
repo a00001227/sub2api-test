@@ -420,6 +420,7 @@ export default {
     riskControl: '风控中心',
     riskV2Shadow: '蒸馏检测',
     promptAudit: '提示词审计',
+    auditCenter: '审计中心',
     pricingDisplay: '价格展示',
   },
 
