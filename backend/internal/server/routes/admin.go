@@ -118,6 +118,9 @@ func RegisterAdminRoutes(
 
 		// 蒸馏执行层：HIGH 自动限速 + 人工封禁 Admin API（默认关；豁免/封禁/查看）。
 		registerEnforcementRoutes(admin, h)
+
+		// 提示词审计：留存用户提示词原文，供事后审计/取证（独立于风控中心）。
+		registerPromptAuditRoutes(admin, h)
 	}
 }
 
@@ -188,6 +191,20 @@ func registerContentModerationRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		risk.POST("/users/:user_id/unban", h.Admin.ContentModeration.UnbanUser)
 		risk.DELETE("/hashes", h.Admin.ContentModeration.DeleteFlaggedHash)
 		risk.DELETE("/hashes/all", h.Admin.ContentModeration.ClearFlaggedHashes)
+	}
+}
+
+// registerPromptAuditRoutes 注册提示词审计 Admin 路由（前缀 /admin/prompt-audit）。同 admin 组鉴权。
+func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	pa := admin.Group("/prompt-audit")
+	{
+		pa.GET("/config", h.Admin.PromptAudit.GetConfig)
+		pa.PUT("/config", h.Admin.PromptAudit.UpdateConfig)
+		pa.GET("/status", h.Admin.PromptAudit.GetStatus)
+		pa.GET("/events", h.Admin.PromptAudit.ListEvents)
+		pa.GET("/events/:id", h.Admin.PromptAudit.GetEvent)
+		pa.DELETE("/events/:id", h.Admin.PromptAudit.DeleteEvent)
+		pa.DELETE("/events", h.Admin.PromptAudit.DeleteAll)
 	}
 }
 

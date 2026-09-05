@@ -43,6 +43,7 @@ type AdminHandlers struct {
 	RiskV2                 *admin.RiskV2Handler
 	EvidenceCapture        *admin.EvidenceCaptureHandler
 	Enforcement            *admin.EnforcementHandler
+	PromptAudit            *admin.PromptAuditHandler
 }
 
 // Handlers contains all HTTP handlers

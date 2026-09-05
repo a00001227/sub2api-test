@@ -46,6 +46,7 @@ func ProvideAdminHandlers(
 	riskV2Handler *admin.RiskV2Handler,
 	evidenceCaptureHandler *admin.EvidenceCaptureHandler,
 	enforcementHandler *admin.EnforcementHandler,
+	promptAuditHandler *admin.PromptAuditHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -85,6 +86,7 @@ func ProvideAdminHandlers(
 		RiskV2:                 riskV2Handler,
 		EvidenceCapture:        evidenceCaptureHandler,
 		Enforcement:            enforcementHandler,
+		PromptAudit:            promptAuditHandler,
 	}
 }
 
@@ -212,6 +214,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewChannelMonitorHandler,
 	admin.NewChannelMonitorRequestTemplateHandler,
 	admin.NewContentModerationHandler,
+	admin.NewPromptAuditHandler,
 	admin.NewPaymentHandler,
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
