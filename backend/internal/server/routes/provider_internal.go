@@ -65,6 +65,9 @@ func RegisterProviderInternalRoutes(
 	proxies.Use(gin.HandlerFunc(auth))
 	{
 		proxies.POST("/sync", h.SyncProxies)
+		// 渠道商自带出口 IP：从本 cell 视角探测一个候选代理的真实出口/延迟，
+		// 供 Portal 在推入池前校验连通性并回显给渠道商。
+		proxies.POST("/probe", h.ProbeProxy)
 		// account→proxy occupancy (which IP is used by which account).
 		proxies.GET("/bindings", h.ProxyBindings)
 	}

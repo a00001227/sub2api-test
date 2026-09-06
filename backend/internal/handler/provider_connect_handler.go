@@ -22,20 +22,21 @@ import (
 // 侧 sub2api-client 的契约对齐。
 // Phase 21E-6E-4: 追加单条 credential 导入（import-credentials）。
 type ProviderConnectHandler struct {
-	connect    *service.ProviderConnectService
-	completion *service.ProviderConnectCompletionService
-	importSvc  *service.ProviderConnectImportService
-	allocator  *service.ProxyAllocator
-	metrics    *service.ProviderAccountMetricsService
-	regions    *service.RegionService
-	deactivate *service.ProviderAccountDeactivationService
-	reauth     *service.ProviderConnectReauthService
-	pacing     *service.ProviderAccountPacingService
-	scheduling *service.ProviderAccountSchedulingService
-	test       *service.ProviderAccountTestService
-	config     *service.ProviderAccountConfigService
-	pricing    *service.PricingService
-	proxySync  *service.ProxySyncService
+	connect     *service.ProviderConnectService
+	completion  *service.ProviderConnectCompletionService
+	importSvc   *service.ProviderConnectImportService
+	allocator   *service.ProxyAllocator
+	metrics     *service.ProviderAccountMetricsService
+	regions     *service.RegionService
+	deactivate  *service.ProviderAccountDeactivationService
+	reauth      *service.ProviderConnectReauthService
+	pacing      *service.ProviderAccountPacingService
+	scheduling  *service.ProviderAccountSchedulingService
+	test        *service.ProviderAccountTestService
+	config      *service.ProviderAccountConfigService
+	pricing     *service.PricingService
+	proxySync   *service.ProxySyncService
+	proxyProber service.ProxyExitInfoProber
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -54,16 +55,17 @@ func NewProviderConnectHandler(
 	config *service.ProviderAccountConfigService,
 	pricing *service.PricingService,
 	proxySync *service.ProxySyncService,
+	proxyProber service.ProxyExitInfoProber,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, pricing: pricing, proxySync: proxySync}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, pricing: pricing, proxySync: proxySync, proxyProber: proxyProber}
 }
 
 // proxySyncRequest is the Portal→cell /internal/proxies/sync body: the desired
 // egress IP pool for this cell (multi-egress, Option A). region = the cell's
 // region; mode = "upsert" (add/update only) | "replace" (also disable the rest).
 type proxySyncRequest struct {
-	Region string `json:"region"`
-	Mode   string `json:"mode"`
+	Region  string `json:"region"`
+	Mode    string `json:"mode"`
 	Proxies []struct {
 		Protocol    string `json:"protocol"`
 		Host        string `json:"host"`
@@ -109,6 +111,74 @@ func (h *ProviderConnectHandler) SyncProxies(c *gin.Context) {
 		return
 	}
 	response.Success(c, res)
+}
+
+// proxyProbeRequest is the Portal→cell /internal/proxies/probe body: a single
+// candidate proxy the Portal wants to validate from THIS cell's network vantage
+// before pushing it into the pool. Creds live only for the probe; never echoed.
+type proxyProbeRequest struct {
+	Protocol string `json:"protocol"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// proxyProbeResponse reports the real exit identity as seen from this cell.
+type proxyProbeResponse struct {
+	ExitIP      string `json:"exit_ip"`
+	City        string `json:"city"`
+	Region      string `json:"region"`
+	Country     string `json:"country"`
+	CountryCode string `json:"country_code"`
+	LatencyMs   int64  `json:"latency_ms"`
+}
+
+// ProbeProxy tests a caller-supplied proxy from this cell and returns its real
+// exit IP / geo / latency, so the Portal can validate connectivity and show the
+// channel provider what their uploaded IP actually resolves to before binding.
+// Same provider-internal auth; edge-surviving. Never echoes credentials, and
+// scrubs proxy host/creds from any error message.
+func (h *ProviderConnectHandler) ProbeProxy(c *gin.Context) {
+	if h.proxyProber == nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_PROBE_DISABLED", "proxy probe not configured"))
+		return
+	}
+	var req proxyProbeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	host := strings.TrimSpace(req.Host)
+	if host == "" || req.Port <= 0 {
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_PROBE_INVALID", "proxy host and port are required"))
+		return
+	}
+	protocol := strings.TrimSpace(req.Protocol)
+	if protocol == "" {
+		protocol = "socks5" // mirror the sync default
+	}
+	proxy := &service.Proxy{
+		Protocol: protocol,
+		Host:     host,
+		Port:     req.Port,
+		Username: req.Username,
+		Password: req.Password,
+	}
+	exit, latencyMs, err := h.proxyProber.ProbeProxy(c.Request.Context(), proxy.URL())
+	if err != nil {
+		// Never surface the proxy URL/creds; give a stable, safe reason.
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_PROBE_FAILED", "proxy probe failed: unreachable or rejected"))
+		return
+	}
+	response.Success(c, proxyProbeResponse{
+		ExitIP:      exit.IP,
+		City:        exit.City,
+		Region:      exit.Region,
+		Country:     exit.Country,
+		CountryCode: exit.CountryCode,
+		LatencyMs:   latencyMs,
+	})
 }
 
 // ProxyBindings returns which accounts are bound to which local proxy (account→IP
