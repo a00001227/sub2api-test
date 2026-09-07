@@ -346,7 +346,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available OpenAI accounts support /responses/compact", streamStarted)
 					return
 				}
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+				// 文案必须含 "No available accounts":这是中央 edge_forward 失败转移的
+				// 哨兵(isCellNoAvailableAccounts)。选号前没号 = 本 cell 没执行,中央据此
+				// 顺位改投下一个有号的 cell(解决 cell 间 openai 号分布不均)。若回
+				// "Service temporarily unavailable" 则不命中哨兵 → 中央停在首个空 cell 直接
+				// 透传 503,失败转移对 openai 失效(与 claude 处理器保持一致)。
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
 				return
 			}
 			if lastFailoverErr != nil {
@@ -769,7 +774,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-					h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+					// 见上:文案含 "No available accounts" 才命中中央失败转移哨兵。
+					h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
 					return
 				}
 			} else {

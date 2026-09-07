@@ -154,7 +154,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			)
 			if len(failedAccountIDs) == 0 {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+				// 文案含 "No available accounts" 才命中中央 edge_forward 失败转移哨兵
+				// (isCellNoAvailableAccounts),使选号前没号的请求被顺位改投下一个有号 cell。
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
 				return
 			} else {
 				if lastFailoverErr != nil {
