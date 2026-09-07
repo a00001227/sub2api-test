@@ -330,6 +330,12 @@ func RegisterGatewayRoutes(
 
 // getGroupPlatform extracts the group platform from the API Key stored in context.
 func getGroupPlatform(c *gin.Context) string {
+	// 强制平台优先：/antigravity 路由，以及 EDGE cell 收到的「中央可信转发」——
+	// 后者 apiKey 无分组(Group==nil)，靠中央带来的 X-Edge-Forward-Platform 定平台，
+	// 使 openai 边缘请求能分流到 OpenAI 处理器(claude 转发不带该头 → 回退原逻辑，不变)。
+	if p, ok := middleware.GetForcePlatformFromContext(c); ok && p != "" {
+		return p
+	}
 	apiKey, ok := middleware.GetAPIKeyFromContext(c)
 	if !ok || apiKey.Group == nil {
 		return ""

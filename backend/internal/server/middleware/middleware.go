@@ -35,6 +35,12 @@ const (
 	ContextKeyEdgeTrusted ContextKey = "edge_trusted"
 )
 
+// EdgeForwardPlatformHeader 中央→cell 转发时携带消费者平台(仅非默认 anthropic 平台)。
+// cell 的 edge 信任分支据此设 ForcePlatform → 选对平台的号 + 路由到对应处理器。
+// 仅在 CellGatewayKey 匹配的可信转发上被 cell 采信;中央转发前先 Del 再按真实分组
+// 平台 Set,杜绝客户端伪造该头走私平台。
+const EdgeForwardPlatformHeader = "X-Edge-Forward-Platform"
+
 // IsEdgeTrusted 返回本请求是否为 EDGE cell 的中央可信转发(方案 B)。
 func IsEdgeTrusted(c *gin.Context) bool {
 	v, ok := c.Get(string(ContextKeyEdgeTrusted))

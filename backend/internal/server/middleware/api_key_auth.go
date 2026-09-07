@@ -87,6 +87,15 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				c.Set(string(ContextKeyUserRole), edgeKey.User.Role)
 				c.Set(string(ContextKeyEdgeTrusted), true)
 				setGroupContext(c, nil)
+				// 中央转发会带上消费者平台(仅非默认 anthropic)。据此设 ForcePlatform：
+				// 让 SelectAccount 选对平台的号、让 /v1 路由分派到对应平台处理器。此头只在
+				// 本可信分支(CellGatewayKey 已匹配)被采信。无此头(如 claude 转发)→ 不设 →
+				// 保持原「无分组默认 claude」行为完全不变。
+				if fp := strings.TrimSpace(c.GetHeader(EdgeForwardPlatformHeader)); fp != "" {
+					ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, fp)
+					c.Request = c.Request.WithContext(ctx)
+					c.Set(string(ContextKeyForcePlatform), fp)
+				}
 				c.Next()
 				return
 			}

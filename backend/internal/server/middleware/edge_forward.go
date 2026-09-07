@@ -328,6 +328,16 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				outReq.Header.Del("X-Api-Key")
 				outReq.Header.Del("x-api-key")
 			}
+			// 携带消费者平台到 cell(仅非默认 anthropic):cell 的 edge 信任分支据此设
+			// ForcePlatform → 选对平台的号并路由到对应处理器。先 Del(清掉 copyProxyHeaders
+			// 可能透传的客户端伪造值)再按真实分组平台 Set;claude(anthropic)不打标 → cell
+			// 走原「无分组默认 claude」路径，零改动。
+			outReq.Header.Del(EdgeForwardPlatformHeader)
+			if apiKey.Group != nil {
+				if p := apiKey.Group.Platform; p != "" && p != service.PlatformAnthropic {
+					outReq.Header.Set(EdgeForwardPlatformHeader, p)
+				}
+			}
 
 			resp, err := client.Do(outReq)
 			if err != nil {
