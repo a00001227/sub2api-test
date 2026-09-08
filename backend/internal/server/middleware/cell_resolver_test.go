@@ -174,6 +174,50 @@ func TestFilterByLane(t *testing.T) {
 	}
 }
 
+func TestNormalizePlatforms(t *testing.T) {
+	if got := normalizePlatforms(nil); got != nil {
+		t.Fatalf("nil 应归一为 nil(未上报); got %v", got)
+	}
+	if got := normalizePlatforms([]string{"", "  "}); got != nil {
+		t.Fatalf("全空 应归一为 nil; got %v", got)
+	}
+	got := normalizePlatforms([]string{" OpenAI ", "openai", "ANTHROPIC", ""})
+	if strings.Join(got, ",") != "openai,anthropic" {
+		t.Fatalf("应小写去空白去重丢空; got %v", got)
+	}
+}
+
+func TestFilterByPlatform(t *testing.T) {
+	pool := []cellCandidate{
+		{url: mustURL(t, "http://a"), platforms: []string{"anthropic"}},
+		{url: mustURL(t, "http://b"), platforms: []string{"openai"}},
+		{url: mustURL(t, "http://c"), platforms: []string{"anthropic", "openai"}},
+		{url: mustURL(t, "http://u"), platforms: nil}, // 未上报 → 全平台可服务
+	}
+	// openai:b(专) + c(多) + u(未上报 fail-open),不含只有 anthropic 的 a。
+	if got := urlStrings(candURLs(filterByPlatform(pool, "openai"))); strings.Join(got, ",") != "http://b,http://c,http://u" {
+		t.Fatalf("openai 过滤应留 b,c,u; got %v", got)
+	}
+	// 大小写/空白不敏感。
+	if got := candURLs(filterByPlatform(pool, "  Anthropic ")); len(got) != 3 {
+		t.Fatalf("anthropic 过滤应留 a,c,u(共 3); got %d", len(got))
+	}
+	// want 为空 → 不过滤(旧行为)。
+	if got := candURLs(filterByPlatform(pool, "")); len(got) != 4 {
+		t.Fatalf("空平台应不过滤; got %d", len(got))
+	}
+	// 未上报的 cell 对任何平台都保留(per-cell fail-open):gemini 命中 u。
+	if got := urlStrings(candURLs(filterByPlatform(pool, "gemini"))); strings.Join(got, ",") != "http://u" {
+		t.Fatalf("gemini 应命中未上报的 u; got %v", got)
+	}
+	// 全为显式平台、无一支持 gemini → 过滤后全空 → fail-open 回落未过滤池(退回盲转移,
+	// 永不比现状更差)。
+	explicit := pool[:3] // a,b,c 都有显式平台,均不含 gemini
+	if got := candURLs(filterByPlatform(explicit, "gemini")); len(got) != 3 {
+		t.Fatalf("全池显式且不支持时应 fail-open 回落全池; got %d", len(got))
+	}
+}
+
 // candURLs 抽出候选的 URL 便于断言。
 func candURLs(cs []cellCandidate) []*url.URL {
 	out := make([]*url.URL, 0, len(cs))
@@ -337,5 +381,41 @@ func TestStartRegistryRefresh_ParsesLane(t *testing.T) {
 	}
 	if byURL["http://n"] != laneNormal {
 		t.Fatalf("缺 type 应归一为 normal; got %q", byURL["http://n"])
+	}
+}
+
+// Portal routable 的 platforms 字段 → 候选的 platforms(归一);缺 platforms 的 cell → nil
+// (向后兼容旧 Portal,平台过滤视为全平台可服务)。
+func TestStartRegistryRefresh_ParsesPlatforms(t *testing.T) {
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cells":[` +
+			`{"baseUrl":"http://p","reputation":50,"platforms":["OpenAI"," anthropic ","openai"]},` +
+			`{"baseUrl":"http://o","reputation":50}]}`)) // 无 platforms → nil
+	}))
+	defer portal.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &dynamicResolver{}
+	startRegistryRefresh(ctx, d, portal.URL, "", time.Hour)
+
+	var pool []cellCandidate
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pool = d.poolCandidates(); len(pool) == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	byURL := map[string][]string{}
+	for _, c := range pool {
+		byURL[c.url.String()] = c.platforms
+	}
+	if strings.Join(byURL["http://p"], ",") != "openai,anthropic" {
+		t.Fatalf("platforms 应归一(小写去空白去重); got %v", byURL["http://p"])
+	}
+	if byURL["http://o"] != nil {
+		t.Fatalf("缺 platforms 应为 nil(未上报); got %v", byURL["http://o"])
 	}
 }

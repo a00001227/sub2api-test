@@ -218,10 +218,13 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		}
 		slog.Debug("edge_forward: 命中,转发到 cell", "path", c.Request.URL.Path, "key_group_slug", apiKey.Group.Slug, "lane", consumerLane)
 
-		// 严格隔离:先按工作道过滤候选,再做加权随机 —— 使信誉权重只在同道内比较,
-		// 且非 normal 消费者绝不落到别道 cell。加权随机选序(P3-3b):首个 = 加权首选,
-		// 其余顺位作失败转移候选。
-		order := weightedOrder(filterByLane(resolver.poolCandidates(), consumerLane), rng)
+		// 严格隔离:先按工作道过滤候选,再按平台过滤,最后加权随机 —— 使信誉权重只在同道内
+		// 比较,且非 normal 消费者绝不落到别道 cell。平台过滤(filterByPlatform,两级 fail-open)
+		// 把请求只投给确有该平台号的 cell(openai 请求→有 ChatGPT 号的 cell),不再靠 503 试错
+		// 逐个撞;cell 未上报平台或全池都不支持时自动退回未过滤池,永不比盲转移更差。加权随机
+		// 选序(P3-3b):首个 = 加权首选,其余顺位作失败转移候选。
+		reqPlatform := apiKey.Group.Platform // 组平台口径(anthropic|openai|gemini|antigravity);空 → 不过滤
+		order := weightedOrder(filterByPlatform(filterByLane(resolver.poolCandidates(), consumerLane), reqPlatform), rng)
 		// 静态兜底仅对 normal 消费者生效(静态 cell 视为 normal 道):蒸馏/批量消费者
 		// 绝不回落到它。
 		if consumerLane == laneNormal {
