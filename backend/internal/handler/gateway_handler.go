@@ -54,6 +54,7 @@ type GatewayHandler struct {
 	maxAccountSwitchesGemini  int
 	cfg                       *config.Config
 	settingService            *service.SettingService
+	pricingDisplay            *service.PricingDisplayService
 }
 
 // ContentModerationService 暴露审核服务给路由层，用于在 EdgeForward 之前挂前置审核中间件
@@ -81,6 +82,7 @@ func NewGatewayHandler(
 	userMsgQueueService *service.UserMessageQueueService,
 	cfg *config.Config,
 	settingService *service.SettingService,
+	pricingDisplay *service.PricingDisplayService,
 ) *GatewayHandler {
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 10
@@ -118,6 +120,7 @@ func NewGatewayHandler(
 		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
 		cfg:                       cfg,
 		settingService:            settingService,
+		pricingDisplay:            pricingDisplay,
 	}
 }
 
@@ -1038,7 +1041,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
-		availableModels = filterModelsByCustomList(availableModels, defaultModelIDsForPlatform(platform), apiKey.Group.ModelsListConfig.Models)
+		availableModels = filterModelsByCustomList(availableModels, h.enabledOrDefaultModelIDs(c.Request.Context(), platform), apiKey.Group.ModelsListConfig.Models)
 		writeCustomModelsList(c, platform, availableModels)
 		return
 	}
@@ -1171,6 +1174,19 @@ func customModelsListAllowsModel(availablePatterns []string, model string) bool 
 		}
 	}
 	return false
+}
+
+// enabledOrDefaultModelIDs 返回 /v1/models 自定义过滤的兜底 allow-set:优先 admin/pricing
+// 里 enabled 的模型(按名字前缀归该平台),为空时回退到硬编码默认目录。与分组编辑页的
+// 候选下拉(admin_service.modelsListCandidateBase)同源,保证:管理员在下拉勾了的模型,
+// 客户端请求 /v1/models 时也能过滤放行、真正展示出来。
+func (h *GatewayHandler) enabledOrDefaultModelIDs(ctx context.Context, platform string) []string {
+	if h.pricingDisplay != nil {
+		if ids := h.pricingDisplay.EnabledModelIDsForPlatform(ctx, platform); len(ids) > 0 {
+			return ids
+		}
+	}
+	return defaultModelIDsForPlatform(platform)
 }
 
 func defaultModelIDsForPlatform(platform string) []string {

@@ -569,6 +569,7 @@ type adminServiceImpl struct {
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
+	pricingDisplay       *PricingDisplayService
 }
 
 type userGroupRateBatchReader interface {
@@ -595,6 +596,7 @@ func NewAdminService(
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
+	pricingDisplay *PricingDisplayService,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -615,6 +617,7 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 		runtimeBlocker:       runtimeBlocker,
+		pricingDisplay:       pricingDisplay,
 	}
 }
 
@@ -1748,7 +1751,7 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 		platform = PlatformAnthropic
 	}
 
-	candidates := defaultModelsListCandidateIDs(platform)
+	candidates := s.modelsListCandidateBase(ctx, platform)
 	if id <= 0 || s.accountRepo == nil {
 		return candidates, nil
 	}
@@ -1779,6 +1782,18 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 		}
 	}
 	return candidates, nil
+}
+
+// modelsListCandidateBase 返回某平台的候选模型底座:优先 admin/pricing 里 enabled 的
+// 模型(按名字前缀归该平台),为空(未配/DB 异常)时回退到硬编码默认目录,永不空。
+// 上层再并上该分组账号 model_mapping 里的自定义模型。
+func (s *adminServiceImpl) modelsListCandidateBase(ctx context.Context, platform string) []string {
+	if s.pricingDisplay != nil {
+		if ids := s.pricingDisplay.EnabledModelIDsForPlatform(ctx, platform); len(ids) > 0 {
+			return ids
+		}
+	}
+	return defaultModelsListCandidateIDs(platform)
 }
 
 func defaultModelsListCandidateIDs(platform string) []string {

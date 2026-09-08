@@ -91,6 +91,68 @@ func (s *PricingDisplayService) IsModelEnabled(ctx context.Context, model string
 	return ok
 }
 
+// PlatformForModelName infers the gateway platform of a pricing_models entry from
+// its name prefix. pricing_models has no platform column, but the /v1/models
+// candidate picker is per-platform, so we derive it here. Unknown prefixes return
+// "" (won't match any platform → simply not surfaced, never mis-grouped).
+func PlatformForModelName(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(m, "claude"):
+		return PlatformAnthropic
+	case strings.HasPrefix(m, "gemini"):
+		return PlatformGemini
+	case strings.HasPrefix(m, "gpt"),
+		strings.HasPrefix(m, "chatgpt"),
+		strings.HasPrefix(m, "codex"),
+		strings.HasPrefix(m, "o1"),
+		strings.HasPrefix(m, "o3"),
+		strings.HasPrefix(m, "o4"),
+		strings.HasPrefix(m, "dall-e"),
+		strings.HasPrefix(m, "text-embedding"),
+		strings.HasPrefix(m, "whisper"),
+		strings.HasPrefix(m, "tts"):
+		return PlatformOpenAI
+	default:
+		return ""
+	}
+}
+
+// EnabledModelIDsForPlatform returns the names of ENABLED pricing_models entries
+// whose inferred platform matches, in sort_order. This is the source of truth for
+// the group "自定义 /v1/models" candidate list and the /v1/models custom-filter
+// fallback — enabling a model in admin/pricing surfaces it with no code change.
+// Fail-open: returns nil on a repo error (callers fall back to the hardcoded
+// default catalog) so a pricing lookup problem never yields an empty model menu.
+func (s *PricingDisplayService) EnabledModelIDsForPlatform(ctx context.Context, platform string) []string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return nil
+	}
+	records, err := s.repo.ListEnabled(ctx)
+	if err != nil {
+		slog.Warn("pricing_display: list enabled models for candidates failed", "error", err)
+		return nil
+	}
+	out := make([]string, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+	for _, r := range records {
+		if r == nil {
+			continue
+		}
+		name := strings.TrimSpace(r.Model)
+		if name == "" || PlatformForModelName(name) != platform {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
 // ---- Public API (portal-ui) DTOs ----
 
 // PricingDisplayItem is the response DTO for the public pricing-display endpoint.
