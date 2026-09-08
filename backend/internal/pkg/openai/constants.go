@@ -39,8 +39,15 @@ func DefaultModelIDs() []string {
 	return ids
 }
 
-// DefaultTestModel default model for testing OpenAI accounts
+// DefaultTestModel default model for testing OpenAI accounts (platform APIKey).
 const DefaultTestModel = "gpt-5.4"
+
+// DefaultCodexTestModel default model for testing ChatGPT OAuth (Codex) accounts.
+// ChatGPT OAuth 账号走 chatgpt.com/backend-api/codex/responses,只认 codex 系模型;
+// DefaultTestModel(gpt-5.4)只对平台 APIKey 合法,对 Codex 号会被上游 400 拒绝
+// ("model is not supported when using Codex with a ChatGPT account")。gpt-5.3-codex
+// 是 codexModelMap(openai_codex_transform.go)的规范目标,codex 号普遍可用。
+const DefaultCodexTestModel = "gpt-5.3-codex"
 
 // DefaultInstructions default instructions for non-Codex CLI requests.
 // 内容为真实 Codex CLI 的 GPT-5-Codex base prompt（codex 系模型默认）。

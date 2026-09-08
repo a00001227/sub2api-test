@@ -570,10 +570,17 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
 
-	// Default to openai.DefaultTestModel for OpenAI testing
+	// Default test model by auth type: ChatGPT OAuth(Codex) 账号走
+	// chatgpt.com/backend-api/codex/responses,只认 codex 系模型,用 gpt-5.4 会被
+	// 上游 400("model is not supported when using Codex with a ChatGPT account");
+	// 平台 APIKey 账号仍用 gpt-5.4。显式传入 modelID 时一律尊重。
 	testModelID := modelID
 	if testModelID == "" {
-		testModelID = openai.DefaultTestModel
+		if account.IsOAuth() {
+			testModelID = openai.DefaultCodexTestModel
+		} else {
+			testModelID = openai.DefaultTestModel
+		}
 	}
 
 	// Align test routing with gateway behavior: OpenAI accounts apply normal

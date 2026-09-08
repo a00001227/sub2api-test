@@ -1,0 +1,231 @@
+package service
+
+import (
+	"context"
+	"math/rand"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+)
+
+/*
+ProxyLivenessService(代理出口 IP 定时探活,cell 内探测)
+
+背景:代理出口 IP 挂掉 → 绑在该 IP 上的账号全部无法出网 → 下游大量请求失败,而
+账号本身 status 仍是 active,运营看不出「是代理死了」。cell 已具备探一个代理的机器
+(ProxyExitInfoProber.ProbeProxy + ProxyLatencyCache),但只在 admin 手动点「测试代理」
+时触发;没有对在役代理的周期性探活。
+
+这个服务补上这一环:EDGE_MODE 下后台循环,周期性对本 cell「active 且有账号绑定」的
+代理探一次出口,把成败/延迟/出口 IP/时间写进 ProxyLatencyCache(与手动 TestProxy 写的
+是同一份缓存)。Portal 侧 proxy-liveness worker 通过 GET /internal/proxies/health 每 cell
+拉一次这份脱敏健康表,归因到账号并打标(只标记,不改 status、不暂停)。
+
+只探有 binding 的代理(省流:没账号用的 IP 死不死不影响任何人)。本服务不搬运凭证、
+不回显代理 URL;Health() 返回的健康表也只含 host/port,绝不含密码。
+*/
+
+const (
+	// 探活间隔:代理挂掉后最迟这么久被发现(叠加随机 jitter 摊平多 cell 同时打)。
+	proxyLivenessInterval = 5 * time.Minute
+	// 每轮间隔上叠加的最大随机抖动,避免多 cell 齐步走。
+	proxyLivenessJitter = 60 * time.Second
+	// 启动后延迟首探,避开 boot 期(等 DB / 代理池稳定)。
+	proxyLivenessInitialDelay = 45 * time.Second
+	// 一轮最多探的代理数(cell 池很小,宽松上限即可)。
+	proxyLivenessMaxProxies = 1000
+	// 单个代理探测的超时(prober 自身也有超时,这里兜底)。
+	proxyLivenessProbeTimeout = 20 * time.Second
+)
+
+// ProxyHealthEntry 是给 Portal 拉取的单条脱敏健康记录(绝不含凭证/代理 URL)。
+type ProxyHealthEntry struct {
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Success   bool   `json:"success"`
+	LatencyMs *int64 `json:"latency_ms,omitempty"`
+	CheckedAt *int64 `json:"checked_at,omitempty"` // unix 秒;从未探过则为 nil
+	Message   string `json:"message,omitempty"`
+}
+
+// ProxyLivenessService periodically probes this cell's active, bound proxies and
+// exposes a scrubbed health table for the Portal to pull. Cell-side only.
+type ProxyLivenessService struct {
+	repo    ProxyRepository
+	prober  ProxyExitInfoProber
+	latency ProxyLatencyCache
+
+	stopCh    chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
+}
+
+// NewProxyLivenessService creates the service. It does not start on its own — the
+// provider decides whether to Start() based on EDGE_MODE.
+func NewProxyLivenessService(repo ProxyRepository, prober ProxyExitInfoProber, latency ProxyLatencyCache) *ProxyLivenessService {
+	return &ProxyLivenessService{repo: repo, prober: prober, latency: latency}
+}
+
+// Start launches the probe loop (idempotent — safe to call once).
+func (s *ProxyLivenessService) Start() {
+	if s == nil || s.repo == nil || s.prober == nil || s.latency == nil {
+		return
+	}
+	s.startOnce.Do(func() {
+		s.stopCh = make(chan struct{})
+		go s.loop()
+		logger.LegacyPrintf("service.proxy_liveness", "[ProxyLiveness] started (interval=%s +jitter<=%s)", proxyLivenessInterval, proxyLivenessJitter)
+	})
+}
+
+// Stop halts the probe loop.
+func (s *ProxyLivenessService) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		if s.stopCh != nil {
+			close(s.stopCh)
+		}
+	})
+}
+
+func (s *ProxyLivenessService) loop() {
+	select {
+	case <-s.stopCh:
+		return
+	case <-time.After(proxyLivenessInitialDelay):
+	}
+	s.probeOnce()
+
+	for {
+		// 每轮 interval + 随机 jitter,摊平多 cell 的探测尖峰。
+		wait := proxyLivenessInterval
+		if proxyLivenessJitter > 0 {
+			wait += time.Duration(rand.Int63n(int64(proxyLivenessJitter)))
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-s.stopCh:
+			t.Stop()
+			return
+		case <-t.C:
+			s.probeOnce()
+		}
+	}
+}
+
+// probeOnce probes every active, bound proxy once and writes the result to the
+// latency cache (same cache the manual "test proxy" admin action writes).
+func (s *ProxyLivenessService) probeOnce() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	proxies, err := s.repo.ListActive(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.proxy_liveness", "[ProxyLiveness] list active proxies error: %v", err)
+		return
+	}
+	if len(proxies) > proxyLivenessMaxProxies {
+		proxies = proxies[:proxyLivenessMaxProxies]
+	}
+
+	probed := 0
+	for i := range proxies {
+		select {
+		case <-s.stopCh:
+			return
+		default:
+		}
+		p := &proxies[i]
+		// 只探有账号绑定的代理:没账号用的 IP 死活不影响任何下游,省流。
+		cnt, err := s.repo.CountAccountsByProxyID(ctx, p.ID)
+		if err != nil {
+			logger.LegacyPrintf("service.proxy_liveness", "[ProxyLiveness] count bindings proxy=%d error: %v", p.ID, err)
+			continue
+		}
+		if cnt <= 0 {
+			continue
+		}
+		s.probeProxy(ctx, p)
+		probed++
+	}
+	if probed > 0 {
+		logger.LegacyPrintf("service.proxy_liveness", "[ProxyLiveness] probed %d bound proxy(ies)", probed)
+	}
+}
+
+// probeProxy probes one proxy and writes success/failure into the latency cache.
+// Mirrors adminService.TestProxy's cache write (single source of truth for health).
+func (s *ProxyLivenessService) probeProxy(ctx context.Context, p *Proxy) {
+	pctx, cancel := context.WithTimeout(ctx, proxyLivenessProbeTimeout)
+	defer cancel()
+
+	exit, latencyMs, err := s.prober.ProbeProxy(pctx, p.URL())
+	if err != nil {
+		_ = s.latency.SetProxyLatency(ctx, p.ID, &ProxyLatencyInfo{
+			Success:   false,
+			Message:   "proxy probe failed: unreachable or rejected",
+			UpdatedAt: time.Now(),
+		})
+		return
+	}
+	lat := latencyMs
+	info := &ProxyLatencyInfo{
+		Success:   true,
+		LatencyMs: &lat,
+		Message:   "Proxy is accessible",
+		UpdatedAt: time.Now(),
+	}
+	if exit != nil {
+		info.IPAddress = exit.IP
+		info.Country = exit.Country
+		info.CountryCode = exit.CountryCode
+		info.Region = exit.Region
+		info.City = exit.City
+	}
+	_ = s.latency.SetProxyLatency(ctx, p.ID, info)
+}
+
+// Health returns a scrubbed health table for every active proxy on this cell:
+// [{host, port, success, latency_ms, checked_at, message}]. No credentials, no
+// proxy URL — the Portal joins on host|port back to CellProxy. Read-only.
+func (s *ProxyLivenessService) Health(ctx context.Context) ([]ProxyHealthEntry, error) {
+	proxies, err := s.repo.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(proxies))
+	for i := range proxies {
+		ids = append(ids, proxies[i].ID)
+	}
+	latencies, err := s.latency.GetProxyLatencies(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProxyHealthEntry, 0, len(proxies))
+	for i := range proxies {
+		p := &proxies[i]
+		e := ProxyHealthEntry{Host: p.Host, Port: p.Port}
+		if info := latencies[p.ID]; info != nil {
+			e.Success = info.Success
+			e.LatencyMs = info.LatencyMs
+			e.Message = info.Message
+			if !info.UpdatedAt.IsZero() {
+				ts := info.UpdatedAt.Unix()
+				e.CheckedAt = &ts
+			}
+		}
+		out = append(out, e)
+	}
+	// 稳定排序,便于 Portal 侧 diff 与日志比对。
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].Host != out[b].Host {
+			return out[a].Host < out[b].Host
+		}
+		return out[a].Port < out[b].Port
+	})
+	return out, nil
+}

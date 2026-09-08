@@ -448,6 +448,24 @@ func ProvideCellSelfHealSeeder(
 	return svc
 }
 
+// ProvideProxyLivenessService constructs the proxy liveness prober and starts its
+// background probe loop ONLY in EDGE_MODE (cell-side probing). On central the
+// egress pool + bindings live on cells, so probing runs there; the Portal pulls
+// each cell's /internal/proxies/health. The handler always exposes Health() so
+// the endpoint stays live even where the loop doesn't run.
+func ProvideProxyLivenessService(
+	proxyRepo ProxyRepository,
+	prober ProxyExitInfoProber,
+	latency ProxyLatencyCache,
+	cfg *config.Config,
+) *ProxyLivenessService {
+	svc := NewProxyLivenessService(proxyRepo, prober, latency)
+	if cfg != nil && cfg.EdgeMode {
+		svc.Start()
+	}
+	return svc
+}
+
 // ProvideOpsScheduledReportService creates and starts OpsScheduledReportService.
 func ProvideOpsScheduledReportService(
 	opsService *OpsService,

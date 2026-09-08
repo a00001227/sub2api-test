@@ -72,5 +72,7 @@ func RegisterProviderInternalRoutes(
 		proxies.POST("/probe", h.ProbeProxy)
 		// account→proxy occupancy (which IP is used by which account).
 		proxies.GET("/bindings", h.ProxyBindings)
+		// 代理出口 IP 定时探活的脱敏健康表(Portal 每 cell 拉一次 → 归因账号打标)。
+		proxies.GET("/health", h.ProxyHealth)
 	}
 }

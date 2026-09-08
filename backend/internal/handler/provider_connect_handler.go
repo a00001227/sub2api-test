@@ -35,9 +35,10 @@ type ProviderConnectHandler struct {
 	test        *service.ProviderAccountTestService
 	config      *service.ProviderAccountConfigService
 	proxyBind   *service.ProviderAccountProxyService
-	pricing     *service.PricingService
-	proxySync   *service.ProxySyncService
-	proxyProber service.ProxyExitInfoProber
+	pricing       *service.PricingService
+	proxySync     *service.ProxySyncService
+	proxyProber   service.ProxyExitInfoProber
+	proxyLiveness *service.ProxyLivenessService
 }
 
 // NewProviderConnectHandler creates the handler.
@@ -58,8 +59,9 @@ func NewProviderConnectHandler(
 	pricing *service.PricingService,
 	proxySync *service.ProxySyncService,
 	proxyProber service.ProxyExitInfoProber,
+	proxyLiveness *service.ProxyLivenessService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, proxyBind: proxyBind, pricing: pricing, proxySync: proxySync, proxyProber: proxyProber}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, proxyBind: proxyBind, pricing: pricing, proxySync: proxySync, proxyProber: proxyProber, proxyLiveness: proxyLiveness}
 }
 
 // proxySyncRequest is the Portal→cell /internal/proxies/sync body: the desired
@@ -197,6 +199,23 @@ func (h *ProviderConnectHandler) ProxyBindings(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"bindings": bindings})
+}
+
+// ProxyHealth returns this cell's scrubbed proxy health table (periodic liveness
+// probe results): [{host, port, success, latency_ms, checked_at, message}]. The
+// Portal pulls this once per cell and joins host|port back to CellProxy to mark
+// which accounts' egress IP is down. No credentials, no proxy URL. Read-only.
+func (h *ProviderConnectHandler) ProxyHealth(c *gin.Context) {
+	if h.proxyLiveness == nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_LIVENESS_DISABLED", "proxy liveness not configured"))
+		return
+	}
+	entries, err := h.proxyLiveness.Health(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"proxies": entries})
 }
 
 // accountConfigRuleRequest 是一条临时不可调度规则的请求体。

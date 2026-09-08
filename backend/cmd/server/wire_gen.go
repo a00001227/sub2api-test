@@ -257,7 +257,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	providerAccountConfigService := service.NewProviderAccountConfigService(providerConnectAccountRepository)
 	providerAccountProxyService := service.NewProviderAccountProxyService(providerConnectAccountRepository, proxyRepository, accountRepository)
 	proxySyncService := service.NewProxySyncService(proxyRepository)
-	providerConnectHandler := handler.NewProviderConnectHandler(providerConnectService, providerConnectCompletionService, providerConnectImportService, proxyAllocator, providerAccountMetricsService, regionService, providerAccountDeactivationService, providerConnectReauthService, providerAccountPacingService, providerAccountSchedulingService, providerAccountTestService, providerAccountConfigService, providerAccountProxyService, pricingService, proxySyncService, proxyExitInfoProber)
+	proxyLivenessService := service.ProvideProxyLivenessService(proxyRepository, proxyExitInfoProber, proxyLatencyCache, configConfig)
+	providerConnectHandler := handler.NewProviderConnectHandler(providerConnectService, providerConnectCompletionService, providerConnectImportService, proxyAllocator, providerAccountMetricsService, regionService, providerAccountDeactivationService, providerConnectReauthService, providerAccountPacingService, providerAccountSchedulingService, providerAccountTestService, providerAccountConfigService, providerAccountProxyService, pricingService, proxySyncService, proxyExitInfoProber, proxyLivenessService)
 	crsSyncService := service.NewCRSSyncService(accountRepository, proxyRepository, oAuthService, openAIOAuthService, geminiOAuthService, configConfig)
 	accountHandler := admin.NewAccountHandler(adminService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, rateLimitService, accountUsageService, accountTestService, concurrencyService, crsSyncService, sessionLimitCache, rpmCache, compositeTokenCacheInvalidator)
 	adminAnnouncementHandler := admin.NewAnnouncementHandler(announcementService)
@@ -360,7 +361,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db, configConfig)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop, enforcementService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop, enforcementService, proxyLivenessService)
 	// 切片 4.2：in-flight tracker 包裹业务 handler（Server.Close 后据此确认 Handler 真正退出）。
 	riskV2InflightTracker := &inflightTracker{}
 	httpServer.Handler = riskV2InflightTracker.Middleware(httpServer.Handler)
@@ -435,6 +436,7 @@ func provideCleanup(
 	riskV2ScoringWorker *service.RiskV2ScoringWorker,
 	riskV2HealthLoop *service.RiskV2HealthReportLoop,
 	enforcementService *service.EnforcementService,
+	proxyLivenessService *service.ProxyLivenessService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -588,6 +590,12 @@ func provideCleanup(
 			{"CellSelfHealSeeder", func() error {
 				if cellSelfHealSeeder != nil {
 					cellSelfHealSeeder.Stop()
+				}
+				return nil
+			}},
+			{"ProxyLivenessService", func() error {
+				if proxyLivenessService != nil {
+					proxyLivenessService.Stop()
 				}
 				return nil
 			}},
