@@ -50,6 +50,8 @@ func RegisterProviderInternalRoutes(
 		// #90-A2/B 账号配置: 读/改可配置项(先接 model_mapping 白名单)。
 		internal.GET("/:external_ref/config", h.GetAccountConfig)
 		internal.POST("/:external_ref/config", h.SetAccountConfig)
+		// 换绑代理: 把既有账号指向 Portal 刚 sync 进本 cell 的自有代理(按唯一 region 定位)。
+		internal.POST("/:external_ref/proxy", h.SetAccountProxy)
 	}
 
 	// 完成流程挂在 /internal/provider/connect（同一鉴权）。

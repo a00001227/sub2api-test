@@ -28,6 +28,10 @@ type ProxyRepository interface {
 	ListActiveWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error)
 
 	ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error)
+	// FindActiveProxyIDByRegion 按 region 精确匹配(存储为大写)返回一个活跃、未软删代理的 id。
+	// 用于换绑:Portal 刚 sync 进本 cell 的自有代理(唯一 OWN-<hex> region)→ 解析出本地 id →
+	// 把既有账号的 proxy_id 指过去。查不到返回 (0,false,nil)。
+	FindActiveProxyIDByRegion(ctx context.Context, region string) (int64, bool, error)
 	CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error)
 	ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error)
 

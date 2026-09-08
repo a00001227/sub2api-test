@@ -54,6 +54,9 @@ func (s *syncProxyRepoStub) ExistsByHostPortAuth(context.Context, string, int, s
 func (s *syncProxyRepoStub) CountAccountsByProxyID(context.Context, int64) (int64, error) {
 	return 0, nil
 }
+func (s *syncProxyRepoStub) FindActiveProxyIDByRegion(context.Context, string) (int64, bool, error) {
+	return 0, false, nil
+}
 func (s *syncProxyRepoStub) ListAccountSummariesByProxyID(context.Context, int64) ([]ProxyAccountSummary, error) {
 	return nil, nil
 }

@@ -34,6 +34,7 @@ type ProviderConnectHandler struct {
 	scheduling  *service.ProviderAccountSchedulingService
 	test        *service.ProviderAccountTestService
 	config      *service.ProviderAccountConfigService
+	proxyBind   *service.ProviderAccountProxyService
 	pricing     *service.PricingService
 	proxySync   *service.ProxySyncService
 	proxyProber service.ProxyExitInfoProber
@@ -53,11 +54,12 @@ func NewProviderConnectHandler(
 	scheduling *service.ProviderAccountSchedulingService,
 	test *service.ProviderAccountTestService,
 	config *service.ProviderAccountConfigService,
+	proxyBind *service.ProviderAccountProxyService,
 	pricing *service.PricingService,
 	proxySync *service.ProxySyncService,
 	proxyProber service.ProxyExitInfoProber,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, pricing: pricing, proxySync: proxySync, proxyProber: proxyProber}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, proxyBind: proxyBind, pricing: pricing, proxySync: proxySync, proxyProber: proxyProber}
 }
 
 // proxySyncRequest is the Portal→cell /internal/proxies/sync body: the desired
@@ -493,6 +495,37 @@ func (h *ProviderConnectHandler) SetScheduling(c *gin.Context) {
 		return
 	}
 	result, err := h.scheduling.SetScheduling(c.Request.Context(), externalRef, *req.Enabled)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// setAccountProxyRequest 换绑代理请求:region = Portal 刚 sync 进本 cell 的自有代理的
+// 唯一 region 码(OWN-<hex>)。
+type setAccountProxyRequest struct {
+	Region string `json:"region" binding:"required"`
+}
+
+// SetAccountProxy handles
+// POST /internal/provider-accounts/:external_ref/proxy
+//
+// 把既有账号换绑到 Portal 刚 sync 进本 cell 的一条自有代理(按唯一 region 定位)。
+// 只改 accounts.proxy_id,不动 cell / 凭证 / 状态。独占由唯一 region 结构性保证。
+// "仅 admin"由 Portal 侧 SuperAdminGuard 把关;本端同 provider-internal 鉴权。幂等。
+func (h *ProviderConnectHandler) SetAccountProxy(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req setAccountProxyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	result, err := h.proxyBind.SetProxyByRegion(c.Request.Context(), externalRef, req.Region)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

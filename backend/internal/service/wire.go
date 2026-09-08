@@ -597,6 +597,7 @@ var ProviderSet = wire.NewSet(
 	NewProviderConnectCompletionService,
 	NewProviderConnectImportService,
 	NewProviderAccountMetricsService,
+	NewProviderAccountProxyService,
 	ProvideProviderWebhookNotifier,
 	ProvideOpenAIOAuthService,
 	NewGeminiOAuthService,

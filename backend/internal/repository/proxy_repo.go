@@ -337,6 +337,29 @@ func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string,
 	return count > 0, err
 }
 
+// FindActiveProxyIDByRegion returns the id of an active (non-soft-deleted) proxy
+// whose region matches exactly. Region codes are stored upper-cased, so the input
+// is normalized the same way (mirrors ProxyAllocator's region handling). Used to
+// resolve a just-synced owned proxy (unique OWN-<hex> region) so an existing
+// account can be re-bound to it. Returns (0,false,nil) when none exists.
+func (r *proxyRepository) FindActiveProxyIDByRegion(ctx context.Context, region string) (int64, bool, error) {
+	region = strings.ToUpper(strings.TrimSpace(region))
+	if region == "" {
+		return 0, false, nil
+	}
+	row, err := r.client.Proxy.Query().
+		Where(proxy.RegionEQ(region), proxy.StatusEQ(service.StatusActive)).
+		Order(dbent.Asc(proxy.FieldID)).
+		First(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return row.ID, true, nil
+}
+
 // CountAccountsByProxyID returns the number of accounts using a specific proxy
 func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	var count int64
