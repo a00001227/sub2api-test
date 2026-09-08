@@ -96,3 +96,15 @@ func (s *sessionAffinity) put(key string, u *url.URL) {
 	}
 	s.m[key] = affinityEntry{u: u, exp: s.now().Add(s.ttl)}
 }
+
+// delete 解除会话→cell 绑定。用于该 cell 在流中途断开时驱逐陈旧绑定,让下一轮同会话
+// 重新选路(换一台 cell),而不是被亲和粘回同一台死 cell(否则客户端会一直 api_error,
+// 只能新开对话才能逃出)。
+func (s *sessionAffinity) delete(key string) {
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, key)
+}

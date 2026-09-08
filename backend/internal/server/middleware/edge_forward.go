@@ -385,7 +385,14 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			if stickyKey != "" {
 				affinity.put(stickyKey, target)
 			}
-			env := streamCellResponse(c, resp)
+			env, interrupted := streamCellResponse(c, resp)
+			if interrupted && stickyKey != "" {
+				// 中央↔cell 流在中途断掉(cell 重启/网络抖动/GOAWAY):streamCellResponse
+				// 已补发一帧 event: error 终止帧,这里再驱逐会话亲和,下一轮同会话重试就
+				// 改选其它 cell,而不是被粘回这台死 cell —— 否则客户端会一直 api_error,
+				// 只能新开对话才能逃(edge 版补 cell 侧 d9f780793 没覆盖的那半)。
+				affinity.delete(stickyKey)
+			}
 			// #86b:cell 带回权威用量 → 给消费者计费(占位号,不重复发 provider 用量)。
 			// reqBody/reqStart 顺带传给 biller 供 Risk V2 影子采集(不参与计费)。
 			if env != nil && biller != nil {
@@ -439,8 +446,9 @@ func relayBufferedResponse(c *gin.Context, resp *http.Response, body []byte) {
 //   - 非流式:X-Sub2api-Usage 响应头(不透传给客户端);
 //   - 流式:末尾的 `event: sub2api_usage` 事件——**剥掉不透传**,只捕获它的 data。
 //
-// 返回捕获到的 envelope(没有则 nil)。
-func streamCellResponse(c *gin.Context, resp *http.Response) *service.EdgeUsageEnvelope {
+// 返回 (捕获到的 envelope, interrupted)。interrupted=true 表示 SSE 流被异常截断
+// (中央↔cell 中途断),此时已向客户端补发一帧终止错误,上层应据此驱逐会话亲和。
+func streamCellResponse(c *gin.Context, resp *http.Response) (*service.EdgeUsageEnvelope, bool) {
 	defer resp.Body.Close()
 	h := c.Writer.Header()
 	for k, vv := range resp.Header {
@@ -464,7 +472,8 @@ func streamCellResponse(c *gin.Context, resp *http.Response) *service.EdgeUsageE
 
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	if !strings.Contains(ct, "text/event-stream") {
-		// 非 SSE:原样拷贝。
+		// 非 SSE:原样拷贝。截断无法用 SSE error 帧兜底(会破坏 JSON body),故不合成、
+		// 不回报 interrupted。
 		buf := make([]byte, 32*1024)
 		for {
 			n, rerr := resp.Body.Read(buf)
@@ -480,20 +489,31 @@ func streamCellResponse(c *gin.Context, resp *http.Response) *service.EdgeUsageE
 				break
 			}
 		}
-		return captured
+		return captured, false
 	}
 
 	// SSE:逐行转发;识别并剥掉 sub2api_usage 事件、捕获其 data。ReadString 对任意长
 	// 度的 data 行安全(bufio.Scanner 有 token 上限)。
+	//
+	// 终止判定(sawTerminal):edge 可信流「成功收尾」一定以权威用量哨兵
+	// event: sub2api_usage 结束(b3c15858f);message_stop / [DONE] / cell 自发的
+	// event: error 也算已正常终止。若循环退出前一个终止标记都没见到(中央↔cell 连接
+	// 在流中途断:cell 重启 / 网络抖动 / HTTP2 GOAWAY),说明流被截断 —— 补一帧
+	// event: error 让客户端认得是「错误终止」而非「断流」,不再静默断线重连,并回报
+	// interrupted=true 让上层驱逐会话亲和。这是 cell 侧 gateway_handler d9f780793 修复
+	// 在「中央中继」这半的对应补丁。
 	reader := bufio.NewReader(resp.Body)
 	inSentinel := false
+	sawTerminal := false
+	clientGone := false
 	for {
 		line, rerr := reader.ReadString('\n')
 		if len(line) > 0 {
 			trimmed := strings.TrimRight(line, "\r\n")
 			switch {
 			case trimmed == "event: "+service.EdgeUsageEventName:
-				inSentinel = true // 该事件所有行都丢弃,不透传
+				inSentinel = true  // 该事件所有行都丢弃,不透传
+				sawTerminal = true // 用量哨兵 = cell 正常收尾的权威标记
 			case inSentinel:
 				if strings.HasPrefix(trimmed, "data: ") {
 					if env, err := service.ParseEdgeUsageEnvelope([]byte(strings.TrimPrefix(trimmed, "data: "))); err == nil {
@@ -504,19 +524,41 @@ func streamCellResponse(c *gin.Context, resp *http.Response) *service.EdgeUsageE
 					inSentinel = false // 空行 = 事件结束
 				}
 			default:
-				if _, werr := c.Writer.Write([]byte(line)); werr != nil {
-					return captured // 客户端断开
+				if trimmed == "event: message_stop" || trimmed == "event: error" || trimmed == "data: [DONE]" {
+					sawTerminal = true // 正常终止事件(或 cell 自发的错误终止)
 				}
-				if flusher != nil {
+				if _, werr := c.Writer.Write([]byte(line)); werr != nil {
+					clientGone = true // 客户端断开
+				} else if flusher != nil {
 					flusher.Flush()
 				}
 			}
 		}
+		if clientGone {
+			return captured, false // 客户端断开:非 cell 问题,不合成、不驱逐亲和
+		}
 		if rerr != nil {
-			break
+			interrupted := !sawTerminal
+			if interrupted {
+				writeSSETerminalError(c, flusher)
+			}
+			return captured, interrupted
 		}
 	}
-	return captured
+}
+
+// writeSSETerminalError 在 SSE 流被异常截断时补发一帧标准终止错误。必须带 event: error
+// 行:缺了它 SSE 事件名默认为 message,客户端 SDK 不认作终止事件,会当成断流 → 断线
+// 重连(见 gateway_handler d9f780793)。message 用通用文案,绝不含任何内部地址/凭据。
+func writeSSETerminalError(c *gin.Context, flusher http.Flusher) {
+	const frame = "event: error\n" +
+		`data: {"type":"error","error":{"type":"upstream_error","message":"edge cell stream interrupted"}}` + "\n\n"
+	if _, err := c.Writer.Write([]byte(frame)); err != nil {
+		return
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
 }
 
 // proxyWebSocket 把客户端 WS 双向代理到 cell 的 WS 端点。
