@@ -2465,7 +2465,9 @@ function riskThresholdsFromConfig(thresholds: Record<string, number> | null | un
   for (const category of riskThresholdCategories) {
     const value = thresholds?.[category]
     if (Number.isFinite(value)) {
-      out[category] = clampPercent(Number(value) * 100)
+      // Fractions are stored with toFixed(4), so the percent has at most 2
+      // decimals. Round to 2 to avoid float artifacts like 0.55*100=55.0000…1.
+      out[category] = clampPercent(Math.round(Number(value) * 10000) / 100)
     }
   }
   return out
