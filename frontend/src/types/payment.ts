@@ -33,6 +33,7 @@ export interface PaymentConfig {
   order_timeout_minutes: number
   balance_disabled: boolean
   balance_recharge_multiplier: number
+  usdt_recharge_multiplier: number
   enabled_payment_types: PaymentType[]
   help_image_url: string
   help_text: string

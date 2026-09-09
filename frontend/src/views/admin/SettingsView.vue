@@ -6201,6 +6201,29 @@
                   </div>
                   <div>
                     <label class="input-label">{{
+                      t("admin.settings.payment.usdtRechargeMultiplier")
+                    }}</label>
+                    <input
+                      :value="form.payment_usdt_recharge_multiplier || ''"
+                      @input="
+                        form.payment_usdt_recharge_multiplier =
+                          parseFloat(
+                            ($event.target as HTMLInputElement).value,
+                          ) || 1
+                      "
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      class="input"
+                    />
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{
+                        t("admin.settings.payment.usdtRechargeMultiplierHint")
+                      }}
+                    </p>
+                  </div>
+                  <div>
+                    <label class="input-label">{{
                       t("admin.settings.payment.rechargeFeeRate")
                     }}</label>
                     <div class="relative">
@@ -7739,6 +7762,7 @@ const form = reactive<SettingsForm>({
   payment_order_timeout_minutes: 30,
   payment_balance_disabled: false,
   payment_balance_recharge_multiplier: 1,
+  payment_usdt_recharge_multiplier: 1,
   payment_recharge_fee_rate: 0,
   payment_enabled_types: [],
   payment_help_image_url: "",
@@ -9044,6 +9068,8 @@ async function saveSettings() {
       payment_balance_disabled: form.payment_balance_disabled,
       payment_balance_recharge_multiplier:
         Number(form.payment_balance_recharge_multiplier) || 1,
+      payment_usdt_recharge_multiplier:
+        Number(form.payment_usdt_recharge_multiplier) || 1,
       payment_recharge_fee_rate: Number(form.payment_recharge_fee_rate) || 0,
       payment_enabled_types: form.payment_enabled_types,
       payment_load_balance_strategy: form.payment_load_balance_strategy,

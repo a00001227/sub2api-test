@@ -95,7 +95,19 @@ func (e *EasyPay) apiBase() string {
 func (e *EasyPay) Name() string        { return "EasyPay" }
 func (e *EasyPay) ProviderKey() string { return payment.TypeEasyPay }
 func (e *EasyPay) SupportedTypes() []payment.PaymentType {
-	return []payment.PaymentType{payment.TypeAlipay, payment.TypeWxpay}
+	return []payment.PaymentType{payment.TypeAlipay, payment.TypeWxpay, payment.TypeUSDT}
+}
+
+// resolveType maps the internal payment type to the panel's channel code.
+// USDT panels often expose a bespoke channel code (e.g. "usdt", "trc20"),
+// configurable via the instance "usdtType" config key; it defaults to "usdt".
+func (e *EasyPay) resolveType(paymentType string) string {
+	if paymentType == payment.TypeUSDT {
+		if v := strings.TrimSpace(e.config["usdtType"]); v != "" {
+			return v
+		}
+	}
+	return paymentType
 }
 
 func (e *EasyPay) MerchantIdentityMetadata() map[string]string {
@@ -125,7 +137,7 @@ func (e *EasyPay) CreatePayment(ctx context.Context, req payment.CreatePaymentRe
 func (e *EasyPay) createRedirectPayment(req payment.CreatePaymentRequest) (*payment.CreatePaymentResponse, error) {
 	notifyURL, returnURL := e.resolveURLs(req)
 	params := map[string]string{
-		"pid": e.config["pid"], "type": req.PaymentType,
+		"pid": e.config["pid"], "type": e.resolveType(req.PaymentType),
 		"out_trade_no": req.OrderID, "notify_url": notifyURL,
 		"return_url": returnURL, "name": req.Subject,
 		"money": req.Amount,
@@ -151,7 +163,7 @@ func (e *EasyPay) createRedirectPayment(req payment.CreatePaymentRequest) (*paym
 func (e *EasyPay) createAPIPayment(ctx context.Context, req payment.CreatePaymentRequest) (*payment.CreatePaymentResponse, error) {
 	notifyURL, returnURL := e.resolveURLs(req)
 	params := map[string]string{
-		"pid": e.config["pid"], "type": req.PaymentType,
+		"pid": e.config["pid"], "type": e.resolveType(req.PaymentType),
 		"out_trade_no": req.OrderID, "notify_url": notifyURL,
 		"return_url": returnURL, "name": req.Subject,
 		"money": req.Amount, "clientip": req.ClientIP,
@@ -436,6 +448,12 @@ func summarizeEasyPayResponse(body []byte) string {
 func (e *EasyPay) resolveCID(paymentType string) string {
 	if strings.HasPrefix(paymentType, "alipay") {
 		if v := e.config["cidAlipay"]; v != "" {
+			return v
+		}
+		return e.config["cid"]
+	}
+	if strings.HasPrefix(paymentType, "usdt") {
+		if v := e.config["cidUsdt"]; v != "" {
 			return v
 		}
 		return e.config["cid"]
