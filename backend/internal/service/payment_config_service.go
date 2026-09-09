@@ -120,6 +120,12 @@ type MethodLimits struct {
 	DailyLimit  float64 `json:"daily_limit"`
 	SingleMin   float64 `json:"single_min"`
 	SingleMax   float64 `json:"single_max"`
+	// RechargeMultiplier is the balance-credit multiplier that applies to this
+	// method (payAmount × multiplier = credited USD balance). Populated by the
+	// checkout handler from the payment config so the client preview matches what
+	// the server will actually credit. 0 means "unset" (client falls back to the
+	// global multiplier).
+	RechargeMultiplier float64 `json:"recharge_multiplier,omitempty"`
 }
 
 // MethodLimitsResponse is the full response for the user-facing /limits API.
