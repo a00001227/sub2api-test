@@ -148,6 +148,38 @@ func TestResolveOpenAIForwardModel_PreventsClaudeModelFromFallingBackToGpt54(t *
 	}
 }
 
+// 回归:新发布的 gpt-5.x 模型(本表未登记)在 Codex(OAuth)号出站时必须原样透传,
+// 不得被兜底降级成 gpt-5.4——后者对 ChatGPT Codex 上游非法,会 400 → 线上大量 502。
+// 详见 openai_model_alias.go 移除的 `Contains("gpt-5") → "gpt-5.4"` 兜底。
+func TestNormalizeOpenAIModelForUpstream_NewModelsNotDowngradedToGpt54(t *testing.T) {
+	oauth := &Account{Type: AccountTypeOAuth, Credentials: map[string]any{}}
+	apikey := &Account{Type: AccountTypeAPIKey, Credentials: map[string]any{}}
+
+	tests := []struct {
+		name     string
+		account  *Account
+		model    string
+		expected string
+	}{
+		{"oauth new gpt-5.6-terra passthrough", oauth, "gpt-5.6-terra", "gpt-5.6-terra"},
+		{"oauth new gpt-5.6-sol passthrough", oauth, "gpt-5.6-sol", "gpt-5.6-sol"},
+		{"oauth new gpt-5.6-luna passthrough", oauth, "gpt-5.6-luna", "gpt-5.6-luna"},
+		{"oauth gpt-6-astra passthrough", oauth, "gpt-6-astra", "gpt-6-astra"},
+		// 已登记的模型行为不变
+		{"oauth known gpt-5.5 stays", oauth, "gpt-5.5", "gpt-5.5"},
+		{"oauth bare gpt-5 still maps to gpt-5.4", oauth, "gpt-5", "gpt-5.4"},
+		// APIKey 号从不走 codex 归一化,任何模型原样透传
+		{"apikey new model passthrough", apikey, "gpt-5.6-terra", "gpt-5.6-terra"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeOpenAIModelForUpstream(tt.account, tt.model); got != tt.expected {
+				t.Fatalf("normalizeOpenAIModelForUpstream(%q, %q) = %q, want %q", tt.account.Type, tt.model, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestResolveOpenAICompactForwardModel(t *testing.T) {
 	tests := []struct {
 		name          string

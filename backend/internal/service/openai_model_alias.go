@@ -83,9 +83,13 @@ func normalizeKnownOpenAICodexModel(model string) string {
 		return "gpt-5.3-codex"
 	case strings.Contains(normalized, "codex"):
 		return "gpt-5.3-codex"
-	case strings.Contains(normalized, "gpt-5"):
-		return "gpt-5.4"
 	default:
+		// 未知的 gpt-5.x（及更新代号）模型不再兜底降级成 gpt-5.4。
+		// 曾有 `case Contains("gpt-5") → "gpt-5.4"`：OpenAI 每发一个本表还没登记的
+		// 新模型（如 gpt-5.6-terra / gpt-5.6-sol / gpt-5.6-luna），都会被它默默改写成
+		// gpt-5.4；而 gpt-5.4 只对平台 APIKey 合法，Codex(ChatGPT OAuth)号会被上游
+		// 400 拒收（"The 'gpt-5.4' model is not supported when using Codex..."）。
+		// 返回 ""→ 上游拿到客户端原始模型名，由 OpenAI 自行判定，新模型无需改代码即可用。
 		return ""
 	}
 }
