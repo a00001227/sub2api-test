@@ -542,9 +542,11 @@ func TestEdgeForward_ModelWhitelist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, nil, "k", func() float64 { return 0 }, nil, allow, nil, nil)
+	var capturedCtx *gin.Context
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: "claude"}})
+			capturedCtx = c
 			c.Next()
 		},
 		h,
@@ -563,12 +565,20 @@ func TestEdgeForward_ModelWhitelist(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "model not allowed") {
 		t.Fatalf("应返回 model not allowed; got %q", w.Body.String())
 	}
+	// 白名单拒绝是中转策略闸门 → 必须标记业务限制,以便排除出 SLA/健康分。
+	if !service.HasOpsClientBusinessLimited(capturedCtx) {
+		t.Fatalf("白名单拒绝应标记 business-limited(排除 SLA)")
+	}
 
-	// 2) 在白名单 → 正常转发到 cell。
+	// 2) 在白名单 → 正常转发到 cell,且不应被标记业务限制。
 	cellHit = false
+	capturedCtx = nil
 	w = httptest.NewRecorder()
 	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"allowed-model"}`)))
 	if w.Code != http.StatusOK || !cellHit {
 		t.Fatalf("白名单内模型应转发到 cell; code=%d hit=%v", w.Code, cellHit)
+	}
+	if service.HasOpsClientBusinessLimited(capturedCtx) {
+		t.Fatalf("白名单内正常转发不应被标记 business-limited")
 	}
 }

@@ -280,6 +280,9 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			reqModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 			if !modelAllowed(c.Request.Context(), reqModel) {
 				slog.Info("edge_forward: 模型不在白名单,拒绝转发", "model", reqModel, "path", c.Request.URL.Path)
+				// 模型白名单拒绝是中转自己的策略闸门(该 model 未配价/未启用),非可用性故障 →
+				// 标记业务限制,排除出 SLA/健康分(仍留错误列表可见)。与内容审核拦截同一套路。
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 				c.Header("Content-Type", "application/json")
 				c.String(http.StatusForbidden, `{"type":"error","error":{"type":"permission_error","message":"model not allowed"}}`)
 				c.Abort()
