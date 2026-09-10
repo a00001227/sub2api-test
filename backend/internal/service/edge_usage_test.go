@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestEdgeUsageEnvelope_SSERoundTrip(t *testing.T) {
@@ -73,6 +74,66 @@ func TestEdgeUsageEnvelope_OpenAIRoundTrip(t *testing.T) {
 	}
 	if got.ServiceTier == nil || *got.ServiceTier != "priority" {
 		t.Errorf("service_tier lost: %v", got.ServiceTier)
+	}
+}
+
+// 时延必须经边信道无损带回中央,否则中央使用记录「首 TOKEN / 耗时」恒为空。
+func TestEdgeUsageEnvelope_TimingRoundTrip(t *testing.T) {
+	ftt := 137
+	// claude 流式路径:SSE 往返后还原 ForwardResult。
+	src := BuildEdgeUsageEnvelope(&ForwardResult{
+		Model:        "claude-sonnet-4-6",
+		Stream:       true,
+		FirstTokenMs: &ftt,
+		Duration:     2500 * time.Millisecond,
+		Usage:        ClaudeUsage{InputTokens: 10, OutputTokens: 5},
+	})
+	if src.FirstTokenMs == nil || *src.FirstTokenMs != 137 || src.DurationMs != 2500 {
+		t.Fatalf("envelope did not carry timing: first=%v dur=%d", src.FirstTokenMs, src.DurationMs)
+	}
+	sse, err := src.SSEBytes()
+	if err != nil {
+		t.Fatalf("SSEBytes: %v", err)
+	}
+	dataStart := bytes.Index(sse, []byte("data: ")) + len("data: ")
+	dataEnd := bytes.Index(sse[dataStart:], []byte("\n")) + dataStart
+	env, err := ParseEdgeUsageEnvelope(sse[dataStart:dataEnd])
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	res := env.ToForwardResult()
+	if res.FirstTokenMs == nil || *res.FirstTokenMs != 137 {
+		t.Errorf("FirstTokenMs lost: %v", res.FirstTokenMs)
+	}
+	if res.Duration != 2500*time.Millisecond {
+		t.Errorf("Duration lost: got %v want 2.5s", res.Duration)
+	}
+
+	// OpenAI 路径同样无损。
+	oai := BuildEdgeUsageEnvelopeOpenAI(&OpenAIForwardResult{
+		Model:        "gpt-5-codex",
+		Stream:       true,
+		FirstTokenMs: &ftt,
+		Duration:     900 * time.Millisecond,
+		Usage:        OpenAIUsage{InputTokens: 1, OutputTokens: 1},
+	})
+	ores := oai.ToOpenAIForwardResult()
+	if ores.FirstTokenMs == nil || *ores.FirstTokenMs != 137 || ores.Duration != 900*time.Millisecond {
+		t.Errorf("openai timing lost: first=%v dur=%v", ores.FirstTokenMs, ores.Duration)
+	}
+
+	// 非流式(FirstTokenMs=nil)时 omitempty 生效,还原后仍为 nil,Duration 保留。
+	nonStream := BuildEdgeUsageEnvelope(&ForwardResult{
+		Model:    "claude-opus-4-8",
+		Duration: 400 * time.Millisecond,
+		Usage:    ClaudeUsage{InputTokens: 2, OutputTokens: 2},
+	})
+	nres := nonStream.ToForwardResult()
+	if nres.FirstTokenMs != nil {
+		t.Errorf("non-stream FirstTokenMs should be nil, got %v", *nres.FirstTokenMs)
+	}
+	if nres.Duration != 400*time.Millisecond {
+		t.Errorf("non-stream Duration lost: %v", nres.Duration)
 	}
 }
 

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 /*
@@ -39,6 +40,11 @@ type EdgeUsageEnvelope struct {
 	ServiceTier      string `json:"service_tier,omitempty"`
 	ImageCount       int    `json:"image_count,omitempty"`
 	Stream           bool   `json:"stream"`
+	// 时延(cell 权威测量):中央转发请求不走本地 gateway,自身测不到首字/耗时,
+	// 必须由 cell 带回,否则中央使用记录的「首 TOKEN / 耗时」恒为空。
+	// 用 ms 传(避免 time.Duration 的纳秒序列化歧义);FirstTokenMs 仅流式有值。
+	FirstTokenMs *int  `json:"first_token_ms,omitempty"`
+	DurationMs   int64 `json:"duration_ms,omitempty"`
 }
 
 // BuildEdgeUsageEnvelope 从 claude ForwardResult 提取计费所需字段。
@@ -53,6 +59,8 @@ func BuildEdgeUsageEnvelope(result *ForwardResult) EdgeUsageEnvelope {
 		Usage:         result.Usage,
 		ImageCount:    result.ImageCount,
 		Stream:        result.Stream,
+		FirstTokenMs:  result.FirstTokenMs,
+		DurationMs:    result.Duration.Milliseconds(),
 	}
 }
 
@@ -81,6 +89,8 @@ func BuildEdgeUsageEnvelopeOpenAI(result *OpenAIForwardResult) EdgeUsageEnvelope
 		ServiceTier:      tier,
 		ImageCount:       result.ImageCount,
 		Stream:           result.Stream,
+		FirstTokenMs:     result.FirstTokenMs,
+		DurationMs:       result.Duration.Milliseconds(),
 	}
 }
 
@@ -93,6 +103,8 @@ func (e EdgeUsageEnvelope) ToForwardResult() *ForwardResult {
 		UpstreamModel: e.UpstreamModel,
 		Stream:        e.Stream,
 		ImageCount:    e.ImageCount,
+		FirstTokenMs:  e.FirstTokenMs,
+		Duration:      time.Duration(e.DurationMs) * time.Millisecond,
 	}
 }
 
@@ -114,9 +126,11 @@ func (e EdgeUsageEnvelope) ToOpenAIForwardResult() *OpenAIForwardResult {
 			CacheReadInputTokens:     e.Usage.CacheReadInputTokens,
 			ImageOutputTokens:        e.Usage.ImageOutputTokens,
 		},
-		ServiceTier: tier,
-		ImageCount:  e.ImageCount,
-		Stream:      e.Stream,
+		ServiceTier:  tier,
+		ImageCount:   e.ImageCount,
+		Stream:       e.Stream,
+		FirstTokenMs: e.FirstTokenMs,
+		Duration:     time.Duration(e.DurationMs) * time.Millisecond,
 	}
 }
 
