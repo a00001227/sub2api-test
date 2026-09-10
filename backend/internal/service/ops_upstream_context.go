@@ -45,6 +45,8 @@ const (
 	OpsClientBusinessLimitedReasonAPIKeyGroupUnassigned  = "api_key_group_unassigned"
 	OpsClientBusinessLimitedReasonLocalFeatureGate       = "local_feature_gate"
 	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
+	// 内容审核主动拦截(违规词等):中转的策略行为,非系统故障 → 排除出 SLA/健康分。
+	OpsClientBusinessLimitedReasonContentPolicy = "content_policy_violation"
 )
 
 func MarkResponseCommitted(c *gin.Context) { c.Set(ResponseCommittedKey, true) }

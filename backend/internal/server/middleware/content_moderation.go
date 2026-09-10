@@ -56,6 +56,10 @@ func ContentModeration(svc *service.ContentModerationService) gin.HandlerFunc {
 			return
 		}
 		if decision.Blocked {
+			// 内容审核主动拦截(违规词等)是中转的策略行为,非系统故障 → 标记业务限制,
+			// 使其排除出 SLA/健康分(仍留在错误列表可见)。协议无关地在此统一打标,
+			// 避免依赖各协议拦截响应体格式(anthropic 走 permission_error、无 code)。
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonContentPolicy)
 			writeModerationBlock(c, protocol, decision)
 			c.Abort()
 			return

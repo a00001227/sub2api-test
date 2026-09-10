@@ -1240,7 +1240,10 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	msg := strings.ToLower(message)
 	localClientAuthError := !upstreamError && phase == "auth" && isOpsClientAuthError(code, msg)
 	localBusinessLimited := !upstreamError && classifyOpsIsBusinessLimited(errType, phase, code, status, message, localClientAuthError)
-	isBusinessLimited = routingCapacityLimited || (clientBusinessLimited && !upstreamError) || localBusinessLimited
+	// 上游侧错误(过载/限流/模型不支持/客户端版本门槛/其它 5xx)非中转自身故障 → 排除出 SLA/健康分;
+	// 唯独 proxy_down(代理出口挂)是中转要负责的资源,保留计入。
+	upstreamBusinessLimited := upstreamError && classifyOpsUpstreamBusinessLimited(c)
+	isBusinessLimited = routingCapacityLimited || (clientBusinessLimited && !upstreamError) || localBusinessLimited || upstreamBusinessLimited
 	errorOwner = classifyOpsErrorOwner(phase, message)
 	errorSource = classifyOpsErrorSource(phase, message)
 	return phase, isBusinessLimited, errorOwner, errorSource
@@ -1248,6 +1251,12 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 
 func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string, localClientAuthError ...bool) bool {
 	if len(localClientAuthError) > 0 && localClientAuthError[0] {
+		return true
+	}
+	// 内容审核主动拦截(违规词等)是中转策略行为,非系统故障 → 排除出 SLA/健康分。
+	// 中间件路径已 MarkOpsClientBusinessLimited;此处兜底覆盖 handler 直接返回的 OpenAI 格式
+	// (body 带 code/type="content_policy_violation")。
+	if code == "content_policy_violation" || errType == "content_policy_violation" {
 		return true
 	}
 	if isOpsLocalBusinessLimitError(code, strings.ToLower(message)) {
@@ -1262,6 +1271,59 @@ func classifyOpsIsBusinessLimited(errType, phase, code string, status int, messa
 		return false
 	}
 	_ = status
+	return false
+}
+
+// opsUpstreamCauseSlug 取本次请求的上游错误分类 slug 与上游状态码。
+// 仅认 cell 计算好的**权威** slug(edge 转发路径经 recordEdgeUpstreamCause 写进 UpstreamErrorMessage);
+// 本地路径的 UpstreamErrorMessage 是上游原始文案,**故意不**在此二次归一——"not supported" 一类
+// 关键词会误伤 feature-gate 文案(如「Token counting is not supported」),宁可漏判也不错判。
+func opsUpstreamCauseSlug(c *gin.Context) (slug string, upstreamStatus int) {
+	if c == nil {
+		return "", 0
+	}
+	if v, ok := c.Get(service.OpsUpstreamStatusCodeKey); ok {
+		switch t := v.(type) {
+		case int:
+			upstreamStatus = t
+		case int64:
+			upstreamStatus = int(t)
+		}
+	}
+	msg := ""
+	if v, ok := c.Get(service.OpsUpstreamErrorMessageKey); ok {
+		if s, ok := v.(string); ok {
+			msg = strings.TrimSpace(s)
+		}
+	}
+	switch msg {
+	case service.UpstreamCauseOverloaded, service.UpstreamCauseModelNotSupported,
+		service.UpstreamCauseClientVersionGate, service.UpstreamCauseProxyDown,
+		service.UpstreamCauseOther5xx:
+		return msg, upstreamStatus // edge 路径:已是规范 slug
+	}
+	return "", upstreamStatus
+}
+
+// classifyOpsUpstreamBusinessLimited 判定上游侧错误是否算「业务限制」(排除出 SLA/健康分)。
+// 口径:中转层健康分只应反映其自身可用性。上游过载、模型不支持、客户端版本门槛、其它上游 5xx
+// 都非中转能控 → 排除;唯独 proxy_down(代理出口挂,传输层无响应)是中转自身要负责发现/修复的
+// 资源 → 保留计入。
+//
+// 注意 429 **不**在此排除:上游 429(限额/速率)被压平回客户端往往意味着「可用账号都限额了」,
+// 即中转容量问题,应计入 SLA;529(Anthropic 语义固定=overloaded)才按上游过载兜底排除。
+func classifyOpsUpstreamBusinessLimited(c *gin.Context) bool {
+	slug, upstreamStatus := opsUpstreamCauseSlug(c)
+	switch slug {
+	case service.UpstreamCauseOverloaded, service.UpstreamCauseModelNotSupported,
+		service.UpstreamCauseClientVersionGate, service.UpstreamCauseOther5xx:
+		return true
+	case service.UpstreamCauseProxyDown:
+		return false
+	}
+	if upstreamStatus == 529 {
+		return true
+	}
 	return false
 }
 

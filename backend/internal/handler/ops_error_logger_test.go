@@ -879,6 +879,71 @@ func TestClassifyOpsUpstreamNoAvailableTextStillCountsForSLA(t *testing.T) {
 	require.Equal(t, "upstream_http", errorSource)
 }
 
+// 违规词等内容审核拦截是中转策略行为,非系统故障 → 必须排除出 SLA/健康分。
+func TestClassifyOpsContentPolicyIsBusinessLimited(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	_, isBusinessLimited, _, _ := classifyOpsErrorLog(
+		c,
+		"content_policy_violation",
+		"request blocked by content policy",
+		"content_policy_violation",
+		http.StatusMethodNotAllowed, // 用户把 BlockStatus 配成 405 的场景
+	)
+	require.True(t, isBusinessLimited)
+}
+
+// 上游侧错误按 cell 回传的权威 slug 判定:过载/模型不支持/客户端版本门槛/其它 5xx 与 529 排除出
+// SLA;唯独 proxy_down(代理出口挂)是中转自身要负责的资源 → 仍计入。
+func TestClassifyOpsUpstreamCauseSLAExclusion(t *testing.T) {
+	tests := []struct {
+		name         string
+		slug         string
+		upstreamCode int
+		wantExcluded bool
+	}{
+		{name: "overloaded", slug: service.UpstreamCauseOverloaded, upstreamCode: 502, wantExcluded: true},
+		{name: "model_not_supported", slug: service.UpstreamCauseModelNotSupported, upstreamCode: 400, wantExcluded: true},
+		{name: "client_version_gate", slug: service.UpstreamCauseClientVersionGate, upstreamCode: 400, wantExcluded: true},
+		{name: "other_5xx", slug: service.UpstreamCauseOther5xx, upstreamCode: 503, wantExcluded: true},
+		{name: "proxy_down_still_counts", slug: service.UpstreamCauseProxyDown, upstreamCode: 0, wantExcluded: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			// edge 路径:recordEdgeUpstreamCause 把规范 slug 写进 UpstreamErrorMessage。
+			service.SetOpsUpstreamError(c, tt.upstreamCode, tt.slug, "")
+
+			phase, isBusinessLimited, _, _ := classifyOpsErrorLog(
+				c, "api_error", "temporarily unavailable", "", http.StatusBadGateway,
+			)
+			require.Equal(t, tt.wantExcluded, isBusinessLimited)
+			// proxy_down 是传输层错误(upstreamStatus=0),不携带上游状态码 → 走非 upstream 分类路径,
+			// 但仍不被排除(计入 SLA)。带上游状态码的用例应归为 upstream phase。
+			if tt.upstreamCode > 0 {
+				require.Equal(t, "upstream", phase)
+			}
+		})
+	}
+}
+
+// 529(Anthropic 语义固定=overloaded)即使未携带 slug,也按上游过载排除。
+func TestClassifyOpsUpstream529IsBusinessLimited(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	service.SetOpsUpstreamError(c, 529, "Overloaded", "")
+
+	_, isBusinessLimited, _, _ := classifyOpsErrorLog(
+		c, "overloaded_error", "Overloaded", "", http.StatusServiceUnavailable,
+	)
+	require.True(t, isBusinessLimited)
+}
+
 func TestParseOpsErrorResponsePreservesNestedStringCode(t *testing.T) {
 	parsed := parseOpsErrorResponse([]byte(`{"error":{"type":"permission_error","code":"GROUP_DELETED","message":"API Key 所属分组已删除"}}`))
 
