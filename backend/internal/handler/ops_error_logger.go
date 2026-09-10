@@ -1275,8 +1275,11 @@ func classifyOpsIsBusinessLimited(errType, phase, code string, status int, messa
 }
 
 // opsUpstreamCauseSlug 取本次请求的上游错误分类 slug 与上游状态码。
-// 仅认 cell 计算好的**权威** slug(edge 转发路径经 recordEdgeUpstreamCause 写进 UpstreamErrorMessage);
-// 本地路径的 UpstreamErrorMessage 是上游原始文案,**故意不**在此二次归一——"not supported" 一类
+// 只认 cell 侧 ClassifyUpstreamCause 算好的**权威** slug,两个来源:
+//   - OpsUpstreamCauseSlugKey:cell 落**自己**那条 ops 行时,SetEdgeUpstreamCauseHeader 顺手写入;
+//   - OpsUpstreamErrorMessageKey:中央 edge 行经 recordEdgeUpstreamCause 把 slug 写进 message key。
+//
+// 两者都拿不到规范 slug 时返回 ""——上游原始文案**故意不**在此二次归一:"not supported" 一类
 // 关键词会误伤 feature-gate 文案(如「Token counting is not supported」),宁可漏判也不错判。
 func opsUpstreamCauseSlug(c *gin.Context) (slug string, upstreamStatus int) {
 	if c == nil {
@@ -1290,6 +1293,17 @@ func opsUpstreamCauseSlug(c *gin.Context) (slug string, upstreamStatus int) {
 			upstreamStatus = int(t)
 		}
 	}
+	// 优先读 cell 落自己 ops 行时写入的权威 slug key。
+	if v, ok := c.Get(service.OpsUpstreamCauseSlugKey); ok {
+		if s, ok := v.(string); ok {
+			switch strings.TrimSpace(s) {
+			case service.UpstreamCauseOverloaded, service.UpstreamCauseModelNotSupported,
+				service.UpstreamCauseClientVersionGate, service.UpstreamCauseProxyDown,
+				service.UpstreamCauseOther5xx:
+				return strings.TrimSpace(s), upstreamStatus
+			}
+		}
+	}
 	msg := ""
 	if v, ok := c.Get(service.OpsUpstreamErrorMessageKey); ok {
 		if s, ok := v.(string); ok {
@@ -1300,7 +1314,7 @@ func opsUpstreamCauseSlug(c *gin.Context) (slug string, upstreamStatus int) {
 	case service.UpstreamCauseOverloaded, service.UpstreamCauseModelNotSupported,
 		service.UpstreamCauseClientVersionGate, service.UpstreamCauseProxyDown,
 		service.UpstreamCauseOther5xx:
-		return msg, upstreamStatus // edge 路径:已是规范 slug
+		return msg, upstreamStatus // 中央 edge 行:已是规范 slug
 	}
 	return "", upstreamStatus
 }

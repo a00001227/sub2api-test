@@ -16,6 +16,12 @@ const (
 	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
 	OpsUpstreamErrorsKey       = "ops_upstream_errors"
 
+	// OpsUpstreamCauseSlugKey 存 cell 侧 ClassifyUpstreamCause 算好的**权威**错误分类 slug。
+	// SetEdgeUpstreamCauseHeader 计算 slug 时顺手写入:回中央的响应头带走的是同一个 slug,
+	// 但 cell 落**自己**那条 ops 行时,原本只有上游原始文案(OpsUpstreamErrorMessageKey),
+	// 分类器读不到规范 slug → SLA 排除口径与中央 edge 行不一致。此 key 补齐,使二者统一。
+	OpsUpstreamCauseSlugKey = "ops_upstream_cause_slug"
+
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
 	OpsRoutingLatencyMsKey   = "ops_routing_latency_ms"

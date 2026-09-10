@@ -61,11 +61,18 @@ func ClassifyUpstreamCause(upstreamStatus int, upstreamMsg string) string {
 // SetEdgeUpstreamCauseHeader 在 cell 压平错误前,把分类写进脱敏响应头(供中央剥取)。
 // 仅在响应尚未开始回写(!streamStarted)时可设——流已开始则响应头已 flush,跳过。
 func SetEdgeUpstreamCauseHeader(c *gin.Context, streamStarted bool, upstreamStatus int, upstreamMsg string) {
-	if c == nil || streamStarted {
+	if c == nil {
 		return
 	}
 	slug := ClassifyUpstreamCause(upstreamStatus, upstreamMsg)
 	if slug == "" {
+		return
+	}
+	// 先把权威 slug 落进 cell 自己的 ops context(与 streamStarted 无关:算 slug 不需要发头)——
+	// cell 落自己那条 ops 行时据此分类,SLA 排除口径与中央 edge 行统一。
+	c.Set(OpsUpstreamCauseSlugKey, slug)
+	// 响应头只在流未开始回写时能加(已开始则头已 flush);带回中央供其 edge 行分类。
+	if streamStarted {
 		return
 	}
 	c.Header(EdgeUpstreamCauseHeader, fmt.Sprintf("%d|%s", upstreamStatus, slug))

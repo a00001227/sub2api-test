@@ -931,6 +931,23 @@ func TestClassifyOpsUpstreamCauseSLAExclusion(t *testing.T) {
 	}
 }
 
+// cell 落自己那条 ops 行时:context 里是上游**原始文案**(非规范 slug),但
+// SetEdgeUpstreamCauseHeader 已把权威 slug 写进 OpsUpstreamCauseSlugKey。
+// 分类器应据该 key 排除,与中央 edge 行口径一致(复现线上 openai overloaded 502 场景)。
+func TestClassifyOpsUpstreamCauseSlugKeyExcludesRawText(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	// cell handler:原始文案入 message key + 上游状态码;SetEdgeUpstreamCauseHeader 顺手落权威 slug。
+	service.SetOpsUpstreamError(c, 502, "Our servers are currently overloaded. Please try again later.", "")
+	service.SetEdgeUpstreamCauseHeader(c, false, 502, "Our servers are currently overloaded. Please try again later.")
+
+	_, isBusinessLimited, _, _ := classifyOpsErrorLog(
+		c, "api_error", "Our servers are currently overloaded. Please try again later.", "", http.StatusBadGateway,
+	)
+	require.True(t, isBusinessLimited, "cell 侧 overloaded 原始文案应经权威 slug 排除出 SLA")
+}
+
 // 529(Anthropic 语义固定=overloaded)即使未携带 slug,也按上游过载排除。
 func TestClassifyOpsUpstream529IsBusinessLimited(t *testing.T) {
 	gin.SetMode(gin.TestMode)
