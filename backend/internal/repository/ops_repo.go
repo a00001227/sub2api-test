@@ -243,7 +243,9 @@ SELECT
   e.request_type,
   COALESCE(ak.name, ''),
   ak.deleted_at,
-  COALESCE(e.deleted_key_name, '')
+  COALESCE(e.deleted_key_name, ''),
+  e.upstream_status_code,
+  COALESCE(e.upstream_error_message, '')
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
@@ -279,6 +281,8 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		var apiKeyName string
 		var apiKeyDeletedAt sql.NullTime
 		var deletedKeyName string
+		var upstreamStatusCode sql.NullInt64
+		var upstreamErrorMessage string
 		if err := rows.Scan(
 			&item.ID,
 			&item.CreatedAt,
@@ -315,9 +319,16 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&apiKeyName,
 			&apiKeyDeletedAt,
 			&deletedKeyName,
+			&upstreamStatusCode,
+			&upstreamErrorMessage,
 		); err != nil {
 			return nil, err
 		}
+		if upstreamStatusCode.Valid {
+			v := int(upstreamStatusCode.Int64)
+			item.UpstreamStatusCode = &v
+		}
+		item.UpstreamErrorMessage = upstreamErrorMessage
 		if resolvedAt.Valid {
 			t := resolvedAt.Time
 			item.ResolvedAt = &t

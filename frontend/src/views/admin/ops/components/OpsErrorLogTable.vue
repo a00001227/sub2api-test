@@ -192,6 +192,13 @@
                   >
                     {{ formatRequestType(log.request_type) }}
                   </span>
+                  <span
+                    v-if="getCauseBadge(log)"
+                    :class="['inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset', getCauseBadge(log)!.className]"
+                    :title="log.upstream_error_message"
+                  >
+                    {{ getCauseBadge(log)!.label }}
+                  </span>
                 </div>
               </td>
 
@@ -324,6 +331,22 @@ interface Emits {
 
 defineProps<Props>()
 const emit = defineEmits<Emits>()
+
+// 已知上游错误分类 slug → 徽标样式（与 edge_upstream_cause.go 的常量一一对应）。
+// 仅当 upstream_error_message 精确等于某个 slug 时展示（cell 本地记录存的是原始文案，不会误命中）。
+const CAUSE_BADGE_CLASS: Record<string, string> = {
+  overloaded: 'bg-orange-50 text-orange-700 ring-orange-600/20 dark:bg-orange-900/30 dark:text-orange-400 dark:ring-orange-500/30',
+  model_not_supported: 'bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-900/30 dark:text-amber-400 dark:ring-amber-500/30',
+  client_version_gate: 'bg-blue-50 text-blue-700 ring-blue-600/20 dark:bg-blue-900/30 dark:text-blue-400 dark:ring-blue-500/30',
+  proxy_down: 'bg-red-50 text-red-700 ring-red-600/20 dark:bg-red-900/30 dark:text-red-400 dark:ring-red-500/30',
+  other_5xx: 'bg-gray-100 text-gray-700 ring-gray-600/20 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-500/40',
+}
+
+function getCauseBadge(log: OpsErrorLog): { label: string; className: string } | null {
+  const slug = String(log.upstream_error_message || '').trim()
+  if (!slug || !(slug in CAUSE_BADGE_CLASS)) return null
+  return { label: t(`admin.ops.errorLog.cause.${slug}`), className: CAUSE_BADGE_CLASS[slug] }
+}
 
 function getStatusClass(code: number): string {
   if (code >= 500) return 'bg-red-50 text-red-700 ring-red-600/20 dark:bg-red-900/30 dark:text-red-400 dark:ring-red-500/30'

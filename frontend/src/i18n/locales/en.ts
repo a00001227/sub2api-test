@@ -5055,7 +5055,14 @@ export default {
         requestType: 'Type',
         requestTypeSync: 'Sync',
         requestTypeStream: 'Stream',
-        requestTypeWs: 'WS'
+        requestTypeWs: 'WS',
+        cause: {
+          overloaded: 'Overloaded',
+          model_not_supported: 'Model unsupported',
+          client_version_gate: 'Client too old',
+          proxy_down: 'Proxy down',
+          other_5xx: 'Upstream 5xx'
+        }
       },
       // Error Details Modal
       errorDetails: {

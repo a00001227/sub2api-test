@@ -65,6 +65,12 @@ type OpsErrorLog struct {
 	UpstreamModel    string `json:"upstream_model"`
 	RequestType      *int16 `json:"request_type"`
 
+	// 上游错误上下文（列表行也带，便于把笼统 5xx 细分展示）。
+	// 中央转发场景下 upstream_error_message 存的是分类 slug（见 edge_upstream_cause.go），
+	// 非转发/cell 本地存的是上游原始文案。列表 UI 优先用它做「原因」徽标。
+	UpstreamStatusCode   *int   `json:"upstream_status_code,omitempty"`
+	UpstreamErrorMessage string `json:"upstream_error_message,omitempty"`
+
 	// 关联 api_key 名称（LEFT JOIN api_keys 取得；软删只覆盖 key 列，name 保留，故已删 key 仍有原名）。
 	APIKeyName    string `json:"api_key_name,omitempty"`
 	APIKeyDeleted bool   `json:"api_key_deleted,omitempty"`
@@ -77,10 +83,9 @@ type OpsErrorLogDetail struct {
 	UserAgent string `json:"user_agent"`
 
 	// Upstream context (optional)
-	UpstreamStatusCode   *int   `json:"upstream_status_code,omitempty"`
-	UpstreamErrorMessage string `json:"upstream_error_message,omitempty"`
-	UpstreamErrorDetail  string `json:"upstream_error_detail,omitempty"`
-	UpstreamErrors       string `json:"upstream_errors,omitempty"` // JSON array (string) for display/parsing
+	// UpstreamStatusCode / UpstreamErrorMessage 已上提到内嵌的 OpsErrorLog（列表行也用）。
+	UpstreamErrorDetail string `json:"upstream_error_detail,omitempty"`
+	UpstreamErrors      string `json:"upstream_errors,omitempty"` // JSON array (string) for display/parsing
 
 	// Timings (optional)
 	AuthLatencyMs      *int64 `json:"auth_latency_ms"`

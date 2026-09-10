@@ -926,6 +926,12 @@ export interface OpsErrorLog {
   requested_model?: string
   upstream_model?: string
   request_type?: number | null
+
+  // 上游错误分类（列表行也带）：中央转发场景下 upstream_error_message 为分类 slug
+  // （overloaded/model_not_supported/client_version_gate/proxy_down/other_5xx），
+  // 非转发时为上游原始文案。用于把笼统 5xx 细分成「原因」徽标。
+  upstream_status_code?: number | null
+  upstream_error_message?: string
 }
 
 export interface OpsErrorDetail extends OpsErrorLog {

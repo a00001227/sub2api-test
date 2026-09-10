@@ -5213,7 +5213,14 @@ export default {
         requestType: '类型',
         requestTypeSync: '同步',
         requestTypeStream: '流式',
-        requestTypeWs: 'WS'
+        requestTypeWs: 'WS',
+        cause: {
+          overloaded: '上游过载',
+          model_not_supported: '模型不支持',
+          client_version_gate: '客户端版本过低',
+          proxy_down: '代理出口异常',
+          other_5xx: '上游 5xx'
+        }
       },
       // Error Details Modal
       errorDetails: {

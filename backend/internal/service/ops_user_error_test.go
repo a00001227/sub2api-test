@@ -121,11 +121,11 @@ func TestToUserErrorRequestDetail_WhitelistAndRedacts(t *testing.T) {
 			UserID:           &uid,
 			UserEmail:        "secret@example.com",
 			ClientIP:         func() *string { s := "1.2.3.4"; return &s }(),
-			UpstreamEndpoint: "https://api.openai.com/v1/chat/completions",
+			UpstreamEndpoint:   "https://api.openai.com/v1/chat/completions",
+			UpstreamStatusCode: &upstreamStatus,
 		},
-		ErrorBody:          `{"error":{"message":"upstream failed","type":"server_error"}}`,
-		UserAgent:          "Mozilla/5.0 secret-agent",
-		UpstreamStatusCode: &upstreamStatus,
+		ErrorBody: `{"error":{"message":"upstream failed","type":"server_error"}}`,
+		UserAgent: "Mozilla/5.0 secret-agent",
 	}
 
 	out := ToUserErrorRequestDetail(src)

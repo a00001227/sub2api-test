@@ -419,6 +419,16 @@ func isCellNoAvailableAccounts(body []byte) bool {
 	return bytes.Contains(bytes.ToLower(body), []byte("no available accounts"))
 }
 
+// recordEdgeUpstreamCause 解析 cell 回传的脱敏错误分类头(EdgeUpstreamCauseHeader,
+// 值为 "<upstreamStatus>|<slug>"),写入中央 ops context —— 转发请求在中央不走 gateway
+// handler,故中央原本只能看到被压平的笼统 502;此处把 cell 已知的真实分类补进 ops,
+// 由 OpsErrorLoggerMiddleware 落库。该头不透传给消费者客户端(调用方已 continue 跳过拷贝)。
+func recordEdgeUpstreamCause(c *gin.Context, headerVal string) {
+	if status, slug, ok := service.ParseEdgeUpstreamCauseHeader(headerVal); ok {
+		service.SetOpsUpstreamError(c, status, slug, "")
+	}
+}
+
 // relayBufferedResponse writes a fully-buffered cell response (headers + status
 // + body) to the client. Used for a non-failover 503 whose body was already read
 // to classify it — mirrors streamCellResponse's header filtering.
@@ -427,6 +437,10 @@ func relayBufferedResponse(c *gin.Context, resp *http.Response, body []byte) {
 	for k, vv := range resp.Header {
 		if isHopByHopHeader(k) || strings.EqualFold(k, service.EdgeUsageHeader) {
 			continue
+		}
+		if strings.EqualFold(k, service.EdgeUpstreamCauseHeader) {
+			recordEdgeUpstreamCause(c, resp.Header.Get(k))
+			continue // 错误分类边信道:写入中央 ops,不透传给客户端
 		}
 		for _, v := range vv {
 			h.Add(k, v)
@@ -454,6 +468,10 @@ func streamCellResponse(c *gin.Context, resp *http.Response) (*service.EdgeUsage
 	for k, vv := range resp.Header {
 		if isHopByHopHeader(k) || strings.EqualFold(k, service.EdgeUsageHeader) {
 			continue // 用量头不透传给消费者客户端
+		}
+		if strings.EqualFold(k, service.EdgeUpstreamCauseHeader) {
+			recordEdgeUpstreamCause(c, resp.Header.Get(k))
+			continue // 错误分类边信道:写入中央 ops,不透传给客户端
 		}
 		for _, v := range vv {
 			h.Add(k, v)
