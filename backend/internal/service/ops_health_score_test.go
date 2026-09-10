@@ -127,8 +127,8 @@ func TestComputeDashboardHealthScore_Comprehensive(t *testing.T) {
 					MemoryUsagePercent: float64Ptr(75),
 				},
 			},
-			wantMin: 96,
-			wantMax: 97,
+			wantMin: 94,
+			wantMax: 96,
 		},
 		{
 			name: "DB failure",
@@ -203,8 +203,8 @@ func TestComputeDashboardHealthScore_Comprehensive(t *testing.T) {
 					MemoryUsagePercent: float64Ptr(30),
 				},
 			},
-			wantMin: 84,
-			wantMax: 85,
+			wantMin: 77,
+			wantMax: 79,
 		},
 		{
 			name: "combined failures - business healthy + infra degraded",
@@ -299,19 +299,44 @@ func TestComputeBusinessHealth(t *testing.T) {
 				UpstreamErrorRate: 0,
 				Duration:          OpsPercentiles{P99: intPtr(500)},
 			},
-			wantMin: 77,
-			wantMax: 78,
+			wantMin: 68,
+			wantMax: 69,
 		},
 		{
-			name: "TTFT boundary 2s",
+			name: "TTFT within full-score band 2s",
 			overview: &OpsDashboardOverview{
 				SLA:               0.99,
 				ErrorRate:         0,
 				UpstreamErrorRate: 0,
 				TTFT:              OpsPercentiles{P99: intPtr(2000)},
 			},
-			wantMin: 75,
-			wantMax: 75,
+			// 2s ≤ 5s 满分门槛 → TTFT 满分,零错误 → 业务健康 100。
+			wantMin: 100,
+			wantMax: 100,
+		},
+		{
+			name: "TTFT mid band 17.5s",
+			overview: &OpsDashboardOverview{
+				SLA:               0.99,
+				ErrorRate:         0,
+				UpstreamErrorRate: 0,
+				TTFT:              OpsPercentiles{P99: intPtr(17500)},
+			},
+			// 17.5s 居 5s~30s 中点 → TTFT 分 50;100*0.7 + 50*0.3 = 85。
+			wantMin: 85,
+			wantMax: 85,
+		},
+		{
+			name: "zero error + high TTFT 12s (LLM 常态)",
+			overview: &OpsDashboardOverview{
+				SLA:               1.0,
+				ErrorRate:         0,
+				UpstreamErrorRate: 0,
+				TTFT:              OpsPercentiles{P99: intPtr(12060)},
+			},
+			// 零错误 + 12s TTFT:TTFT 分≈71.8;100*0.7 + 71.8*0.3 ≈ 91.5(原公式仅 50)。
+			wantMin: 91,
+			wantMax: 92,
 		},
 		{
 			name: "upstream error dominates",
@@ -321,8 +346,8 @@ func TestComputeBusinessHealth(t *testing.T) {
 				UpstreamErrorRate: 0.03,
 				Duration:          OpsPercentiles{P99: intPtr(500)},
 			},
-			wantMin: 88,
-			wantMax: 90,
+			wantMin: 84,
+			wantMax: 85,
 		},
 	}
 

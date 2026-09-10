@@ -32,7 +32,11 @@ func computeDashboardHealthScore(now time.Time, overview *OpsDashboardOverview) 
 }
 
 // computeBusinessHealth calculates business health score (0-100)
-// Components: Error Rate (50%) + TTFT (50%)
+// Components: Error Rate (70%) + TTFT (30%)
+//
+// 中转场景下 TTFT 主要由上游模型 + 客户端 prompt 大小决定(非中转自身故障),故:
+//   - 阈值按 LLM 现实校准(5s 满分 / 30s 归零,原 1s/3s 对 LLM 过苛,几乎必然归零);
+//   - 权重从 50% 降到 30%,让「可用性(错误率)」主导健康分,TTFT 仅作次要信号。
 func computeBusinessHealth(overview *OpsDashboardOverview) float64 {
 	// Error rate score: 1% → 100, 10% → 0 (linear)
 	// Combines request errors and upstream errors
@@ -48,22 +52,22 @@ func computeBusinessHealth(overview *OpsDashboardOverview) float64 {
 		}
 	}
 
-	// TTFT score: 1s → 100, 3s → 0 (linear)
-	// Time to first token is critical for user experience
+	// TTFT score: 5s → 100, 30s → 0 (linear)
+	// LLM 中转的首字延迟随上游模型与 prompt 大小天然偏高,阈值按现实校准。
 	ttftScore := 100.0
 	if overview.TTFT.P99 != nil {
 		p99 := float64(*overview.TTFT.P99)
-		if p99 > 1000 {
-			if p99 <= 3000 {
-				ttftScore = (3000 - p99) / 2000 * 100
+		if p99 > 5000 {
+			if p99 <= 30000 {
+				ttftScore = (30000 - p99) / 25000 * 100
 			} else {
 				ttftScore = 0
 			}
 		}
 	}
 
-	// Weighted combination: 50% error rate + 50% TTFT
-	return errorScore*0.5 + ttftScore*0.5
+	// Weighted combination: 70% error rate + 30% TTFT
+	return errorScore*0.7 + ttftScore*0.3
 }
 
 // computeInfraHealth calculates infrastructure health score (0-100)
