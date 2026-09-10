@@ -1244,6 +1244,13 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	// 唯独 proxy_down(代理出口挂)是中转要负责的资源,保留计入。
 	upstreamBusinessLimited := upstreamError && classifyOpsUpstreamBusinessLimited(c)
 	isBusinessLimited = routingCapacityLimited || (clientBusinessLimited && !upstreamError) || localBusinessLimited || upstreamBusinessLimited
+	// invalid_request_error(400)= 客户端把请求本身发错(prompt 过长 / 参数非法 / 字段不支持等)。
+	// 中转如实转发,由上游或本地校验拒绝——非中转可用性故障 → 排除出 SLA/健康分(仍留错误列表可见)。
+	// 与 upstreamError 无关地判定:请求内容错就是客户端的锅,哪层拒的都一样。极少数「中转请求
+	// 转换 bug 导致的 400」会一并被盖,属已知取舍(仍可在错误列表发现)。
+	if errType == "invalid_request_error" {
+		isBusinessLimited = true
+	}
 	errorOwner = classifyOpsErrorOwner(phase, message)
 	errorSource = classifyOpsErrorSource(phase, message)
 	return phase, isBusinessLimited, errorOwner, errorSource

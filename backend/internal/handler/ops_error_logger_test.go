@@ -961,6 +961,50 @@ func TestClassifyOpsUpstream529IsBusinessLimited(t *testing.T) {
 	require.True(t, isBusinessLimited)
 }
 
+func TestClassifyOpsInvalidRequestErrorExcludedFromSLA(t *testing.T) {
+	// invalid_request_error(400)= 客户端把请求本身发错,统一排除出 SLA/健康分。
+	// 覆盖两种落库路径:upstreamError=false(纯 400 透传,如 prompt 过长)与
+	// upstreamError=true(cell 把 400 也记进上游错误上下文),均应被排除。
+	tests := []struct {
+		name        string
+		setUpstream bool
+		message     string
+	}{
+		{
+			name:    "prompt too long, no upstream ctx",
+			message: "prompt is too long: 1258361 tokens > 1000000 maximum",
+		},
+		{
+			name:    "invalid param, no upstream ctx",
+			message: "messages: at least one message is required",
+		},
+		{
+			name:        "prompt too long, with upstream ctx",
+			setUpstream: true,
+			message:     "prompt is too long: 1258361 tokens > 1000000 maximum",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			if tt.setUpstream {
+				service.SetOpsUpstreamError(c, http.StatusBadRequest, tt.message, "")
+			}
+
+			errType := normalizeOpsErrorType("invalid_request_error", "")
+			_, isBusinessLimited, _, _ := classifyOpsErrorLog(
+				c, errType, tt.message, "", http.StatusBadRequest,
+			)
+
+			require.Equal(t, "invalid_request_error", errType)
+			require.True(t, isBusinessLimited)
+		})
+	}
+}
+
 func TestParseOpsErrorResponsePreservesNestedStringCode(t *testing.T) {
 	parsed := parseOpsErrorResponse([]byte(`{"error":{"type":"permission_error","code":"GROUP_DELETED","message":"API Key 所属分组已删除"}}`))
 
