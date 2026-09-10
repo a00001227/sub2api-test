@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -73,35 +74,73 @@ func (s *proxyProbeService) ProbeProxy(ctx context.Context, proxyURL string) (*s
 		return nil, 0, fmt.Errorf("failed to create proxy client: %w", err)
 	}
 
-	var lastErr error
+	// 逐个探测站尝试:任一解析成功即返回地理信息。全部失败时,区分两类结局:
+	//   - 「可达」:经代理拿到了任意 HTTP 响应(哪怕 429/503/无法解析)→ 出口能出网,
+	//     只是地理站没给可用数据 → 返回 *service.ProxyReachableError(判活方视为通)。
+	//   - 「出不了网」:所有探测站在传输层就失败(经代理建连失败/超时)→ 才算出口真死。
+	var (
+		anyReachable bool
+		reachLatency int64
+		reachReason  string
+		deadReason   string
+	)
 	for _, probe := range probeURLs {
-		exitInfo, latencyMs, err := s.probeWithURL(ctx, client, probe.url, probe.parser)
+		exitInfo, latencyMs, reachable, err := s.probeWithURL(ctx, client, probe.url, probe.parser)
 		if err == nil {
 			return exitInfo, latencyMs, nil
 		}
-		lastErr = err
+		if reachable {
+			// err 由响应/解析构造,内容安全(不含代理 URL/凭证),可直接用作原因。
+			anyReachable = true
+			reachLatency = latencyMs
+			reachReason = fmt.Sprintf("%s %s", probe.parser, err.Error())
+		} else {
+			// 传输层错误可能包含代理地址,绝不回显 —— 只归类,不带原始 message。
+			deadReason = fmt.Sprintf("%s %s", probe.parser, transportReason(err))
+		}
 	}
 
-	return nil, 0, fmt.Errorf("all probe URLs failed, last error: %w", lastErr)
+	if anyReachable {
+		return nil, reachLatency, &service.ProxyReachableError{Reason: reachReason}
+	}
+	return nil, 0, fmt.Errorf("proxy unreachable: %s", deadReason)
 }
 
-func (s *proxyProbeService) probeWithURL(ctx context.Context, client *http.Client, url string, parser string) (*service.ProxyExitInfo, int64, error) {
+// transportReason 把「经代理建连失败」的原始错误归类成一句脱敏短语,绝不回显原始
+// message(它常含代理 IP:端口)。
+func transportReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "connect failed"
+	}
+}
+
+// probeWithURL 探一个 URL。reachable=true 表示经代理拿到了 HTTP 响应(出口能出网),
+// 即使随后状态码非 200 或响应无法解析;reachable=false 仅当传输层(经代理建连)失败。
+func (s *proxyProbeService) probeWithURL(ctx context.Context, client *http.Client, url string, parser string) (info *service.ProxyExitInfo, latencyMs int64, reachable bool, err error) {
 	startTime := time.Now()
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, 0, false, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("proxy connection failed: %w", err)
+		// 经代理建连/传输失败 —— 出口没出网。
+		return nil, 0, false, fmt.Errorf("proxy connection failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	latencyMs := time.Since(startTime).Milliseconds()
+	latencyMs = time.Since(startTime).Milliseconds()
 
+	// 到这里已拿到 HTTP 响应 → 出口确实出网了(reachable=true),后续任何失败都只是
+	// 「探测站没给可用数据」,不代表代理死。
 	if resp.StatusCode != http.StatusOK {
-		return nil, latencyMs, fmt.Errorf("request failed with status: %d", resp.StatusCode)
+		return nil, latencyMs, true, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	maxResponseBytes := s.maxResponseBytes
@@ -110,19 +149,22 @@ func (s *proxyProbeService) probeWithURL(ctx context.Context, client *http.Clien
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return nil, latencyMs, fmt.Errorf("failed to read response: %w", err)
+		return nil, latencyMs, true, fmt.Errorf("read response failed: %w", err)
 	}
 	if int64(len(body)) > maxResponseBytes {
-		return nil, latencyMs, fmt.Errorf("proxy probe response exceeds limit: %d", maxResponseBytes)
+		return nil, latencyMs, true, fmt.Errorf("response exceeds limit: %d", maxResponseBytes)
 	}
 
+	// 到这里 reachable 恒为 true(已拿到 200 响应体),解析失败也只是地理数据不可用。
 	switch parser {
 	case "ip-api":
-		return s.parseIPAPI(body, latencyMs)
+		info, lat, perr := s.parseIPAPI(body, latencyMs)
+		return info, lat, true, perr
 	case "httpbin":
-		return s.parseHTTPBin(body, latencyMs)
+		info, lat, perr := s.parseHTTPBin(body, latencyMs)
+		return info, lat, true, perr
 	default:
-		return nil, latencyMs, fmt.Errorf("unknown parser: %s", parser)
+		return nil, latencyMs, true, fmt.Errorf("unknown parser: %s", parser)
 	}
 }
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"math"
 	neturl "net/url"
@@ -171,6 +172,13 @@ func (h *ProviderConnectHandler) ProbeProxy(c *gin.Context) {
 	}
 	exit, latencyMs, err := h.proxyProber.ProbeProxy(c.Request.Context(), proxy.URL())
 	if err != nil {
+		// 可达但地理站没数据(如 ip-api 限流)→ 出口确实能出网 → 判「通」,回显空 IP。
+		// 与 liveness 判活口径一致,避免「定时说异常、手动说通」的矛盾。
+		var reachErr *service.ProxyReachableError
+		if errors.As(err, &reachErr) {
+			response.Success(c, proxyProbeResponse{LatencyMs: latencyMs})
+			return
+		}
 		// Never surface the proxy URL/creds; give a stable, safe reason.
 		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_PROBE_FAILED", "proxy probe failed: unreachable or rejected"))
 		return

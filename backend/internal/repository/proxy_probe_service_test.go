@@ -2,12 +2,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
@@ -93,17 +95,22 @@ func (s *ProxyProbeServiceSuite) TestProbeProxy_Success_HTTPBinFallback() {
 	require.Equal(s.T(), "5.6.7.8", info.IP)
 }
 
-func (s *ProxyProbeServiceSuite) TestProbeProxy_AllFailed() {
+func (s *ProxyProbeServiceSuite) TestProbeProxy_AllFailed_ReachableButNoGeo() {
+	// 探测站返回 503:说明请求已经过代理转发出去(出口能出网),只是目标站没给数据。
+	// 应判「可达」(*service.ProxyReachableError),而不是把代理当死。
 	s.setupProxyServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 
 	_, _, err := s.prober.ProbeProxy(s.ctx, s.proxySrv.URL)
 	require.Error(s.T(), err)
-	require.ErrorContains(s.T(), err, "all probe URLs failed")
+	var reachErr *service.ProxyReachableError
+	require.True(s.T(), errors.As(err, &reachErr), "expected ProxyReachableError, got %v", err)
+	require.Contains(s.T(), reachErr.Reason, "HTTP 503")
 }
 
-func (s *ProxyProbeServiceSuite) TestProbeProxy_InvalidJSON() {
+func (s *ProxyProbeServiceSuite) TestProbeProxy_InvalidJSON_ReachableButNoGeo() {
+	// 200 但响应无法解析:同样说明出口能出网,只是数据不可用 → 判「可达」。
 	s.setupProxyServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.RequestURI, "ip-api.com") {
 			w.Header().Set("Content-Type", "application/json")
@@ -121,15 +128,20 @@ func (s *ProxyProbeServiceSuite) TestProbeProxy_InvalidJSON() {
 
 	_, _, err := s.prober.ProbeProxy(s.ctx, s.proxySrv.URL)
 	require.Error(s.T(), err)
-	require.ErrorContains(s.T(), err, "all probe URLs failed")
+	var reachErr *service.ProxyReachableError
+	require.True(s.T(), errors.As(err, &reachErr), "expected ProxyReachableError, got %v", err)
 }
 
 func (s *ProxyProbeServiceSuite) TestProbeProxy_ProxyServerClosed() {
+	// 代理本身连不上(传输层失败)→ 出口真出不了网 → 普通 unreachable 错误,非可达。
 	s.setupProxyServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	s.proxySrv.Close()
 
 	_, _, err := s.prober.ProbeProxy(s.ctx, s.proxySrv.URL)
 	require.Error(s.T(), err, "expected error when proxy server is closed")
+	var reachErr *service.ProxyReachableError
+	require.False(s.T(), errors.As(err, &reachErr), "closed proxy must not be treated as reachable")
+	require.ErrorContains(s.T(), err, "proxy unreachable")
 }
 
 func (s *ProxyProbeServiceSuite) TestParseIPAPI_Success() {

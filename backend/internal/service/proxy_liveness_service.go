@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"sort"
 	"sync"
@@ -38,6 +39,14 @@ const (
 	proxyLivenessMaxProxies = 1000
 	// 单个代理探测的超时(prober 自身也有超时,这里兜底)。
 	proxyLivenessProbeTimeout = 20 * time.Second
+
+	// 批量限速:探测目标 ip-api.com 免费档约 45 次/分。整轮探测按 minGap(+jitter)
+	// 依次隔开,即使一个 cell 挂十几条代理、且它们回落到同一出口 IP,也稳稳压在限额
+	// 之下(如 15 条 × ~2s ≈ 30s,≤ ~30 次/分),不会自己把自己打成限流。
+	proxyLivenessMinGap    = 1500 * time.Millisecond
+	proxyLivenessGapJitter = 1000 * time.Millisecond
+	// 传输层探测失败(疑似出口死)先短退避重试 1 次,滤掉单次网络抖动再判死。
+	proxyLivenessRetryBackoff = 2 * time.Second
 )
 
 // ProxyHealthEntry 是给 Portal 拉取的单条脱敏健康记录(绝不含凭证/代理 URL)。
@@ -149,6 +158,11 @@ func (s *ProxyLivenessService) probeOnce() {
 		if cnt <= 0 {
 			continue
 		}
+		// 批量限速:每条探测之间隔开 minGap(+jitter),把整轮请求摊平在限额之下。
+		// 放在实际发起探测之前,首条不等待。
+		if probed > 0 && !s.sleepOrStop(proxyLivenessMinGap+time.Duration(rand.Int63n(int64(proxyLivenessGapJitter)))) {
+			return
+		}
 		s.probeProxy(ctx, p)
 		probed++
 	}
@@ -157,20 +171,62 @@ func (s *ProxyLivenessService) probeOnce() {
 	}
 }
 
+// sleepOrStop 等待 d,期间若收到停止信号则返回 false(调用方应尽快退出)。
+func (s *ProxyLivenessService) sleepOrStop(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-s.stopCh:
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
 // probeProxy probes one proxy and writes success/failure into the latency cache.
 // Mirrors adminService.TestProxy's cache write (single source of truth for health).
+// 仅当探测判定「出口真出不了网」时先短退避重试 1 次,滤掉单次网络抖动再判死;
+// 「可达但地理站没数据(如 ip-api 限流)」直接判活,不重试也不标异常。
 func (s *ProxyLivenessService) probeProxy(ctx context.Context, p *Proxy) {
+	info := s.probeAttempt(ctx, p)
+	if !info.Success {
+		// 疑似出口死:退避后重试一次,任一次判活即采用。
+		if s.sleepOrStop(proxyLivenessRetryBackoff) {
+			if retry := s.probeAttempt(ctx, p); retry.Success {
+				info = retry
+			}
+		}
+	}
+	_ = s.latency.SetProxyLatency(ctx, p.ID, info)
+}
+
+// probeAttempt 探一次,产出一条(尚未落库的)健康记录。message 均已脱敏。
+func (s *ProxyLivenessService) probeAttempt(ctx context.Context, p *Proxy) *ProxyLatencyInfo {
 	pctx, cancel := context.WithTimeout(ctx, proxyLivenessProbeTimeout)
 	defer cancel()
 
 	exit, latencyMs, err := s.prober.ProbeProxy(pctx, p.URL())
 	if err != nil {
-		_ = s.latency.SetProxyLatency(ctx, p.ID, &ProxyLatencyInfo{
+		// 可达但地理探测失败(如 ip-api 限流)→ 出口能出网 → 判活,不标异常。
+		var reachErr *ProxyReachableError
+		if errors.As(err, &reachErr) {
+			info := &ProxyLatencyInfo{
+				Success:   true,
+				Message:   "reachable (geo unavailable: " + reachErr.Reason + ")",
+				UpdatedAt: time.Now(),
+			}
+			if latencyMs > 0 {
+				lat := latencyMs
+				info.LatencyMs = &lat
+			}
+			return info
+		}
+		// 出口真出不了网。err 已由 prober 脱敏(不含代理 URL/凭证)。
+		return &ProxyLatencyInfo{
 			Success:   false,
-			Message:   "proxy probe failed: unreachable or rejected",
+			Message:   err.Error(),
 			UpdatedAt: time.Now(),
-		})
-		return
+		}
 	}
 	lat := latencyMs
 	info := &ProxyLatencyInfo{
@@ -186,7 +242,7 @@ func (s *ProxyLivenessService) probeProxy(ctx context.Context, p *Proxy) {
 		info.Region = exit.Region
 		info.City = exit.City
 	}
-	_ = s.latency.SetProxyLatency(ctx, p.ID, info)
+	return info
 }
 
 // Health returns a scrubbed health table for every active proxy on this cell:

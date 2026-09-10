@@ -499,6 +499,16 @@ type ProxyExitInfoProber interface {
 	ProbeProxy(ctx context.Context, proxyURL string) (*ProxyExitInfo, int64, error)
 }
 
+// ProxyReachableError 表示:经代理成功拿到了 HTTP 响应(出口能出网),但探测目标
+// (ip-api / httpbin)没返回可解析的地理信息 —— 最常见是 ip-api.com 免费档限流(429)
+// 或第三方抽风。此时代理本身是活的,判活方(liveness / 手动测试)应据此判「通」,
+// 绝不能把用它的账号标成「出口异常」。Reason 已脱敏(只含探测站+状态,不含代理 URL/凭证)。
+type ProxyReachableError struct {
+	Reason string
+}
+
+func (e *ProxyReachableError) Error() string { return e.Reason }
+
 type groupExistenceBatchReader interface {
 	ExistsByIDs(ctx context.Context, ids []int64) (map[int64]bool, error)
 }
@@ -3457,6 +3467,19 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 	proxyURL := proxy.URL()
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
+		// 可达但地理站没数据(如 ip-api 限流)→ 出口能出网 → 判活,与 liveness 口径一致,
+		// 避免污染同一份 latency 缓存(Health 会被 Portal 拉取归因)。
+		var reachErr *ProxyReachableError
+		if errors.As(err, &reachErr) {
+			msg := "reachable (geo unavailable: " + reachErr.Reason + ")"
+			info := &ProxyLatencyInfo{Success: true, Message: msg, UpdatedAt: time.Now()}
+			if latencyMs > 0 {
+				lat := latencyMs
+				info.LatencyMs = &lat
+			}
+			s.saveProxyLatency(ctx, id, info)
+			return &ProxyTestResult{Success: true, Message: msg, LatencyMs: latencyMs}, nil
+		}
 		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
 			Success:   false,
 			Message:   err.Error(),
