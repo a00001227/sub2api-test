@@ -130,16 +130,12 @@ func (s *GatewayService) ForwardAsResponses(
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		setOpsUpstreamError(c, 0, safeErr, "")
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: 0,
-			Kind:               "request_error",
-			Message:            safeErr,
-		})
+		// 连接建立阶段失败（含响应头之前的 EOF/RST，如死号被上游边缘掐断）在换号预算内换号，
+		// 由 handler 切到健康账号；否则（读侧超时/预算耗尽）保持原行为写 Responses 格式 502。
+		safeErr, failover := recordAnthropicTransportFailover(c, account, upstreamReq, err, false)
+		if failover {
+			return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+		}
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}

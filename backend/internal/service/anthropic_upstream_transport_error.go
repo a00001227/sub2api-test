@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -22,8 +23,14 @@ import (
 // Tunnel 的会话超时是 100s：
 //   - 连接建立失败（dial 超时 / 拒连 / DNS / 网络不可达 / TLS 握手）在 dial_timeout（~10s）
 //     内就返回，上游根本没收到请求，换号既安全（不双执行）又快，重试仍来得及赶在 CF 掐断前完成。
+//   - 响应头之前的连接被掐（EOF / connection reset by peer）——死号被 Anthropic 边缘/WAF
+//     立刻 RST、代理断连——也在此换号：本分类器只在 DoWithTLS 返回 err 的三处站点被调用，
+//     此刻响应头尚未到达（响应中途的重置/读超时不会走到这里，见下），故这类 EOF 意味着上游
+//     没有回答本次请求，换号安全（不双执行已生成的回答）且快，仍受 upstreamFailoverBudget 约束。
 //   - 读/响应侧超时（read/header timeout 600~900s 才触发）此时 CF 早已切断客户端，客户端已收到
 //     错误或已放弃；此时换号会对上游**重复执行**同一请求，且新请求同样超不出 CF 窗口 —— 纯亏。
+//     这类慢超时表现为 context.DeadlineExceeded，仍返回 false；响应中途的连接重置发生在读 body
+//     阶段（SSE scanner），根本到不了本分类器。
 //   - 客户端主动断开（context.Canceled）：上游没机会暴露故障，不换号。
 //
 // 不做账号驱逐（不同于 OpenAI 的 tempUnschedule 副作用）：连接级失败多是瞬时网络抖动，
@@ -43,12 +50,15 @@ const anthropicTransportFailoverBudgetKey = "anthropic_upstream_failover_start"
 // 502 body 保持一致：若 failover 最终耗尽，客户端看到的载荷不变。
 var anthropicTransportFailoverBody = []byte(`{"type":"error","error":{"type":"upstream_error","message":"Upstream request failed"}}`)
 
-// isConnectPhaseTransportError 判断传输层错误是否发生在"连接建立阶段"——dial 超时、
-// 拒连、主机/网络不可达、DNS 解析失败、TLS 握手失败。这些失败上游都未收到请求，
-// 换号安全（不双执行）且快（≤dial_timeout）。
+// isConnectPhaseTransportError 判断传输层错误是否属于"上游未回答本次请求、换号安全"的一类——
+// dial 超时、拒连、主机/网络不可达、DNS 解析失败、TLS 握手失败，以及**响应头之前**连接被
+// 对端掐断（EOF / connection reset by peer，典型是死号被 Anthropic 边缘/WAF 立刻 RST）。
+// 这些失败上游都没有回答本次请求，换号既安全（不双执行）又快。
 //
-// 对读/响应侧错误（读超时、EOF、响应中途连接被重置）返回 false：它们只在 600~900s 的
-// 读/头超时后才出现，此时 CF 已切断客户端，换号只会对上游重复执行。
+// 前提不变式：本函数只在 DoWithTLS 返回 err（尚无 HTTP 响应头）的站点被调用，所以这里的 EOF/RST
+// 必然发生在响应头之前；响应中途的重置/读 body 错误在 SSE scanner 里单独处理，不会到这里。
+// 读/头侧的慢超时表现为 context.DeadlineExceeded，仍返回 false（保持原行为写 502，避免对上游
+// 重复执行同一已处理请求）。
 func isConnectPhaseTransportError(err error) bool {
 	if err == nil {
 		return false
@@ -79,6 +89,12 @@ func isConnectPhaseTransportError(err error) bool {
 	if errors.As(err, &recordErr) {
 		return true
 	}
+	// 响应头之前连接被对端关闭/重置：EOF（`Post "...": EOF`，Go http client 在拿到响应头前
+	// 连接被关时返回，errors.Is 会穿透 *url.Error 命中 io.EOF）、半截 EOF、connection reset by peer。
+	// 依据上面的不变式，这里必然是响应头之前，上游未回答本次请求 → 换号安全。
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
 	// 读/响应侧的超时（非 dial）：不算连接级，保持原行为写 502。
 	if errors.Is(err, context.DeadlineExceeded) {
 		return false
@@ -93,6 +109,8 @@ func isConnectPhaseTransportError(err error) bool {
 		"no such host",
 		"tls: handshake",
 		"tls handshake",
+		"connection reset by peer",
+		"unexpected eof",
 	} {
 		if strings.Contains(msg, marker) {
 			return true
@@ -125,20 +143,8 @@ func upstreamFailoverWithinBudget(c *gin.Context) bool {
 //
 // passthrough 为透传分支的 Ops 事件打标（对齐原三处站点：透传分支置 true，其余 false）。
 func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, upstreamReq *http.Request, err error, passthrough bool) error {
-	safeErr := sanitizeUpstreamErrorMessage(err.Error())
-	setOpsUpstreamError(c, 0, safeErr, "")
-	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		Platform:           account.Platform,
-		AccountID:          account.ID,
-		AccountName:        account.Name,
-		UpstreamStatusCode: 0,
-		UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
-		Passthrough:        passthrough,
-		Kind:               "request_error",
-		Message:            safeErr,
-	})
-
-	if isConnectPhaseTransportError(err) && upstreamFailoverWithinBudget(c) {
+	safeErr, failover := recordAnthropicTransportFailover(c, account, upstreamReq, err, passthrough)
+	if failover {
 		// 不写响应：由 handler 换号，或换号耗尽后写协议正确的错误。
 		return &UpstreamFailoverError{
 			StatusCode:   http.StatusBadGateway,
@@ -155,4 +161,26 @@ func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, ups
 		},
 	})
 	return fmt.Errorf("upstream request failed: %s", safeErr)
+}
+
+// recordAnthropicTransportFailover 记录 Anthropic 网关传输层失败的 Ops 事件，并判定本次
+// 请求是否应换号。返回 failover=true 时，调用方**必须**返回 *UpstreamFailoverError 且
+// **不写响应**（响应由 handler 拥有）；failover=false 时，调用方自行写协议正确的 502。
+//
+// 抽出此函数是为了让 CC(/v1/chat/completions) 与 Responses(/v1/responses) 两条转发路径复用
+// 与主 /v1/messages 路径完全一致的分类与 Ops 记录，只在最终兜底 502 的响应格式上各自处理。
+func recordAnthropicTransportFailover(c *gin.Context, account *Account, upstreamReq *http.Request, err error, passthrough bool) (safeErr string, failover bool) {
+	safeErr = sanitizeUpstreamErrorMessage(err.Error())
+	setOpsUpstreamError(c, 0, safeErr, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: 0,
+		UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+		Passthrough:        passthrough,
+		Kind:               "request_error",
+		Message:            safeErr,
+	})
+	return safeErr, isConnectPhaseTransportError(err) && upstreamFailoverWithinBudget(c)
 }
