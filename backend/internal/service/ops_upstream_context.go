@@ -55,6 +55,12 @@ const (
 	OpsClientBusinessLimitedReasonContentPolicy = "content_policy_violation"
 )
 
+// SanitizeUpstreamErrorMessage 是 sanitizeUpstreamErrorMessage 的导出包装,供 handler 层
+// 在把上游真实原因下发给客户端前脱敏(去掉 URL 里的敏感 query 参数,如 token)。
+func SanitizeUpstreamErrorMessage(msg string) string {
+	return sanitizeUpstreamErrorMessage(msg)
+}
+
 func MarkResponseCommitted(c *gin.Context) { c.Set(ResponseCommittedKey, true) }
 
 func IsResponseCommitted(c *gin.Context) bool {

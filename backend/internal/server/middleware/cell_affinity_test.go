@@ -32,6 +32,28 @@ func TestStickySessionKey(t *testing.T) {
 	if stickySessionKey(nil) != "" || stickySessionKey([]byte(`{}`)) != "" {
 		t.Fatalf("无稳定信号应返回空键")
 	}
+
+	// Codex /v1/responses:prompt_cache_key 是唯一可靠的跨轮会话锚点。
+	// 后续轮带 previous_response_id、input 只发增量,但 prompt_cache_key 恒定 →
+	// 键必须稳定,否则会换 cell → 换号 → input[N].id 校验 400。
+	rTurn1 := stickySessionKey([]byte(`{"prompt_cache_key":"conv-777","instructions":"sys","input":[{"role":"user","content":"q1"}]}`))
+	rTurn2 := stickySessionKey([]byte(`{"prompt_cache_key":"conv-777","previous_response_id":"resp_abc","input":[{"role":"user","content":"q2"}]}`))
+	if rTurn1 != "pck:conv-777" {
+		t.Fatalf("responses 应取 prompt_cache_key; got %q", rTurn1)
+	}
+	if rTurn1 != rTurn2 {
+		t.Fatalf("同会话 prompt_cache_key 跨轮键应稳定; t1=%q t2=%q", rTurn1, rTurn2)
+	}
+	// prompt_cache_key 优先级高于内容哈希:不同 input 也应同键。
+	if rTurn2 == stickySessionKey([]byte(`{"prompt_cache_key":"conv-888","input":[{"role":"user","content":"q2"}]}`)) {
+		t.Fatalf("不同 prompt_cache_key 不应同键")
+	}
+
+	// 无 prompt_cache_key 的 responses 首轮 → 退回 instructions+input 内容哈希(尽力而为)。
+	rNoPck := stickySessionKey([]byte(`{"instructions":"sys","input":[{"role":"user","content":"q1"}]}`))
+	if rNoPck == "" {
+		t.Fatalf("responses 首轮应能从 instructions+input 得到兜底键")
+	}
 }
 
 func TestSessionAffinity_GetPutExpiry(t *testing.T) {

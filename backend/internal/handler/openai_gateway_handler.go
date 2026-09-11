@@ -1007,7 +1007,7 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
 	service.SetEdgeUpstreamCauseHeader(c, streamStarted, failoverErr.StatusCode, upstreamMsg)
 
-	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
+	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode, upstreamMsg)
 	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
 
@@ -1900,33 +1900,68 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	// edge:把被压平的真实原因经脱敏头带回中央(中央 EdgeForward 会剥掉不下发客户端)
 	service.SetEdgeUpstreamCauseHeader(c, streamStarted, statusCode, upstreamMsg)
 
-	// 使用默认的错误映射
-	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	// 映射错误:过载归 overloaded_error(同 Claude,不计入错误),其余把真实原因回给客户端
+	status, errType, errMsg := h.mapUpstreamError(statusCode, upstreamMsg)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况
 func (h *OpenAIGatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool) {
-	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	status, errType, errMsg := h.mapUpstreamError(statusCode, "")
 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
 	service.SetEdgeUpstreamCauseHeader(c, streamStarted, statusCode, "")
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
 
-func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
+// clientUpstreamReason 把上游真实文案脱敏并按 rune 截断,供直接下发给客户端——
+// 让用户在客户端就能看到真实失败原因,不必每次翻服务器日志。空/无信号 → "".
+func clientUpstreamReason(upstreamMsg string) string {
+	r := strings.TrimSpace(service.SanitizeUpstreamErrorMessage(upstreamMsg))
+	if r == "" {
+		return ""
+	}
+	const maxReasonRunes = 300
+	if rs := []rune(r); len(rs) > maxReasonRunes {
+		r = strings.TrimSpace(string(rs[:maxReasonRunes])) + "…"
+	}
+	return r
+}
+
+// withUpstreamReason 把面向客户端的兜底话术与上游真实原因拼成一句(reason 为空只回兜底话术)。
+func withUpstreamReason(fallback, reason string) string {
+	if reason == "" {
+		return fallback
+	}
+	return fallback + " — " + reason
+}
+
+// mapUpstreamError 把上游状态码(+可选真实文案)映射成回客户端的错误。
+//
+//  1. 过载统一按 Claude 语义回 overloaded_error(HTTP 503):OpenAI 过载走 5xx + "overloaded"
+//     body,Anthropic 走 529。复用 ClassifyUpstreamCause 做单一真源判定,过载被归为
+//     overloaded → 不计入 SLA/错误率(见 classifyOpsUpstreamBusinessLimited),与 Claude 一致。
+//  2. 其余错误尽量把上游真实原因(已脱敏)拼回客户端,免得每次查服务器日志。401/403 除外
+//     (认证类文案可能带敏感提示,只回固定话术)。
+func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int, upstreamMsg string) (int, string, string) {
+	reason := clientUpstreamReason(upstreamMsg)
+	if service.ClassifyUpstreamCause(statusCode, upstreamMsg) == service.UpstreamCauseOverloaded {
+		return http.StatusServiceUnavailable, "overloaded_error",
+			withUpstreamReason("Upstream service overloaded, please retry later", reason)
+	}
 	switch statusCode {
 	case 401:
 		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"
 	case 403:
 		return http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"
 	case 429:
-		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
-	case 529:
-		return http.StatusServiceUnavailable, "upstream_error", "Upstream service overloaded, please retry later"
+		return http.StatusTooManyRequests, "rate_limit_error",
+			withUpstreamReason("Upstream rate limit exceeded, please retry later", reason)
 	case 500, 502, 503, 504:
-		return http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable"
+		return http.StatusBadGateway, "upstream_error",
+			withUpstreamReason("Upstream service temporarily unavailable", reason)
 	default:
-		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
+		return http.StatusBadGateway, "upstream_error",
+			withUpstreamReason("Upstream request failed", reason)
 	}
 }
 
@@ -1970,7 +2005,9 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	if c.Writer.Written() {
 		streamStarted = true
 	}
-	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
+	// 传输层失败(无 HTTP 响应,拿不到上游文案):给出诚实的连接失败话术,
+	// 而非笼统的 "Upstream request failed"。真实分类(proxy_down)已进 ops/脱敏头。
+	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream connection failed, no response from upstream", streamStarted)
 	return true
 }
 

@@ -36,7 +36,7 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 			if block.Thinking != "" {
 				outputs = append(outputs, ResponsesOutput{
 					Type: "reasoning",
-					ID:   generateItemID(),
+					ID:   generateReasoningItemID(),
 					Summary: []ResponsesSummary{{
 						Type: "summary_text",
 						Text: block.Thinking,
@@ -57,7 +57,7 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 			}
 			outputs = append(outputs, ResponsesOutput{
 				Type:      "function_call",
-				ID:        generateItemID(),
+				ID:        generateFunctionCallItemID(),
 				CallID:    toResponsesCallID(block.ID),
 				Name:      block.Name,
 				Arguments: args,
@@ -70,7 +70,7 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 	if len(msgParts) > 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type:    "message",
-			ID:      generateItemID(),
+			ID:      generateMessageItemID(),
 			Role:    "assistant",
 			Content: msgParts,
 			Status:  "completed",
@@ -80,7 +80,7 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 	if len(outputs) == 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type:    "message",
-			ID:      generateItemID(),
+			ID:      generateMessageItemID(),
 			Role:    "assistant",
 			Content: []ResponsesContentPart{{Type: "output_text", Text: ""}},
 			Status:  "completed",
@@ -260,7 +260,7 @@ func anthToResHandleContentBlockStart(evt *AnthropicStreamEvent, state *Anthropi
 
 	switch evt.ContentBlock.Type {
 	case "thinking":
-		state.CurrentItemID = generateItemID()
+		state.CurrentItemID = generateReasoningItemID()
 		state.CurrentItemType = "reasoning"
 		state.ContentIndex = 0
 
@@ -275,7 +275,7 @@ func anthToResHandleContentBlockStart(evt *AnthropicStreamEvent, state *Anthropi
 	case "text":
 		// If we don't have an open message item, open one
 		if state.CurrentItemType != "message" {
-			state.CurrentItemID = generateItemID()
+			state.CurrentItemID = generateMessageItemID()
 			state.CurrentItemType = "message"
 			state.ContentIndex = 0
 
@@ -294,7 +294,7 @@ func anthToResHandleContentBlockStart(evt *AnthropicStreamEvent, state *Anthropi
 		// Close previous item if any
 		events = append(events, closeCurrentResponsesItem(state)...)
 
-		state.CurrentItemID = generateItemID()
+		state.CurrentItemID = generateFunctionCallItemID()
 		state.CurrentItemType = "function_call"
 		state.CurrentCallID = toResponsesCallID(evt.ContentBlock.ID)
 		state.CurrentName = evt.ContentBlock.Name
@@ -532,14 +532,24 @@ func makeResponsesEvent(state *AnthropicEventToResponsesState, eventType string,
 	return evt
 }
 
-func generateResponsesID() string {
+func randItemHex() string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
-	return "resp_" + hex.EncodeToString(b)
+	return hex.EncodeToString(b)
 }
 
-func generateItemID() string {
-	b := make([]byte, 12)
-	_, _ = rand.Read(b)
-	return "item_" + hex.EncodeToString(b)
-}
+func generateResponsesID() string { return "resp_" + randItemHex() }
+
+// generateItemID 仅保留兼容(legacy)。新代码必须按 output item 类型选带正确前缀的生成器:
+// OpenAI Responses API 校验 input[].id 的 per-type 前缀(message→msg_、function_call→fc_、
+// reasoning→rs_),用统一的 item_ 前缀合成,下一轮换到原生 OpenAI 号时会 400
+// "Invalid 'input[N].id'... Expected an ID that begins with 'msg'/'fc'/'rs'"。
+func generateItemID() string { return "item_" + randItemHex() }
+
+func generateMessageItemID() string { return "msg_" + randItemHex() }
+
+func generateReasoningItemID() string { return "rs_" + randItemHex() }
+
+func generateFunctionCallItemID() string { return "fc_" + randItemHex() }
+
+func generateCallID() string { return "call_" + randItemHex() }

@@ -516,7 +516,7 @@ func chatMessageToResponsesOutput(message ChatMessage) []ResponsesOutput {
 	if message.ReasoningContent != "" {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "reasoning",
-			ID:   generateItemID(),
+			ID:   generateReasoningItemID(),
 			Summary: []ResponsesSummary{{
 				Type: "summary_text",
 				Text: message.ReasoningContent,
@@ -531,7 +531,7 @@ func chatMessageToResponsesOutput(message ChatMessage) []ResponsesOutput {
 	if text != "" || len(message.ToolCalls) == 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "message",
-			ID:   generateItemID(),
+			ID:   generateMessageItemID(),
 			Role: "assistant",
 			Content: []ResponsesContentPart{{
 				Type: "output_text",
@@ -548,7 +548,7 @@ func chatMessageToResponsesOutput(message ChatMessage) []ResponsesOutput {
 		}
 		outputs = append(outputs, ResponsesOutput{
 			Type:      "function_call",
-			ID:        generateItemID(),
+			ID:        generateFunctionCallItemID(),
 			CallID:    toolCall.ID,
 			Name:      toolCall.Function.Name,
 			Arguments: arguments,
@@ -562,7 +562,7 @@ func chatMessageToResponsesOutput(message ChatMessage) []ResponsesOutput {
 func emptyResponsesMessageOutput() ResponsesOutput {
 	return ResponsesOutput{
 		Type:    "message",
-		ID:      generateItemID(),
+		ID:      generateMessageItemID(),
 		Role:    "assistant",
 		Content: []ResponsesContentPart{{Type: "output_text", Text: ""}},
 		Status:  "completed",
@@ -734,12 +734,12 @@ func ChatCompletionsChunkToResponsesEvents(
 				events = append(events, closeChatReasoningItem(state)...)
 				copyCall := toolCall
 				if copyCall.ID == "" {
-					copyCall.ID = generateItemID()
+					copyCall.ID = generateCallID()
 				}
 				copyCall.Type = "function"
 				state.ToolCalls[idx] = &copyCall
 				stored = &copyCall
-				itemID := generateItemID()
+				itemID := generateFunctionCallItemID()
 				state.ToolItemIDs[idx] = itemID
 				state.ToolOutputIndex[idx] = state.allocOutputIndex()
 				events = append(events, chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
@@ -871,7 +871,7 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 		return nil
 	}
 	state.ReasoningOpen = true
-	state.ReasoningItemID = generateItemID()
+	state.ReasoningItemID = generateReasoningItemID()
 	state.ReasoningIndex = state.allocOutputIndex()
 	return []ResponsesStreamEvent{
 		chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
@@ -952,7 +952,7 @@ func ensureChatToResponsesMessageItem(state *ChatCompletionsToResponsesStreamSta
 	if state.MessageItemID != "" {
 		return nil
 	}
-	state.MessageItemID = generateItemID()
+	state.MessageItemID = generateMessageItemID()
 	state.MessageIndex = state.allocOutputIndex()
 	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
 		OutputIndex: state.MessageIndex,
@@ -1031,7 +1031,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	if state.Reasoning.Len() > 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "reasoning",
-			ID:   generateItemID(),
+			ID:   generateReasoningItemID(),
 			Summary: []ResponsesSummary{{
 				Type: "summary_text",
 				Text: state.Reasoning.String(),
@@ -1041,7 +1041,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	if state.MessageItemID != "" || len(state.ToolCalls) == 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "message",
-			ID:   nonEmpty(state.MessageItemID, generateItemID()),
+			ID:   nonEmpty(state.MessageItemID, generateMessageItemID()),
 			Role: "assistant",
 			Content: []ResponsesContentPart{{
 				Type: "output_text",
@@ -1061,7 +1061,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		}
 		outputs = append(outputs, ResponsesOutput{
 			Type:      "function_call",
-			ID:        generateItemID(),
+			ID:        generateFunctionCallItemID(),
 			CallID:    toolCall.ID,
 			Name:      toolCall.Function.Name,
 			Arguments: arguments,
