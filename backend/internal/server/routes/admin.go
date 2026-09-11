@@ -201,6 +201,8 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		pa.GET("/config", h.Admin.PromptAudit.GetConfig)
 		pa.PUT("/config", h.Admin.PromptAudit.UpdateConfig)
 		pa.GET("/status", h.Admin.PromptAudit.GetStatus)
+		// /summary 与 /events 平级（避免与 /events/:id 的通配冲突）：结果分桶计数，供状态栏。
+		pa.GET("/summary", h.Admin.PromptAudit.GetSummary)
 		pa.GET("/events", h.Admin.PromptAudit.ListEvents)
 		pa.GET("/events/:id", h.Admin.PromptAudit.GetEvent)
 		pa.DELETE("/events/:id", h.Admin.PromptAudit.DeleteEvent)

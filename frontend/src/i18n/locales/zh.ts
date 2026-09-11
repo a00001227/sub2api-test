@@ -2653,7 +2653,19 @@ export default {
       deleteAllConfirm: '确认清空全部提示词审计记录？此操作不可恢复。',
       deleteAllDone: '已清空 {n} 条记录',
       empty: '暂无记录',
-      disabledTip: '提示词审计当前未启用，开启后新的请求才会被留存。'
+      disabledTip: '提示词审计当前未启用，开启后新的请求才会被留存。',
+      resultBar: '结果统计',
+      resultBarHint: '结果按 request_id 读时关联风控日志得出（与提示词审计解耦）；「未审」表示无关联记录：内容审核未开、被抽样跳过或该请求无 request_id。点卡片可按结果筛选。',
+      result: {
+        label: '结果',
+        all: '全部',
+        allow: '放行',
+        hit: '命中',
+        blocked: '已拦截',
+        error: '异常',
+        unaudited: '未审',
+        categoryTip: '命中类目：{c}'
+      }
     },
 
     riskControl: {

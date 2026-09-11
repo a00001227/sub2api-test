@@ -2576,7 +2576,19 @@ export default {
       deleteAllConfirm: 'Clear ALL prompt audit records? This cannot be undone.',
       deleteAllDone: 'Cleared {n} records',
       empty: 'No records',
-      disabledTip: 'Prompt audit is currently disabled. Only new requests are retained once enabled.'
+      disabledTip: 'Prompt audit is currently disabled. Only new requests are retained once enabled.',
+      resultBar: 'Results',
+      resultBarHint: 'Results are derived at read time by correlating moderation logs on request_id (decoupled from prompt audit). "Unaudited" means no matching log: moderation was off, the request was sampled out, or it had no request_id. Click a card to filter by result.',
+      result: {
+        label: 'Result',
+        all: 'All',
+        allow: 'Pass',
+        hit: 'Hit',
+        blocked: 'Blocked',
+        error: 'Error',
+        unaudited: 'Unaudited',
+        categoryTip: 'Category: {c}'
+      }
     },
 
     riskControl: {

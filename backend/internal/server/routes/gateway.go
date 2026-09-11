@@ -69,8 +69,10 @@ func RegisterGatewayRoutes(
 	// 未启用时零开销放行；cell 回源可信流量跳过（中央已审）。
 	contentModeration := middleware.ContentModeration(h.Gateway.ContentModerationService())
 
-	// 提示词审计捕获中间件：与内容审核解耦、best-effort 留存原文，挂在同一批次
-	// （enforcement 之后、edgeForward 之前 → 转发路径也覆盖）。未启用时零开销放行。
+	// 提示词审计捕获中间件：与内容审核解耦、best-effort 留存原文。**必须排在 contentModeration
+	// 之前**——内容审核命中会 c.Abort() 短路后续中间件，若审计在其后，被拦截的请求就永远留不下原文；
+	// 放在前面则全量留存（含被拦截请求），提示词审计再读时按 request_id 关联风控日志得出「结果」。
+	// 未启用时零开销放行。
 	promptAudit := middleware.PromptAuditCapture(h.Admin.PromptAudit.Service())
 
 	// API网关（Claude API兼容）
@@ -83,10 +85,10 @@ func RegisterGatewayRoutes(
 	gateway.Use(requireGroupAnthropic)
 	// 蒸馏执行层限速（默认关 = no-op），必须在转发之前。
 	gateway.Use(enforcement)
+	// 提示词审计捕获（默认关 = no-op），必须在内容审核之前 → 被拦截的请求也留存原文。
+	gateway.Use(promptAudit)
 	// 前置内容审计（默认关 = no-op），必须在转发之前 → 命中即拦、不转发 cell。
 	gateway.Use(contentModeration)
-	// 提示词审计捕获（默认关 = no-op），转发前留存原文。
-	gateway.Use(promptAudit)
 	// 中央“执行→转发”:命中配置组的请求反向代理到边缘 cell（默认关 = no-op）。
 	gateway.Use(edgeForward)
 	{
@@ -205,25 +207,25 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.Responses(c)
 	}
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward, responsesHandler)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward, responsesHandler)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward, h.OpenAIGateway.ResponsesWebSocket)
+	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
+	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, h.OpenAIGateway.ResponsesWebSocket)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward)
+	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward)
 	{
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
 		codexDirect.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward, func(c *gin.Context) {
+	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
 	})
-	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward, func(c *gin.Context) {
+	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -236,7 +238,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Embeddings(c)
 	})
-	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward, func(c *gin.Context) {
+	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -249,7 +251,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Images(c)
 	})
-	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, contentModeration, promptAudit, edgeForward, func(c *gin.Context) {
+	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{

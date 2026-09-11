@@ -54,8 +54,13 @@ func (r *promptAuditRepository) ListEvents(ctx context.Context, filter service.P
 	where, args := buildPromptAuditEventWhere(filter)
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
 
+	// 结果过滤时 WHERE 会引用 m.*，COUNT 也需带上 lateral join；无结果过滤则保持快路径。
+	countJoin := ""
+	if promptAuditResultPredicate(filter.Result) != "" {
+		countJoin = promptAuditModerationJoin
+	}
 	var total int64
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM prompt_audit_events e "+whereSQL, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM prompt_audit_events e "+countJoin+whereSQL, args...).Scan(&total); err != nil {
 		return nil, nil, fmt.Errorf("count prompt audit events: %w", err)
 	}
 
@@ -72,13 +77,16 @@ func (r *promptAuditRepository) ListEvents(ctx context.Context, filter service.P
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, params.Limit(), params.Offset())
 	// 列表不返回 full_prompt（可能很大），仅返回长度/元数据；详情单独查。
+	// 末尾 4 列为读时关联风控日志推导的结果字段（无关联记录时 action/category 为空、flagged=false、result=unaudited）。
 	rows, err := r.db.QueryContext(ctx, `
 SELECT
     e.id, e.request_id, e.user_id, e.user_email, e.api_key_id, e.api_key_name, e.group_id, e.group_name,
     e.provider, e.endpoint, e.protocol, e.model, e.prompt_hash, e.prompt_length, e.message_count,
-    COALESCE(u.status, ''), e.created_at
+    COALESCE(u.status, ''), e.created_at,
+    COALESCE(m.action, ''), COALESCE(m.highest_category, ''), COALESCE(m.flagged, FALSE),
+    `+promptAuditResultCase+`
 FROM prompt_audit_events e
-LEFT JOIN users u ON u.id = e.user_id `+whereSQL+`
+LEFT JOIN users u ON u.id = e.user_id`+promptAuditModerationJoin+whereSQL+`
 ORDER BY e.created_at DESC, e.id DESC
 LIMIT $`+fmt.Sprint(len(queryArgs)-1)+` OFFSET $`+fmt.Sprint(len(queryArgs)),
 		queryArgs...,
@@ -110,6 +118,10 @@ LIMIT $`+fmt.Sprint(len(queryArgs)-1)+` OFFSET $`+fmt.Sprint(len(queryArgs)),
 			&item.MessageCount,
 			&item.UserStatus,
 			&item.CreatedAt,
+			&item.ModerationAction,
+			&item.ModerationCategory,
+			&item.ModerationFlagged,
+			&item.Result,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan prompt audit event: %w", err)
 		}
@@ -131,6 +143,30 @@ LIMIT $`+fmt.Sprint(len(queryArgs)-1)+` OFFSET $`+fmt.Sprint(len(queryArgs)),
 		return nil, nil, fmt.Errorf("iterate prompt audit events: %w", err)
 	}
 	return items, paginationResultFromTotal(total, params), nil
+}
+
+// SummarizeResults 在给定过滤条件下按结果分桶计数（service 已清空 result，故这里不含结果过滤）。
+// 用 FILTER 一次扫描出全部分桶，谓词与 promptAuditResultCase 一致。
+func (r *promptAuditRepository) SummarizeResults(ctx context.Context, filter service.PromptAuditEventFilter) (service.PromptAuditResultSummary, error) {
+	where, args := buildPromptAuditEventWhere(filter)
+	whereSQL := "WHERE " + strings.Join(where, " AND ")
+
+	var s service.PromptAuditResultSummary
+	err := r.db.QueryRowContext(ctx, `
+SELECT
+    COUNT(*),
+    COUNT(*) FILTER (WHERE `+promptAuditResultPredicate(service.PromptAuditResultAllow)+`),
+    COUNT(*) FILTER (WHERE `+promptAuditResultPredicate(service.PromptAuditResultHit)+`),
+    COUNT(*) FILTER (WHERE `+promptAuditResultPredicate(service.PromptAuditResultBlocked)+`),
+    COUNT(*) FILTER (WHERE `+promptAuditResultPredicate(service.PromptAuditResultError)+`),
+    COUNT(*) FILTER (WHERE `+promptAuditResultPredicate(service.PromptAuditResultUnaudited)+`)
+FROM prompt_audit_events e`+promptAuditModerationJoin+whereSQL,
+		args...,
+	).Scan(&s.Total, &s.Allow, &s.Hit, &s.Blocked, &s.Error, &s.Unaudited)
+	if err != nil {
+		return service.PromptAuditResultSummary{}, fmt.Errorf("summarize prompt audit results: %w", err)
+	}
+	return s, nil
 }
 
 func (r *promptAuditRepository) GetEvent(ctx context.Context, id int64) (*service.PromptAuditEvent, error) {
@@ -213,6 +249,47 @@ func (r *promptAuditRepository) CleanupExpired(ctx context.Context, before time.
 	return n, nil
 }
 
+// promptAuditModerationJoin 读时把每条提示词审计记录关联到「最近一条」同 request_id 的风控日志。
+// LEFT JOIN 保证无关联记录（审核未开 / 抽样跳过 / request_id 为空）的行仍然返回（m.* 为 NULL）。
+// 依赖 content_moderation_logs(request_id) 部分索引（见 migration 179）避免逐行 seq scan。
+const promptAuditModerationJoin = ` LEFT JOIN LATERAL (
+    SELECT cm.action, cm.flagged, cm.error, cm.highest_category
+    FROM content_moderation_logs cm
+    WHERE cm.request_id = e.request_id AND e.request_id <> ''
+    ORDER BY cm.created_at DESC
+    LIMIT 1
+) m ON true `
+
+// promptAuditResultCase 由关联到的风控 action/flagged/error 推导「结果」，与前端徽章一一对应。
+// 优先级：无记录 → 异常 → 已拦截 → 命中 → 放行。必须与 promptAuditResultPredicate 保持一致。
+const promptAuditResultCase = `CASE
+    WHEN m.action IS NULL THEN 'unaudited'
+    WHEN m.action = 'error' OR m.error <> '' THEN 'error'
+    WHEN m.action IN ('block','hash_block','keyword_block','cyber_policy') THEN 'blocked'
+    WHEN m.flagged THEN 'hit'
+    ELSE 'allow'
+END`
+
+// promptAuditResultPredicate 返回某个结果值对应的 SQL 谓词（只用字面量、不占位参数，故不影响
+// 既有 $N 参数编号）。逐条镜像 promptAuditResultCase 的优先级，供列表过滤与状态栏分桶复用。
+func promptAuditResultPredicate(result string) string {
+	const blocked = "m.action IN ('block','hash_block','keyword_block','cyber_policy')"
+	const notError = "m.action <> 'error' AND m.error = ''"
+	switch result {
+	case service.PromptAuditResultUnaudited:
+		return "m.action IS NULL"
+	case service.PromptAuditResultError:
+		return "m.action IS NOT NULL AND (m.action = 'error' OR m.error <> '')"
+	case service.PromptAuditResultBlocked:
+		return "m.action IS NOT NULL AND " + notError + " AND " + blocked
+	case service.PromptAuditResultHit:
+		return "m.action IS NOT NULL AND " + notError + " AND NOT (" + blocked + ") AND m.flagged IS TRUE"
+	case service.PromptAuditResultAllow:
+		return "m.action IS NOT NULL AND " + notError + " AND NOT (" + blocked + ") AND m.flagged IS NOT TRUE"
+	}
+	return ""
+}
+
 func buildPromptAuditEventWhere(filter service.PromptAuditEventFilter) ([]string, []any) {
 	where := []string{"e.id IS NOT NULL"}
 	args := make([]any, 0)
@@ -240,6 +317,11 @@ func buildPromptAuditEventWhere(filter service.PromptAuditEventFilter) ([]string
 	}
 	if filter.To != nil && !filter.To.IsZero() {
 		add("e.created_at <= $%d", *filter.To)
+	}
+	// 结果过滤：谓词只用字面量、不占位参数，故不影响上面的 $N 编号；引用 m.* 需调用方带上
+	// promptAuditModerationJoin。
+	if pred := promptAuditResultPredicate(filter.Result); pred != "" {
+		where = append(where, "("+pred+")")
 	}
 	return where, args
 }

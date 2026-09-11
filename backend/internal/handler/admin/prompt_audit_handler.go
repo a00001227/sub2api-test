@@ -71,21 +71,17 @@ func (h *PromptAuditHandler) GetStatus(c *gin.Context) {
 	response.Success(c, h.service.Status(c.Request.Context()))
 }
 
-func (h *PromptAuditHandler) ListEvents(c *gin.Context) {
-	page, pageSize := response.ParsePagination(c)
+// parsePromptAuditFilter 解析列表/状态栏共用的过滤条件（不含分页）。校验失败时写好错误响应并
+// 返回 ok=false，调用方直接 return。
+func parsePromptAuditFilter(c *gin.Context) (service.PromptAuditEventFilter, bool) {
 	filter := service.PromptAuditEventFilter{
 		Search: strings.TrimSpace(c.Query("search")),
-		Pagination: pagination.PaginationParams{
-			Page:      page,
-			PageSize:  pageSize,
-			SortOrder: pagination.SortOrderDesc,
-		},
 	}
 	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {
 		v, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || v <= 0 {
 			response.BadRequest(c, "Invalid group_id")
-			return
+			return filter, false
 		}
 		filter.GroupID = &v
 	}
@@ -93,7 +89,7 @@ func (h *PromptAuditHandler) ListEvents(c *gin.Context) {
 		v, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || v <= 0 {
 			response.BadRequest(c, "Invalid api_key_id")
-			return
+			return filter, false
 		}
 		filter.APIKeyID = &v
 	}
@@ -101,15 +97,19 @@ func (h *PromptAuditHandler) ListEvents(c *gin.Context) {
 		v, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || v <= 0 {
 			response.BadRequest(c, "Invalid user_id")
-			return
+			return filter, false
 		}
 		filter.UserID = &v
+	}
+	// 结果过滤：非法值静默忽略（等价不过滤），不报错。
+	if raw := strings.TrimSpace(c.Query("result")); raw != "" && service.IsValidPromptAuditResult(raw) {
+		filter.Result = raw
 	}
 	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
 		t, _, err := parsePromptAuditDate(raw)
 		if err != nil {
 			response.BadRequest(c, "Invalid from")
-			return
+			return filter, false
 		}
 		filter.From = &t
 	}
@@ -117,12 +117,26 @@ func (h *PromptAuditHandler) ListEvents(c *gin.Context) {
 		t, dateOnly, err := parsePromptAuditDate(raw)
 		if err != nil {
 			response.BadRequest(c, "Invalid to")
-			return
+			return filter, false
 		}
 		if dateOnly {
 			t = t.Add(24*time.Hour - time.Nanosecond)
 		}
 		filter.To = &t
+	}
+	return filter, true
+}
+
+func (h *PromptAuditHandler) ListEvents(c *gin.Context) {
+	filter, ok := parsePromptAuditFilter(c)
+	if !ok {
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	filter.Pagination = pagination.PaginationParams{
+		Page:      page,
+		PageSize:  pageSize,
+		SortOrder: pagination.SortOrderDesc,
 	}
 	items, pageResult, err := h.service.ListEvents(c.Request.Context(), filter)
 	if err != nil {
@@ -130,6 +144,20 @@ func (h *PromptAuditHandler) ListEvents(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
+}
+
+// GetSummary 返回当前过滤条件下的结果分桶计数（供「结果状态栏」）。忽略 result 过滤本身。
+func (h *PromptAuditHandler) GetSummary(c *gin.Context) {
+	filter, ok := parsePromptAuditFilter(c)
+	if !ok {
+		return
+	}
+	summary, err := h.service.SummarizeResults(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, summary)
 }
 
 func (h *PromptAuditHandler) GetEvent(c *gin.Context) {

@@ -68,6 +68,33 @@ type PromptAuditEvent struct {
 	FullPrompt   string    `json:"full_prompt"`
 	UserStatus   string    `json:"user_status"`
 	CreatedAt    time.Time `json:"created_at"`
+
+	// 读时按 request_id 关联风控日志（content_moderation_logs）得出的审核结果，与提示词审计
+	// 解耦、不落本表。取值：allow(放行) / hit(命中未拦) / blocked(已拦截) / error(异常) /
+	// unaudited(无关联记录：审核未开、抽样跳过或该请求无 request_id)。
+	Result             string `json:"result"`
+	ModerationAction   string `json:"moderation_action"`   // 关联到的风控 action 原值（供详情展示）
+	ModerationCategory string `json:"moderation_category"` // 命中的最高类目
+	ModerationFlagged  bool   `json:"moderation_flagged"`
+}
+
+// PromptAuditResultKind 是提示词审计「结果」列/状态栏的取值枚举。
+const (
+	PromptAuditResultAllow     = "allow"
+	PromptAuditResultHit       = "hit"
+	PromptAuditResultBlocked   = "blocked"
+	PromptAuditResultError     = "error"
+	PromptAuditResultUnaudited = "unaudited"
+)
+
+// IsValidPromptAuditResult 校验前端传入的结果过滤值是否合法（非法则忽略过滤）。
+func IsValidPromptAuditResult(v string) bool {
+	switch v {
+	case PromptAuditResultAllow, PromptAuditResultHit, PromptAuditResultBlocked,
+		PromptAuditResultError, PromptAuditResultUnaudited:
+		return true
+	}
+	return false
 }
 
 // PromptAuditEventFilter 列表查询过滤条件。
@@ -76,9 +103,20 @@ type PromptAuditEventFilter struct {
 	GroupID    *int64
 	APIKeyID   *int64
 	UserID     *int64
+	Result     string // 结果过滤（见 PromptAuditResult* 枚举）；空串=不过滤
 	From       *time.Time
 	To         *time.Time
 	Pagination pagination.PaginationParams
+}
+
+// PromptAuditResultSummary 结果状态栏计数（在当前过滤条件下、忽略 result 本身）。
+type PromptAuditResultSummary struct {
+	Total     int64 `json:"total"`
+	Allow     int64 `json:"allow"`
+	Hit       int64 `json:"hit"`
+	Blocked   int64 `json:"blocked"`
+	Error     int64 `json:"error"`
+	Unaudited int64 `json:"unaudited"`
 }
 
 // PromptAuditStatus 面板状态展示。
@@ -95,6 +133,7 @@ type PromptAuditStatus struct {
 type PromptAuditRepository interface {
 	CreateEvent(ctx context.Context, event *PromptAuditEvent) error
 	ListEvents(ctx context.Context, filter PromptAuditEventFilter) ([]PromptAuditEvent, *pagination.PaginationResult, error)
+	SummarizeResults(ctx context.Context, filter PromptAuditEventFilter) (PromptAuditResultSummary, error)
 	GetEvent(ctx context.Context, id int64) (*PromptAuditEvent, error)
 	DeleteEvent(ctx context.Context, id int64) error
 	DeleteAll(ctx context.Context) (int64, error)
@@ -313,6 +352,16 @@ func (s *PromptAuditService) ListEvents(ctx context.Context, filter PromptAuditE
 		return nil, nil, infraerrors.BadRequest("PROMPT_AUDIT_UNAVAILABLE", "提示词审计服务不可用")
 	}
 	return s.repo.ListEvents(ctx, filter)
+}
+
+// SummarizeResults 返回当前过滤条件下的结果分桶计数（供「结果状态栏」）。
+// 忽略 filter.Result 本身，使状态栏始终展示全部分桶、可点选过滤。
+func (s *PromptAuditService) SummarizeResults(ctx context.Context, filter PromptAuditEventFilter) (PromptAuditResultSummary, error) {
+	if s == nil || s.repo == nil {
+		return PromptAuditResultSummary{}, infraerrors.BadRequest("PROMPT_AUDIT_UNAVAILABLE", "提示词审计服务不可用")
+	}
+	filter.Result = "" // 状态栏跨全部结果，不受结果过滤影响
+	return s.repo.SummarizeResults(ctx, filter)
 }
 
 func (s *PromptAuditService) GetEvent(ctx context.Context, id int64) (*PromptAuditEvent, error) {

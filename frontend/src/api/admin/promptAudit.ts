@@ -41,6 +41,23 @@ export interface PromptAuditEvent {
   full_prompt: string // 仅详情接口返回；列表为空串
   user_status: string
   created_at: string
+  // 读时按 request_id 关联风控日志推导（与提示词审计解耦，不落本表）。
+  // result: allow(放行) / hit(命中未拦) / blocked(已拦截) / error(异常) / unaudited(无关联记录)
+  result: PromptAuditResult
+  moderation_action: string
+  moderation_category: string
+  moderation_flagged: boolean
+}
+
+export type PromptAuditResult = 'allow' | 'hit' | 'blocked' | 'error' | 'unaudited'
+
+export interface PromptAuditResultSummary {
+  total: number
+  allow: number
+  hit: number
+  blocked: number
+  error: number
+  unaudited: number
 }
 
 export interface ListPromptAuditEventsParams {
@@ -50,9 +67,13 @@ export interface ListPromptAuditEventsParams {
   group_id?: number
   api_key_id?: number
   user_id?: number
+  result?: PromptAuditResult | ''
   from?: string
   to?: string
 }
+
+// 状态栏计数参数：与列表过滤同源，但不含分页与 result（后端忽略 result 本身）。
+export type PromptAuditSummaryParams = Omit<ListPromptAuditEventsParams, 'page' | 'page_size' | 'result'>
 
 export interface PromptAuditEventsResponse {
   items: PromptAuditEvent[]
@@ -86,6 +107,15 @@ export async function listEvents(
   return data
 }
 
+export async function getSummary(
+  params: PromptAuditSummaryParams = {}
+): Promise<PromptAuditResultSummary> {
+  const { data } = await apiClient.get<PromptAuditResultSummary>('/admin/prompt-audit/summary', {
+    params,
+  })
+  return data
+}
+
 export async function getEvent(id: number): Promise<PromptAuditEvent> {
   const { data } = await apiClient.get<PromptAuditEvent>(`/admin/prompt-audit/events/${id}`)
   return data
@@ -105,6 +135,7 @@ export const promptAuditAPI = {
   getConfig,
   updateConfig,
   getStatus,
+  getSummary,
   listEvents,
   getEvent,
   deleteEvent,
