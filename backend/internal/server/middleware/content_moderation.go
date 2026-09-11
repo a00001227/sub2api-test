@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -116,6 +117,13 @@ func buildModerationInput(c *gin.Context, apiKey *service.APIKey, protocol strin
 	}
 	if input.Endpoint == "" && c.Request != nil && c.Request.URL != nil {
 		input.Endpoint = c.Request.URL.Path
+	}
+	// 写入 request_id（与提示词审计同源 ctxkey.ClientRequestID）→ 供提示词审计「结果」列读时
+	// 按 request_id 关联本条风控日志。不设则恒为空串，两表无法关联（历史 bug）。
+	if c.Request != nil {
+		if rid, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string); rid != "" {
+			input.RequestID = strings.TrimSpace(rid)
+		}
 	}
 	if forced, ok := GetForcePlatformFromContext(c); ok {
 		input.Provider = strings.TrimSpace(forced)
