@@ -4,12 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
 
 const proxyLatencyKeyPrefix = "proxy:latency:"
+
+// proxyLatencyTTL:健康记录的存活时长。取远大于探活间隔(5min),让在役代理每轮
+// 都能在过期前被刷新;而一旦某代理不再被探(解绑/下架/移出池),它的记录在此之后
+// 自动过期消失 —— Health() 便不再上报陈旧结果,避免「死 IP 记录永久残留」。
+// 过期后读到 nil = 「无数据」,由上层按「未探到」处理(不判死),而非误当失败。
+const proxyLatencyTTL = 30 * time.Minute
 
 func proxyLatencyKey(proxyID int64) string {
 	return fmt.Sprintf("%s%d", proxyLatencyKeyPrefix, proxyID)
@@ -70,5 +77,5 @@ func (c *proxyLatencyCache) SetProxyLatency(ctx context.Context, proxyID int64, 
 	if err != nil {
 		return err
 	}
-	return c.rdb.Set(ctx, proxyLatencyKey(proxyID), payload, 0).Err()
+	return c.rdb.Set(ctx, proxyLatencyKey(proxyID), payload, proxyLatencyTTL).Err()
 }

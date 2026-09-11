@@ -171,6 +171,12 @@ func (h *ProviderConnectHandler) ProbeProxy(c *gin.Context) {
 		Password: req.Password,
 	}
 	exit, latencyMs, err := h.proxyProber.ProbeProxy(c.Request.Context(), proxy.URL())
+	// 把手动探测结果写进定时探活所用的同一份 latency 缓存(仅当命中池内在役代理)。
+	// 关键修复:否则手动「测试通过」只改了 Portal DB,cell 缓存仍是旧的失败/空记录,
+	// 下一轮 worker 拉 /health 又把它打回「出口异常」——这正是「一测就好、过一会又变」。
+	if h.proxyLiveness != nil {
+		h.proxyLiveness.CacheManualProbe(c.Request.Context(), host, req.Port, req.Username, req.Password, exit, latencyMs, err)
+	}
 	if err != nil {
 		// 可达但地理站没数据(如 ip-api 限流)→ 出口确实能出网 → 判「通」,回显空 IP。
 		// 与 liveness 判活口径一致,避免「定时说异常、手动说通」的矛盾。

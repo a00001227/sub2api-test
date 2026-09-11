@@ -306,6 +306,9 @@ func proxyListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, error) {
 	proxies, err := r.client.Proxy.Query().
 		Where(proxy.StatusEQ(service.StatusActive)).
+		// 稳定按 id 升序:探活循环据此顺序摊平探测,顺序确定后「哪些代理排在队尾」
+		// 不再随物理行序漂移,便于比对与推理;无 ORDER BY 时 PG 返回序不确定。
+		Order(dbent.Asc(proxy.FieldID)).
 		All(ctx)
 	if err != nil {
 		return nil, err

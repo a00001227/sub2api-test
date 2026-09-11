@@ -47,6 +47,9 @@ const (
 	proxyLivenessGapJitter = 1000 * time.Millisecond
 	// 传输层探测失败(疑似出口死)先短退避重试 1 次,滤掉单次网络抖动再判死。
 	proxyLivenessRetryBackoff = 2 * time.Second
+	// 写缓存的独立超时:每条探测结果用它自带的短 ctx 落库,绝不复用「整轮」ctx——
+	// 否则整轮一旦超时/取消,排在队尾的代理会连写缓存都失败 → 无记录 → 被误标。
+	proxyLivenessWriteTimeout = 10 * time.Second
 )
 
 // ProxyHealthEntry 是给 Portal 拉取的单条脱敏健康记录(绝不含凭证/代理 URL)。
@@ -129,10 +132,13 @@ func (s *ProxyLivenessService) loop() {
 // probeOnce probes every active, bound proxy once and writes the result to the
 // latency cache (same cache the manual "test proxy" admin action writes).
 func (s *ProxyLivenessService) probeOnce() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	proxies, err := s.repo.ListActive(ctx)
+	// 元数据读取(列表 + 绑定计数)用短超时 ctx,绝不跨越整轮探测;整轮的时长由每条
+	// 探测各自的超时累加决定,循环本身只靠 stopCh 在两条探测之间及时退出。这样即便一轮
+	// 里有多条死/慢代理把整轮拖长,排在队尾的代理照样会被探到并写入缓存——根治「队尾
+	// 代理无缓存记录 → 被 Portal worker 误标出口异常」。
+	listCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	proxies, err := s.repo.ListActive(listCtx)
+	cancel()
 	if err != nil {
 		logger.LegacyPrintf("service.proxy_liveness", "[ProxyLiveness] list active proxies error: %v", err)
 		return
@@ -150,7 +156,9 @@ func (s *ProxyLivenessService) probeOnce() {
 		}
 		p := &proxies[i]
 		// 只探有账号绑定的代理:没账号用的 IP 死活不影响任何下游,省流。
-		cnt, err := s.repo.CountAccountsByProxyID(ctx, p.ID)
+		cntCtx, c := context.WithTimeout(context.Background(), 10*time.Second)
+		cnt, err := s.repo.CountAccountsByProxyID(cntCtx, p.ID)
+		c()
 		if err != nil {
 			logger.LegacyPrintf("service.proxy_liveness", "[ProxyLiveness] count bindings proxy=%d error: %v", p.ID, err)
 			continue
@@ -163,7 +171,7 @@ func (s *ProxyLivenessService) probeOnce() {
 		if probed > 0 && !s.sleepOrStop(proxyLivenessMinGap+time.Duration(rand.Int63n(int64(proxyLivenessGapJitter)))) {
 			return
 		}
-		s.probeProxy(ctx, p)
+		s.probeProxy(p)
 		probed++
 	}
 	if probed > 0 {
@@ -187,25 +195,37 @@ func (s *ProxyLivenessService) sleepOrStop(d time.Duration) bool {
 // Mirrors adminService.TestProxy's cache write (single source of truth for health).
 // 仅当探测判定「出口真出不了网」时先短退避重试 1 次,滤掉单次网络抖动再判死;
 // 「可达但地理站没数据(如 ip-api 限流)」直接判活,不重试也不标异常。
-func (s *ProxyLivenessService) probeProxy(ctx context.Context, p *Proxy) {
-	info := s.probeAttempt(ctx, p)
+func (s *ProxyLivenessService) probeProxy(p *Proxy) {
+	info := s.probeAttempt(p)
 	if !info.Success {
 		// 疑似出口死:退避后重试一次,任一次判活即采用。
 		if s.sleepOrStop(proxyLivenessRetryBackoff) {
-			if retry := s.probeAttempt(ctx, p); retry.Success {
+			if retry := s.probeAttempt(p); retry.Success {
 				info = retry
 			}
 		}
 	}
-	_ = s.latency.SetProxyLatency(ctx, p.ID, info)
+	// 写缓存用独立短 ctx(不复用整轮/探测 ctx):无论整轮多长、是否收到停止信号,
+	// 这条已探出的结果都要落库——否则队尾代理探到了却写不进去,等同没探。
+	wctx, cancel := context.WithTimeout(context.Background(), proxyLivenessWriteTimeout)
+	defer cancel()
+	_ = s.latency.SetProxyLatency(wctx, p.ID, info)
 }
 
 // probeAttempt 探一次,产出一条(尚未落库的)健康记录。message 均已脱敏。
-func (s *ProxyLivenessService) probeAttempt(ctx context.Context, p *Proxy) *ProxyLatencyInfo {
-	pctx, cancel := context.WithTimeout(ctx, proxyLivenessProbeTimeout)
+// 用自带的独立超时 ctx,和「整轮」无关:整轮再长也不会把某次探测提前取消成假失败。
+func (s *ProxyLivenessService) probeAttempt(p *Proxy) *ProxyLatencyInfo {
+	pctx, cancel := context.WithTimeout(context.Background(), proxyLivenessProbeTimeout)
 	defer cancel()
 
 	exit, latencyMs, err := s.prober.ProbeProxy(pctx, p.URL())
+	return buildLatencyInfo(exit, latencyMs, err)
+}
+
+// buildLatencyInfo 把 prober 的一次原始结果映射成(脱敏的)缓存记录。定时循环与手动
+// 测试共用它 → 两条路径判活口径逐字一致,消除「定时说异常、手动说通」的矛盾。
+func buildLatencyInfo(exit *ProxyExitInfo, latencyMs int64, err error) *ProxyLatencyInfo {
+	now := time.Now()
 	if err != nil {
 		// 可达但地理探测失败(如 ip-api 限流)→ 出口能出网 → 判活,不标异常。
 		var reachErr *ProxyReachableError
@@ -213,7 +233,7 @@ func (s *ProxyLivenessService) probeAttempt(ctx context.Context, p *Proxy) *Prox
 			info := &ProxyLatencyInfo{
 				Success:   true,
 				Message:   "reachable (geo unavailable: " + reachErr.Reason + ")",
-				UpdatedAt: time.Now(),
+				UpdatedAt: now,
 			}
 			if latencyMs > 0 {
 				lat := latencyMs
@@ -225,7 +245,7 @@ func (s *ProxyLivenessService) probeAttempt(ctx context.Context, p *Proxy) *Prox
 		return &ProxyLatencyInfo{
 			Success:   false,
 			Message:   err.Error(),
-			UpdatedAt: time.Now(),
+			UpdatedAt: now,
 		}
 	}
 	lat := latencyMs
@@ -233,7 +253,7 @@ func (s *ProxyLivenessService) probeAttempt(ctx context.Context, p *Proxy) *Prox
 		Success:   true,
 		LatencyMs: &lat,
 		Message:   "Proxy is accessible",
-		UpdatedAt: time.Now(),
+		UpdatedAt: now,
 	}
 	if exit != nil {
 		info.IPAddress = exit.IP
@@ -243,6 +263,41 @@ func (s *ProxyLivenessService) probeAttempt(ctx context.Context, p *Proxy) *Prox
 		info.City = exit.City
 	}
 	return info
+}
+
+// resolveProxyID 在本 cell 的在役代理池里,按 host/port/凭证精确匹配出内部 proxyID。
+// 供手动探测把结果归到「定时循环写的同一缓存键」。池极小,内存匹配即可,避免扩接口。
+// 匹配不到(尚未入池的候选代理)返回 (0,false)。
+func (s *ProxyLivenessService) resolveProxyID(ctx context.Context, host string, port int, username, password string) (int64, bool) {
+	proxies, err := s.repo.ListActive(ctx)
+	if err != nil {
+		return 0, false
+	}
+	for i := range proxies {
+		p := &proxies[i]
+		if p.Host == host && p.Port == port && p.Username == username && p.Password == password {
+			return p.ID, true
+		}
+	}
+	return 0, false
+}
+
+// CacheManualProbe 把一次手动探测(ProbeProxy)的结果写进定时循环所用的同一份 latency
+// 缓存——当被探代理确实是池内在役代理(host/port/凭证匹配)时。这样手动「测试」与定时
+// 探活永不矛盾,Portal 拉 /health 会立刻反映手动结果,不会下一轮又被打回出口异常。
+// 对「尚未入池的候选代理」(绑定前校验,匹配不到)或依赖缺失时静默 no-op。
+func (s *ProxyLivenessService) CacheManualProbe(ctx context.Context, host string, port int, username, password string, exit *ProxyExitInfo, latencyMs int64, probeErr error) {
+	if s == nil || s.repo == nil || s.latency == nil {
+		return
+	}
+	id, ok := s.resolveProxyID(ctx, host, port, username, password)
+	if !ok {
+		return
+	}
+	info := buildLatencyInfo(exit, latencyMs, probeErr)
+	wctx, cancel := context.WithTimeout(context.Background(), proxyLivenessWriteTimeout)
+	defer cancel()
+	_ = s.latency.SetProxyLatency(wctx, id, info)
 }
 
 // Health returns a scrubbed health table for every active proxy on this cell:
@@ -264,15 +319,21 @@ func (s *ProxyLivenessService) Health(ctx context.Context) ([]ProxyHealthEntry, 
 	out := make([]ProxyHealthEntry, 0, len(proxies))
 	for i := range proxies {
 		p := &proxies[i]
+		info := latencies[p.ID]
+		if info == nil {
+			// 缓存里没有这条代理的记录 =「还没探到 / 刚入池 / 记录已过期」,是「无数据」
+			// 而非「探测失败」。绝不上报成 success=false —— 那会被 Portal worker 兜底成
+			// 「proxy probe failed」误标出口异常(旧 bug 正是这条)。省略该行,worker 侧
+			// `if(!entry) continue` 会保留其原判定(NULL=未探,不显示徽标)。
+			continue
+		}
 		e := ProxyHealthEntry{Host: p.Host, Port: p.Port}
-		if info := latencies[p.ID]; info != nil {
-			e.Success = info.Success
-			e.LatencyMs = info.LatencyMs
-			e.Message = info.Message
-			if !info.UpdatedAt.IsZero() {
-				ts := info.UpdatedAt.Unix()
-				e.CheckedAt = &ts
-			}
+		e.Success = info.Success
+		e.LatencyMs = info.LatencyMs
+		e.Message = info.Message
+		if !info.UpdatedAt.IsZero() {
+			ts := info.UpdatedAt.Unix()
+			e.CheckedAt = &ts
 		}
 		out = append(out, e)
 	}
