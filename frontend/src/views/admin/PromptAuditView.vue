@@ -159,8 +159,8 @@
               <Icon name="search" size="sm" />
               {{ t('admin.promptAudit.search') }}
             </button>
-            <button @click="resetFilters" class="btn btn-secondary btn-sm">
-              <Icon name="x" size="sm" />
+            <button @click="resetFilters" :disabled="listLoading" class="btn btn-secondary btn-sm" :title="t('admin.promptAudit.reset')">
+              <Icon name="refresh" size="sm" :class="listLoading ? 'animate-spin' : ''" />
             </button>
           </div>
         </div>

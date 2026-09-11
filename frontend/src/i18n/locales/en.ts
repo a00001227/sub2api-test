@@ -2547,6 +2547,7 @@ export default {
       records: 'Prompt Records',
       recordsHint: 'Search retained user prompts by user, key, group and time.',
       search: 'Search',
+      reset: 'Reset filters',
       searchPlaceholder: 'Request ID / email / key name / model / prompt text',
       from: 'From',
       to: 'To',

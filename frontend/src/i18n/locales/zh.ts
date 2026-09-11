@@ -2624,6 +2624,7 @@ export default {
       records: '提示词记录',
       recordsHint: '按用户、密钥、分组、时间检索用户发送的提示词原文。',
       search: '搜索',
+      reset: '重置筛选',
       searchPlaceholder: '请求ID / 邮箱 / 密钥名 / 模型 / 原文关键字',
       from: '起始时间',
       to: '结束时间',
