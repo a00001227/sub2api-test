@@ -2286,42 +2286,70 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		"total_accounts", len(accounts),
 	)
 	candidates := make([]*Account, 0, len(accounts))
+	// 选号失败诊断:记录每道闸刷掉了多少号(reject tally)+ 逐号原因(薄池,量小)。
+	// 仅在最终 candidates==0 / 会话全满时才打一行 Warn,成功路径零日志开销。
+	rejectTally := make(map[string]int, 8)
+	rejectDetail := make([]string, 0, len(accounts))
+	reject := func(acc *Account, reason string) {
+		rejectTally[reason]++
+		if len(rejectDetail) < 64 {
+			rejectDetail = append(rejectDetail, strconv.FormatInt(acc.ID, 10)+":"+reason)
+		}
+	}
 	for i := range accounts {
 		acc := &accounts[i]
 		if isExcluded(acc.ID) {
+			reject(acc, "excluded_failover")
 			continue
 		}
 		// Scheduler snapshots can be temporarily stale (bucket rebuild is throttled);
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
 		if !s.isAccountSchedulableForSelection(acc) {
+			reject(acc, "not_schedulable")
 			continue
 		}
 		if !s.isAccountAllowedForPlatform(acc, platform, useMixed) {
+			reject(acc, "platform_mismatch")
 			continue
 		}
 		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
+			reject(acc, "model_unsupported")
 			continue
 		}
 		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+			reject(acc, "model_selection_gate")
 			continue
 		}
 		// 配额检查
 		if !s.isAccountSchedulableForQuota(acc) {
+			reject(acc, "quota")
 			continue
 		}
 		// 窗口费用检查（非粘性会话路径）
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
+			reject(acc, "window_cost")
 			continue
 		}
 		// RPM 检查（非粘性会话路径）
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			reject(acc, "rpm_rph")
 			continue
 		}
 		candidates = append(candidates, acc)
 	}
 
 	if len(candidates) == 0 {
+		// 8 道闸把号全刷光 → 记录每道闸的贡献,定位真凶(pacing/并发/配额/模型/限流)。
+		slog.Warn("selection.no_available_accounts",
+			"stage", "gates_filtered_all",
+			"platform", platform,
+			"model", requestedModel,
+			"group_id", derefGroupID(groupID),
+			"total_accounts", len(accounts),
+			"reject_tally", rejectTally,
+			"detail", strings.Join(rejectDetail, ","),
+		)
 		return nil, ErrNoAvailableAccounts
 	}
 
@@ -2410,6 +2438,15 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		})
 	}
+	// 号通过了 8 道闸,但全部会话数已满(checkAndRegisterSession 失败),连 Layer 3
+	// 兜底排队都进不去 → 与"闸刷光"区分开,便于判断是容量不足还是会话上限卡死。
+	slog.Warn("selection.no_available_accounts",
+		"stage", "session_limit_full",
+		"platform", platform,
+		"model", requestedModel,
+		"group_id", derefGroupID(groupID),
+		"candidates", len(candidates),
+	)
 	return nil, ErrNoAvailableAccounts
 }
 
