@@ -94,6 +94,7 @@ type enforcementSnapshot struct {
 type EnforcementService struct {
 	store EnforcementStore
 	repo  UserRiskV2Repository
+	users RiskV2UserSummaryReader // 可选：HIGH 名单补邮箱/用户名（nil → 只返回 user_id）
 	cfg   EnforcementConfigView
 
 	snap atomic.Pointer[enforcementSnapshot]
@@ -134,6 +135,13 @@ func NewEnforcementService(store EnforcementStore, repo UserRiskV2Repository, cf
 		s.swap(high, allow, rules)
 	}
 	return s
+}
+
+// SetUserSummaryReader 注入批量用户摘要读取器（复用 risk_v2 的），供 admin 名单展示邮箱/用户名。nil-safe。
+func (s *EnforcementService) SetUserSummaryReader(r RiskV2UserSummaryReader) {
+	if s != nil {
+		s.users = r
+	}
 }
 
 // configured 表示 store/repo 齐备（不看 master 开关）——供 admin API（可在启用前预置豁免/预览名单）。
@@ -476,6 +484,8 @@ func (s *EnforcementService) currentHigh() map[int64]struct{} {
 // EnforcementHighUser 一条 HIGH 用户名单项（供 admin 名单查看）。
 type EnforcementHighUser struct {
 	UserID         int64   `json:"user_id"`
+	Email          string  `json:"email"`    // 用户邮箱（未注入读取器/用户缺失 → 空）
+	Username       string  `json:"username"` // 用户名（同上）
 	RiskIndex      float64 `json:"risk_index"`
 	Confidence     float64 `json:"confidence"`
 	DataSufficient bool    `json:"data_sufficient"`
@@ -493,13 +503,27 @@ func (s *EnforcementService) ListHighUsers(ctx context.Context) ([]EnforcementHi
 	if err != nil {
 		return nil, err
 	}
+	// 批量补用户摘要（无 N+1）；读取失败降级为只返回 user_id，不影响名单本身。
+	summaries := map[int64]RiskV2UserSummary{}
+	if s.users != nil && len(items) > 0 {
+		ids := make([]int64, 0, len(items))
+		for _, it := range items {
+			ids = append(ids, it.UserID)
+		}
+		if m, uerr := s.users.GetSummariesByIDs(ctx, ids); uerr == nil {
+			summaries = m
+		}
+	}
 	out := make([]EnforcementHighUser, 0, len(items))
 	for _, it := range items {
 		allow := s.IsAllowlisted(it.UserID)
 		// 限速前提：master 开 + confidence≥地板 + data_sufficient + 未豁免。
 		throttled := s.cfg.Enabled && it.Confidence >= s.cfg.ConfidenceMin && it.DataSufficient && !allow
+		u := summaries[it.UserID]
 		out = append(out, EnforcementHighUser{
 			UserID:         it.UserID,
+			Email:          u.Email,
+			Username:       u.Username,
 			RiskIndex:      it.RiskIndex,
 			Confidence:     it.Confidence,
 			DataSufficient: it.DataSufficient,

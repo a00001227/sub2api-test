@@ -72,7 +72,10 @@
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-dark-600">
             <tr v-for="u in users" :key="u.user_id">
-              <td class="py-1.5 pr-3 font-mono">#{{ u.user_id }}</td>
+              <td class="py-1.5 pr-3">
+                <div v-if="u.email" class="text-gray-800 dark:text-gray-200">{{ u.email }}</div>
+                <div class="font-mono text-gray-400 dark:text-gray-500">#{{ u.user_id }}</div>
+              </td>
               <td class="py-1.5 pr-3">{{ u.risk_index.toFixed(1) }}</td>
               <td class="py-1.5 pr-3">{{ u.confidence.toFixed(2) }}</td>
               <td class="py-1.5 pr-3">{{ u.data_sufficient ? t('admin.enforcement.yes') : t('admin.enforcement.no') }}</td>
@@ -85,7 +88,7 @@
                 <div class="flex flex-wrap gap-1">
                   <button v-if="!u.allowlisted" @click="addAllow(u.user_id)" :disabled="busy" class="btn btn-secondary btn-xs">{{ t('admin.enforcement.exempt') }}</button>
                   <button v-else @click="removeAllow(u.user_id)" :disabled="busy" class="btn btn-secondary btn-xs">{{ t('admin.enforcement.unexempt') }}</button>
-                  <button @click="banUser(u.user_id)" :disabled="busy" class="btn btn-secondary btn-xs text-red-600 dark:text-red-400">{{ t('admin.enforcement.banUser') }}</button>
+                  <button @click="banUser(u.user_id, u.email)" :disabled="busy" class="btn btn-secondary btn-xs text-red-600 dark:text-red-400">{{ t('admin.enforcement.banUser') }}</button>
                 </div>
               </td>
             </tr>
@@ -241,8 +244,9 @@ async function removeAllow(userId: number) {
   }
 }
 
-async function banUser(userId: number) {
-  if (!window.confirm(t('admin.enforcement.banUserConfirm', { id: userId }))) return
+async function banUser(userId: number, email?: string) {
+  const label = email ? `${email} (#${userId})` : `#${userId}`
+  if (!window.confirm(t('admin.enforcement.banUserConfirm', { id: label }))) return
   busy.value = true
   error.value = ''
   try {

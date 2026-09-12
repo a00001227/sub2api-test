@@ -200,6 +200,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		RefreshInterval: time.Duration(configConfig.Enforcement.RefreshIntervalSeconds) * time.Second,
 		CounterTTL:      time.Duration(configConfig.Enforcement.CounterTTLHours) * time.Hour,
 	})
+	enforcementService.SetUserSummaryReader(repository.NewRiskV2UserSummaryReader(client)) // HIGH 名单补邮箱/用户名
 	enforcementService.Start()
 	openAITokenProvider := service.ProvideOpenAITokenProvider(accountRepository, geminiTokenCache, openAIOAuthService, oAuthRefreshAPI)
 	openAIGatewayService := service.NewOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository)

@@ -7152,7 +7152,7 @@ export default {
       unexempted: '已移出豁免',
       banned: '已封禁',
       unbanned: '已解封',
-      banUserConfirm: '确认封禁用户 #{id}？其所有 Key 将被拒绝（可解封）。',
+      banUserConfirm: '确认封禁用户 {id}？其所有 Key 将被拒绝（可解封）。',
       banKeyConfirm: '确认封禁 Key #{id}？（可解封）',
       loadFail: '加载失败',
       actionFail: '操作失败',

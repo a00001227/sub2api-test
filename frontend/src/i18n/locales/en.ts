@@ -6998,7 +6998,7 @@ export default {
       unexempted: 'Removed from allowlist',
       banned: 'Banned',
       unbanned: 'Unbanned',
-      banUserConfirm: 'Ban user #{id}? All their keys will be rejected (reversible).',
+      banUserConfirm: 'Ban user {id}? All their keys will be rejected (reversible).',
       banKeyConfirm: 'Ban key #{id}? (reversible)',
       loadFail: 'Failed to load',
       actionFail: 'Action failed',

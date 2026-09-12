@@ -27,6 +27,10 @@ export interface EnforcementModelRule {
 
 export interface EnforcementHighUser {
   user_id: number
+  /** 用户邮箱（用户缺失时为空串）。 */
+  email: string
+  /** 用户名（用户缺失时为空串）。 */
+  username: string
   risk_index: number
   confidence: number
   data_sufficient: boolean
