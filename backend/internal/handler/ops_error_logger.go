@@ -1251,6 +1251,15 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	if errType == "invalid_request_error" {
 		isBusinessLimited = true
 	}
+	// 内部 429 限流——中转自身的闸(pacing RPM/RPH 软闸、enforcement 反蒸馏、并发闸、配额)
+	// 主动限流回客户端,属预期内的业务限制而非可用性故障 → 排除出 SLA/异常/请求错误率
+	// (仍计入「业务限制」计数)。此处按客户端最终状态码兜底,覆盖 isOpsLocalBusinessLimitError
+	// 按 code/文案匹配时漏网的内部 429。
+	// 上游 429(upstreamError=true)不在此覆盖,仍由 classifyOpsUpstreamBusinessLimited 的既有
+	// 口径处理(当前口径:上游 429 计入 SLA,529 排除)。
+	if status == 429 && !upstreamError {
+		isBusinessLimited = true
+	}
 	errorOwner = classifyOpsErrorOwner(phase, message)
 	errorSource = classifyOpsErrorSource(phase, message)
 	return phase, isBusinessLimited, errorOwner, errorSource
