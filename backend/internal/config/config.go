@@ -140,7 +140,7 @@ type Config struct {
 type EnforcementConfig struct {
 	// Enabled master kill switch。默认 false（Go 零值）→ 中间件与端点全 no-op、零开销。
 	Enabled bool `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
-	// ThrottleRPM 命中 HIGH 时的每分钟请求上限（独立计数桶，不动用户正常 RPM）。默认 5。
+	// ThrottleRPM 命中 HIGH 时的每分钟请求上限（独立计数桶，不动用户正常 RPM）。默认 2。
 	ThrottleRPM int `mapstructure:"throttle_rpm" yaml:"throttle_rpm" json:"throttle_rpm"`
 	// ConfidenceMin 施加限速的最低置信度地板（HIGH 已隐含 ≥0.6，这里再设一道）。默认 0.6。
 	ConfidenceMin float64 `mapstructure:"confidence_min" yaml:"confidence_min" json:"confidence_min"`
@@ -2514,7 +2514,7 @@ func setDefaults() {
 
 	// Enforcement 蒸馏执行层：HIGH 自动限速 + 人工封禁（master 默认关）。
 	viper.SetDefault("enforcement.enabled", false)
-	viper.SetDefault("enforcement.throttle_rpm", 5)
+	viper.SetDefault("enforcement.throttle_rpm", 2)
 	viper.SetDefault("enforcement.confidence_min", 0.6)
 	viper.SetDefault("enforcement.refresh_interval_seconds", 60)
 	viper.SetDefault("enforcement.counter_ttl_hours", 2)

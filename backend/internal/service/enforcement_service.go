@@ -28,7 +28,7 @@ var (
 // 豁免名单一票否决。master 开关默认关 → Active()=false，中间件与端点整体 no-op、零开销。封禁只走人工 admin API。
 
 const (
-	enforcementThrottleRPMDefault     = 5
+	enforcementThrottleRPMDefault     = 2
 	enforcementConfidenceMinDefault   = 0.6
 	enforcementRefreshIntervalDefault = 60 * time.Second
 	enforcementCounterTTLDefault      = 2 * time.Hour
