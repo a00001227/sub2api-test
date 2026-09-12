@@ -64,6 +64,18 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		}
 	}
 
+	// Anthropic requires max_tokens > thinking.budget_tokens, with room left for
+	// the visible output. We inject budget_tokens from effort independently of the
+	// client's max_tokens, so a small (or defaulted) max_tokens collides with a
+	// larger injected budget and upstream rejects with 400
+	// "max_tokens must be greater than thinking.budget_tokens". Raise max_tokens to
+	// fit the budget plus output headroom; leave a client-provided larger value alone.
+	if out.Thinking != nil {
+		if minMax := out.Thinking.BudgetTokens + thinkingOutputHeadroomTokens; out.MaxTokens < minMax {
+			out.MaxTokens = minMax
+		}
+	}
+
 	return out, nil
 }
 

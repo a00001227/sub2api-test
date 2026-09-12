@@ -582,3 +582,9 @@ type ChatDelta struct {
 // minMaxOutputTokens is the floor for max_output_tokens in a Responses request.
 // Very small values may cause upstream API errors, so we enforce a minimum.
 const minMaxOutputTokens = 128
+
+// thinkingOutputHeadroomTokens is the minimum visible-output room we guarantee
+// on top of an injected thinking budget. Anthropic's max_tokens counts thinking
+// + output, and must exceed thinking.budget_tokens; we reserve this many tokens
+// for the actual answer when raising max_tokens to fit an effort-derived budget.
+const thinkingOutputHeadroomTokens = 8192
