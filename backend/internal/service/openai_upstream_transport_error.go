@@ -124,7 +124,27 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		return err
 	}
 
-	if classifyOpenAITransportError(err).Persistent {
+	class := classifyOpenAITransportError(err)
+
+	// Diagnostic: surface the REAL transport cause for EVERY failure, not only
+	// persistent ones. Previously transient faults (timeouts, proxy blips) left
+	// no log line at all — the per-account cause was recorded to Ops but then
+	// overwritten by the generic openAITransportFailoverBody once failover was
+	// exhausted, so a burst of identical "Upstream request failed" 502s gave no
+	// way to tell why each account failed. This single greppable line ties the
+	// account to its sanitized cause and is joinable with the handler's
+	// "openai.responses_failover_exhausted" summary by account_id.
+	logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
+		"openai.upstream_transport_error",
+		zap.Int64("account_id", account.ID),
+		zap.String("account_name", account.Name),
+		zap.String("platform", account.Platform),
+		zap.Bool("persistent", class.Persistent),
+		zap.Bool("passthrough", passthrough),
+		zap.String("cause", safeErr),
+	)
+
+	if class.Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
 

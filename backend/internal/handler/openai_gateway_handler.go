@@ -321,6 +321,23 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 
+	// logExhausted emits one greppable summary line whenever /v1/responses
+	// failover is exhausted and the client gets the generic 502. The client and
+	// Ops list only ever see the flattened "Upstream request failed" body; this
+	// line records how many accounts were tried and the final upstream status,
+	// and is joinable by account_id with the per-account "openai.upstream_transport_error"
+	// / "openai.upstream_failover_switching" lines to pinpoint why each failed.
+	logExhausted := func(finalStatus int, cause string) {
+		reqLog.Warn("openai.responses_failover_exhausted",
+			zap.String("model", reqModel),
+			zap.Any("group_id", apiKey.GroupID),
+			zap.Int("switch_count", switchCount),
+			zap.Int("tried_accounts", len(failedAccountIDs)),
+			zap.Int("final_upstream_status", finalStatus),
+			zap.String("final_cause", cause),
+		)
+	}
+
 	for {
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
@@ -355,8 +372,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			if lastFailoverErr != nil {
+				logExhausted(lastFailoverErr.StatusCode, service.ExtractUpstreamErrorMessage(lastFailoverErr.ResponseBody))
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
+				logExhausted(http.StatusBadGateway, "account_select_failed_after_failover")
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
 			}
 			return
@@ -453,17 +472,20 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
+						logExhausted(failoverErr.StatusCode, service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody))
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
 					switchCount++
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount) {
+						logExhausted(failoverErr.StatusCode, service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody))
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
 					reqLog.Warn("openai.upstream_failover_switching",
 						zap.Int64("account_id", account.ID),
 						zap.Int("upstream_status", failoverErr.StatusCode),
+						zap.String("upstream_cause", service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)),
 						zap.Int("switch_count", switchCount),
 						zap.Int("max_switches", maxAccountSwitches),
 					)

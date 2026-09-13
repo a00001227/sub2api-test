@@ -390,6 +390,16 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				c.Abort()
 				return
 			}
+			// 诊断:透传 cell 的非 2xx 响应前点名是哪台 cell + 什么状态码。否则中央
+			// 把 cell 的 502(如 gpt 号出口传输耗尽的 "Upstream request failed")静默
+			// 二传给客户端,运维只看到中央一条空账号/空模型的 502,却不知道是哪台 cell
+			// 出的错 —— 要逐台 grep 才能定位。有了这条即可直接去对应 cell 捞
+			// openai.upstream_transport_error / *_failover_exhausted 的逐号真死因。
+			if resp.StatusCode >= http.StatusBadRequest {
+				slog.Warn("edge_forward: cell 回传上游错误,原样透传",
+					"cell", target.Host, "idx", i, "status", resp.StatusCode,
+					"path", c.Request.URL.Path, "group_slug", apiKey.Group.Slug)
+			}
 			// 成功落到某 cell → 绑定会话亲和(下一轮同会话回到这台 cell)。
 			if stickyKey != "" {
 				affinity.put(stickyKey, target)
