@@ -1882,6 +1882,18 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, err
 	}
 	if len(accounts) == 0 {
+		// 池在任何选号闸之前就是空的 —— 号根本没进入过滤循环。定位方向:分组未分配
+		// 该号 / 平台不匹配 / scheduler snapshot 尚未收录(新号常见)/ status!=active /
+		// cellId 未绑定。与 "gates_filtered_all"(号进了循环被闸刷掉)明确区分。
+		slog.Warn("selection.no_available_accounts",
+			"stage", "empty_pool",
+			"platform", platform,
+			"model", requestedModel,
+			"group_id", derefGroupID(groupID),
+			"has_force_platform", hasForcePlatform,
+			"use_mixed", useMixed,
+			"from_snapshot", s.schedulerSnapshot != nil,
+		)
 		return nil, ErrNoAvailableAccounts
 	}
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
@@ -2306,7 +2318,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
 		if !s.isAccountSchedulableForSelection(acc) {
-			reject(acc, "not_schedulable")
+			reject(acc, "not_schedulable:"+acc.SchedulableRejectReason())
 			continue
 		}
 		if !s.isAccountAllowedForPlatform(acc, platform, useMixed) {
@@ -2333,7 +2345,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 		// RPM 检查（非粘性会话路径）
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
-			reject(acc, "rpm_rph")
+			reject(acc, "rpm_rph:"+s.rpmRejectReason(ctx, acc))
 			continue
 		}
 		candidates = append(candidates, acc)
@@ -3106,6 +3118,38 @@ func (s *GatewayService) isAccountSchedulableForRPH(ctx context.Context, account
 	}
 
 	return resolveSchedulability(account.CheckRPHSchedulability(currentRPH), isSticky)
+}
+
+// rpmRejectReason returns which sub-gate of isAccountSchedulableForRPM (the bundled
+// "rpm_rph" label) rejects the account: humanized_dormant | rpm | rph, or "" when it
+// is schedulable. DIAGNOSTIC ONLY — non-sticky path (isSticky=false), called on the
+// reject path just to label logs; it mirrors isAccountSchedulableForRPM and never
+// gates selection. Keep in lockstep with isAccountSchedulableForRPM above.
+func (s *GatewayService) rpmRejectReason(ctx context.Context, account *Account) string {
+	if !account.IsAnthropicOAuthOrSetupToken() {
+		return ""
+	}
+	if account.IsHumanizedDormant(time.Now()) {
+		return "humanized_dormant"
+	}
+	if account.GetBaseRPM() <= 0 {
+		return ""
+	}
+	var currentRPM int
+	if count, ok := rpmFromPrefetchContext(ctx, account.ID); ok {
+		currentRPM = count
+	} else if s.rpmCache != nil {
+		if count, err := s.rpmCache.GetRPM(ctx, account.ID); err == nil {
+			currentRPM = count
+		}
+	}
+	if !resolveSchedulability(account.CheckRPMSchedulability(currentRPM), false) {
+		return "rpm"
+	}
+	if !s.isAccountSchedulableForRPH(ctx, account, false) {
+		return "rph"
+	}
+	return ""
 }
 
 // IncrementAccountRPM increments the RPM counter for the given account.

@@ -318,6 +318,10 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		}
 
 		var lastErr error
+		// 逐候选结果:host=no_accounts(cell 选号前失败) / host=transport_err(连不上)。
+		// 全候选耗尽时一并打出 —— 用来区分「好 cell 压根没进候选」(控制面/心跳排除,
+		// 此处根本不会出现该 host)与「进了候选但回没号」(cell 侧选号问题)。
+		outcomes := make([]string, 0, len(order))
 		for i, target := range order {
 			outURL := *target
 			outURL.Path = c.Request.URL.Path
@@ -361,6 +365,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				// 仅“写任何响应前”的传输错误才转移;一旦开始回传就不再转移
 				// (避免把非幂等请求重放到第二个号 → 双执行)。
 				lastErr = err
+				outcomes = append(outcomes, target.Host+"=transport_err")
 				slog.Warn("edge_forward: 转发到 cell 失败,尝试下一候选",
 					"cell", target.Host, "idx", i, "err", err)
 				continue
@@ -375,6 +380,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				_ = resp.Body.Close()
 				if isCellNoAvailableAccounts(peek) {
 					lastErr = errCellNoAvailableAccounts
+					outcomes = append(outcomes, target.Host+"=no_accounts")
 					slog.Warn("edge_forward: cell 无可用账号(选号前失败),尝试下一候选",
 						"cell", target.Host, "idx", i)
 					continue
@@ -404,7 +410,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			c.Abort()
 			return
 		}
-		slog.Error("edge_forward: 所有候选 cell 均不可达", "candidates", len(order), "err", lastErr)
+		slog.Error("edge_forward: 所有候选 cell 均不可达", "candidates", len(order), "outcomes", outcomes, "err", lastErr)
 		writeEdgeError(c)
 	}
 }

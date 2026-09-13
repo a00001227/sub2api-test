@@ -149,6 +149,43 @@ func (a *Account) IsSchedulable() bool {
 	return true
 }
 
+// SchedulableRejectReason returns the specific reason IsSchedulable() would reject
+// this account, or "" if it is schedulable. DIAGNOSTIC ONLY: it mirrors
+// IsSchedulable()'s checks in the same order and is meant to be called on the
+// reject path purely to label logs — it never gates selection, so it cannot change
+// scheduling behavior. Keep in lockstep with IsSchedulable() above.
+func (a *Account) SchedulableRejectReason() string {
+	if !a.IsActive() {
+		return "status_" + a.Status
+	}
+	if !a.Schedulable {
+		return "flag_off"
+	}
+	now := time.Now()
+	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
+		return "expired"
+	}
+	if a.OverloadUntil != nil && now.Before(*a.OverloadUntil) {
+		return "overloaded"
+	}
+	if a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt) {
+		return "rate_limited"
+	}
+	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
+		return "temp_unschedulable"
+	}
+	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
+		return "quota_exceeded"
+	}
+	if a.GetPacingMode() != "" && a.IsUtilizationDormant() {
+		if a.GetSessionWindowUtilization() >= pacingUtilizationDormantThreshold {
+			return "util_dormant_5h"
+		}
+		return "util_dormant_7d"
+	}
+	return ""
+}
+
 func (a *Account) IsRateLimited() bool {
 	if a.RateLimitResetAt == nil {
 		return false
