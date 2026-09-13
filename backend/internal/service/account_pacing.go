@@ -1,6 +1,7 @@
 package service
 
 import (
+	"hash/fnv"
 	"strings"
 	"time"
 )
@@ -179,9 +180,13 @@ func PacingProfileForTier(rawTier string) PacingTierProfile {
 //
 // 本阶段把这些已采集、原本仅用于展示的数值接入调度决策。
 
-// pacingUtilizationDormantThreshold 利用率达到此值即主动休眠（排除出调度）。
-// 对齐 DeRouter「剩余 < 10% → 排除」，即利用率 >= 0.90。
-const pacingUtilizationDormantThreshold = 0.90
+// pacingUtilizationDormantThreshold5h 5h 窗口利用率达到此值即主动休眠（排除出调度）。
+const pacingUtilizationDormantThreshold5h = 0.85
+
+// pacingUtilizationDormantThreshold7d 7d 窗口利用率达到此值即主动休眠。
+// 比 5h 更保守（更早歇）：7d 窗口一旦打高很难在短时间内回落，提前休眠以拉开
+// 与 7d 硬封的安全边际。
+const pacingUtilizationDormantThreshold7d = 0.75
 
 // GetSessionWindowUtilization 返回上游 5h 窗口真实利用率 (0-1)；无数据返回 0。
 func (a *Account) GetSessionWindowUtilization() float64 {
@@ -214,25 +219,26 @@ func (a *Account) Get7dUtilization() float64 {
 }
 
 // pacingDownweightThreshold 利用率进入降权带的下界。
-// 对齐 DeRouter：剩余 > 50%（util < 0.5）正常；剩余 10-50%（util 0.5-0.9）
-// 降权 ×0.5；剩余 < 10%（util >= 0.9）排除（已由 IsUtilizationDormant 处理）。
+// util < 0.5 正常；util >= 0.5 且未到该窗口休眠阈值 → 降权 ×0.5；
+// 达到休眠阈值（5h>=0.85 / 7d>=0.75）→ 排除（已由 IsUtilizationDormant 处理）。
 const pacingDownweightThreshold = 0.50
 
 // pacingDownweightFactor 降权带内的选择权重系数。
 const pacingDownweightFactor = 0.5
 
 // PacingSelectionWeight 返回账号在同优先级组内被优先选中的相对权重 (0,1]。
-// util < 0.5 或未启用 pacing → 1.0（正常）；util ∈ [0.5, 0.9) → 0.5（降权）。
-// util >= 0.9 的排除不在此处理（走 IsUtilizationDormant 直接退出调度）。
+// 未启用 pacing → 1.0；任一窗口 util ∈ [0.5, 该窗口休眠阈值) → 0.5（降权）。
+// 达到休眠阈值的排除不在此处理（走 IsUtilizationDormant 直接退出调度）。
 func (a *Account) PacingSelectionWeight() float64 {
 	if a.GetPacingMode() == "" || !a.IsAnthropicOAuthOrSetupToken() {
 		return 1.0
 	}
-	util := a.GetSessionWindowUtilization()
-	if u7 := a.Get7dUtilization(); u7 > util {
-		util = u7
-	}
-	if util >= pacingDownweightThreshold && util < pacingUtilizationDormantThreshold {
+	// 降权带：任一窗口进入 [0.5, 该窗口休眠阈值) 就 ×0.5。已达休眠阈值的号由
+	// IsUtilizationDormant 直接排除，不会走到这里。
+	u5 := a.GetSessionWindowUtilization()
+	u7 := a.Get7dUtilization()
+	if (u5 >= pacingDownweightThreshold && u5 < pacingUtilizationDormantThreshold5h) ||
+		(u7 >= pacingDownweightThreshold && u7 < pacingUtilizationDormantThreshold7d) {
 		return pacingDownweightFactor
 	}
 	return 1.0
@@ -245,10 +251,10 @@ func (a *Account) IsUtilizationDormant() bool {
 	if !a.IsAnthropicOAuthOrSetupToken() {
 		return false
 	}
-	if a.GetSessionWindowUtilization() >= pacingUtilizationDormantThreshold {
+	if a.GetSessionWindowUtilization() >= pacingUtilizationDormantThreshold5h {
 		return true
 	}
-	if a.Get7dUtilization() >= pacingUtilizationDormantThreshold {
+	if a.Get7dUtilization() >= pacingUtilizationDormantThreshold7d {
 		return true
 	}
 	return false
@@ -259,10 +265,39 @@ func (a *Account) IsUtilizationDormant() bool {
 // DeRouter 最核心的事前防封：让账号像真人一样「集中干一段、歇一段」，
 // 并遵守每日作息。速度档（burst）跳过全部拟人化。
 //
-// 全部无状态实现——不新建表、不加 worker，用账号 ID 作为稳定种子 + 墙钟时间
-// 当场算出。ID 决定每个账号的休息时段与节奏相位，天然把全池打散（避免所有
-// 账号同一时刻集体休息导致容量断崖，这是多账号池相对 DeRouter 单账号视角
-// 必须做的适配）。
+// 全部无状态实现——不新建表、不加 worker，用账号 ID + cell 盐 作为稳定种子 +
+// 墙钟时间当场算出。
+//
+// 打散分两层：
+//   - 单 cell 内：ID 决定相位。每日休息乘质数 373、冷却乘质数 7（均与各自周期
+//     互质），保证连号也铺开，不会相邻 ID 相位挨在一起。
+//   - cell 之间：混入 pacingCellPhaseSalt（由每 cell 唯一的字符串派生，见
+//     SetPacingCellPhaseSalt）。每个 cell 是独立 DB、账号 ID 都从 1 自增，同一个
+//     ID 会出现在所有 cell 上；若相位只认 (ID, 墙钟) 就会让不同 cell 的同 ID 号
+//     在同一墙钟分钟集体休息 / 冷却，全 fleet 同时掉容量。cell 盐给每个 cell 加
+//     一个稳定偏移，把 fleet 级的休息窗口错开。
+//
+// salt 默认 0（中央 / 未配置）→ 完全等价原来的单池行为。
+
+// pacingCellPhaseSalt 跨 cell 的相位偏移种子（默认 0 = 不偏移，行为同旧）。
+// 由 SetPacingCellPhaseSalt 在启动时按每 cell 唯一的字符串设定。
+var pacingCellPhaseSalt int64
+
+// SetPacingCellPhaseSalt 用一个「每 cell 唯一」的字符串播种跨 cell 相位偏移，
+// 让不同 cell 的同 ID 账号错峰休息 / 冷却。推荐种子 = CELL_ADVERTISE_ADDR
+// （含 host:port，天生每 cell 唯一，无需人工逐台填 CELL_NODE）。空种子 → salt
+// 归 0（不偏移）。应在启动时调用一次；中央不调用即保持 0。
+func SetPacingCellPhaseSalt(seed string) {
+	seed = strings.TrimSpace(seed)
+	if seed == "" {
+		pacingCellPhaseSalt = 0
+		return
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(seed))
+	// 归约到有界非负区间：加到 ID*质数 上不会溢出 int64，后续取模也安全。
+	pacingCellPhaseSalt = int64(h.Sum64() % (1 << 31))
+}
 
 // pacingIsSpeedMode 判断档位是否跳过拟人化（standard/2x/3x/5x 均不拟人，
 // 仅 humanized 档遵守活跃-冷却 + 每日休息）。
@@ -285,9 +320,11 @@ const (
 )
 
 // dailyRestStartMinute 账号每日休息窗口的起始分钟（UTC，[0,1440)）。
-// 由 ID 确定性打散：(ID*prime) mod 1440，全池均匀分布。
+// 单 cell 内由 ID 打散：(ID*prime) mod 1440；再加 pacingCellPhaseSalt 让不同
+// cell 的同 ID 号错峰（salt=0 时等价旧行为）。
 func (a *Account) dailyRestStartMinute() int {
-	return int((a.ID*pacingRestSpreadPrime)%pacingDayMinutes+pacingDayMinutes) % pacingDayMinutes
+	base := a.ID*pacingRestSpreadPrime + pacingCellPhaseSalt
+	return int((base%pacingDayMinutes+pacingDayMinutes) % pacingDayMinutes)
 }
 
 // DailyRestWindowUTC 返回账号每日休息窗口 [startMin, endMin)（UTC 分钟）。
@@ -323,6 +360,10 @@ const (
 	pacingActiveMin = 50
 	pacingCoolMin   = 10
 	pacingCycleMin  = pacingActiveMin + pacingCoolMin
+	// pacingCooldownSpreadPrime 把连号在 60 分钟周期里铺开（与 pacingCycleMin=60
+	// 互质，故连续 ID → 相位是 mod 60 的双射，不像原来 ID%60 把相邻 ID 映到相邻
+	// 相位、冷却扎堆）。
+	pacingCooldownSpreadPrime = 7
 )
 
 // IsInCooldownPhase 判断账号当前是否处于活跃-冷却节奏的「冷却段」。
@@ -333,10 +374,11 @@ func (a *Account) IsInCooldownPhase(now time.Time) bool {
 	if mode == "" || pacingIsSpeedMode(mode) {
 		return false
 	}
-	// 相位偏移：每个账号在 [0,cycle) 内错开一个固定起点。
-	offset := int(a.ID % int64(pacingCycleMin))
+	// 相位偏移：每个账号在 [0,cycle) 内错开一个固定起点。乘质数打散连号（单
+	// cell 内），加 cell 盐错开不同 cell 的同 ID 号（salt=0 时等价旧偏移量级）。
+	offset := (a.ID*pacingCooldownSpreadPrime + pacingCellPhaseSalt) % int64(pacingCycleMin)
 	minuteOfEpoch := now.UTC().Unix() / 60
-	pos := int((minuteOfEpoch+int64(offset))%int64(pacingCycleMin)+int64(pacingCycleMin)) % pacingCycleMin
+	pos := int((minuteOfEpoch+offset)%int64(pacingCycleMin)+int64(pacingCycleMin)) % pacingCycleMin
 	return pos >= pacingActiveMin
 }
 

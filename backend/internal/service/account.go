@@ -178,7 +178,7 @@ func (a *Account) SchedulableRejectReason() string {
 		return "quota_exceeded"
 	}
 	if a.GetPacingMode() != "" && a.IsUtilizationDormant() {
-		if a.GetSessionWindowUtilization() >= pacingUtilizationDormantThreshold {
+		if a.GetSessionWindowUtilization() >= pacingUtilizationDormantThreshold5h {
 			return "util_dormant_5h"
 		}
 		return "util_dormant_7d"

@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
 
@@ -141,6 +142,14 @@ func runMainServer() {
 	}
 	if cfg.RunMode == config.RunModeSimple {
 		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
+	}
+
+	// 跨 cell 相位错峰:用每 cell 唯一的对外地址(host:port)播种拟人休眠/冷却的
+	// 相位偏移,让不同 cell 的同 ID 账号错峰休息,避免全 fleet 同时掉容量。
+	// 中央 AdvertiseAddr 为空 → salt 归 0,行为不变。必须在服务开始处理请求前设定。
+	service.SetPacingCellPhaseSalt(cfg.CellRegistry.AdvertiseAddr)
+	if addr := strings.TrimSpace(cfg.CellRegistry.AdvertiseAddr); addr != "" {
+		log.Printf("Pacing cell phase salt seeded from advertise addr %q", addr)
 	}
 
 	buildInfo := handler.BuildInfo{

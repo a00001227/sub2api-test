@@ -151,23 +151,41 @@ func utilAccount(mode string, extra map[string]any) *Account {
 }
 
 func TestPacing_Util5hBelowThreshold_NotDormant(t *testing.T) {
-	a := utilAccount("smart", map[string]any{"session_window_utilization": 0.89})
+	// 5h 休眠阈值 = 0.85；0.84 仍在阈值之下 → 不休眠。
+	a := utilAccount("smart", map[string]any{"session_window_utilization": 0.84})
 	require.False(t, a.IsUtilizationDormant())
 }
 
 func TestPacing_Util5hAtThreshold_Dormant(t *testing.T) {
-	a := utilAccount("smart", map[string]any{"session_window_utilization": 0.90})
+	// 5h 达 0.85 → 主动休眠。
+	a := utilAccount("smart", map[string]any{"session_window_utilization": 0.85})
 	require.True(t, a.IsUtilizationDormant())
 	require.False(t, a.IsSchedulable(), "利用率达阈值应退出调度")
 }
 
 func TestPacing_Util7dAtThreshold_Dormant(t *testing.T) {
+	// 7d 休眠阈值 = 0.75（比 5h 更保守）。
 	future := time.Now().Add(3 * 24 * time.Hour).Unix()
 	a := utilAccount("smart", map[string]any{
-		"passive_usage_7d_utilization": 0.95,
+		"passive_usage_7d_utilization": 0.75,
 		"passive_usage_7d_reset":       float64(future),
 	})
 	require.True(t, a.IsUtilizationDormant())
+}
+
+// TestPacing_Util7dThresholdLowerThan5h 证明 5h / 7d 阈值已拆开:
+// 一个 util 值(0.80)在 7d 维度触发休眠(>=0.75),但同值放到 5h 维度不触发(<0.85)。
+func TestPacing_Util7dThresholdLowerThan5h(t *testing.T) {
+	future := time.Now().Add(3 * 24 * time.Hour).Unix()
+	// 仅 7d = 0.80(5h 为 0)→ 休眠(7d 阈值 0.75)。
+	sevenD := utilAccount("smart", map[string]any{
+		"passive_usage_7d_utilization": 0.80,
+		"passive_usage_7d_reset":       float64(future),
+	})
+	require.True(t, sevenD.IsUtilizationDormant(), "7d=0.80 >= 0.75 应休眠")
+	// 仅 5h = 0.80(7d 为 0)→ 不休眠(5h 阈值 0.85)。
+	fiveH := utilAccount("smart", map[string]any{"session_window_utilization": 0.80})
+	require.False(t, fiveH.IsUtilizationDormant(), "5h=0.80 < 0.85 不应休眠")
 }
 
 func TestPacing_Util7dExpiredWindow_NotDormant(t *testing.T) {
@@ -235,15 +253,23 @@ func TestPacing_SelectionWeight_Normal(t *testing.T) {
 }
 
 func TestPacing_SelectionWeight_DownweightBand(t *testing.T) {
+	// 5h 降权带 = [0.5, 0.85)。
 	a := utilAccount("smart", map[string]any{"session_window_utilization": 0.60})
-	require.Equal(t, 0.5, a.PacingSelectionWeight(), "util∈[0.5,0.9) 应降权 0.5")
-	b := utilAccount("smart", map[string]any{"session_window_utilization": 0.89})
+	require.Equal(t, 0.5, a.PacingSelectionWeight(), "util∈[0.5,0.85) 应降权 0.5")
+	b := utilAccount("smart", map[string]any{"session_window_utilization": 0.84})
 	require.Equal(t, 0.5, b.PacingSelectionWeight())
+	// 7d 降权带 = [0.5, 0.75)：7d=0.70(5h 为 0)也应降权。
+	future := time.Now().Add(3 * 24 * time.Hour).Unix()
+	c := utilAccount("smart", map[string]any{
+		"passive_usage_7d_utilization": 0.70,
+		"passive_usage_7d_reset":       float64(future),
+	})
+	require.Equal(t, 0.5, c.PacingSelectionWeight(), "7d∈[0.5,0.75) 应降权 0.5")
 }
 
 func TestPacing_SelectionWeight_DormantBandStillReportsWeight(t *testing.T) {
-	// util>=0.9 的排除由 IsUtilizationDormant 处理，权重函数此时回落到 1.0
-	// （不在降权带内），避免与休眠逻辑重复作用。
+	// 达休眠阈值(5h>=0.85)的排除由 IsUtilizationDormant 处理，权重函数此时回落到
+	// 1.0（不在降权带内），避免与休眠逻辑重复作用。
 	a := utilAccount("smart", map[string]any{"session_window_utilization": 0.95})
 	require.Equal(t, 1.0, a.PacingSelectionWeight())
 	require.True(t, a.IsUtilizationDormant())
@@ -388,6 +414,94 @@ func TestPacing_Cooldown_CyclesAndSpeedModeSkips(t *testing.T) {
 		}
 	}
 	require.False(t, anyCool, "速度档应跳过活跃-冷却节奏")
+}
+
+// ── Phase 21I: 跨 cell 相位错峰(cell 盐)────────────────────────────────
+
+func TestPacing_CellSalt_ZeroWhenUnset(t *testing.T) {
+	SetPacingCellPhaseSalt("")
+	t.Cleanup(func() { SetPacingCellPhaseSalt("") })
+	require.Equal(t, int64(0), pacingCellPhaseSalt)
+	// salt=0 → 等价旧公式 (ID*373)%1440,行为不变。
+	a := humanAccount(7, PacingModeHumanized)
+	require.Equal(t, int((7*pacingRestSpreadPrime)%pacingDayMinutes), a.dailyRestStartMinute())
+}
+
+func TestPacing_CellSalt_ShiftsDailyRestPhase(t *testing.T) {
+	SetPacingCellPhaseSalt("http://10.0.0.1:8091")
+	t.Cleanup(func() { SetPacingCellPhaseSalt("") })
+	require.NotEqual(t, int64(0), pacingCellPhaseSalt, "非空种子应产生非零 salt")
+	a := humanAccount(7, PacingModeHumanized)
+	want := int((7*pacingRestSpreadPrime + pacingCellPhaseSalt) % pacingDayMinutes)
+	require.Equal(t, want, a.dailyRestStartMinute())
+	// 窗口时长不变(仍 4h)。
+	start, end := a.DailyRestWindowUTC()
+	require.Equal(t, pacingDailyRestDurationMin, end-start)
+}
+
+func TestPacing_CellSalt_DifferentCellsDesync(t *testing.T) {
+	t.Cleanup(func() { SetPacingCellPhaseSalt("") })
+	restStarts := func() map[int64]int {
+		m := map[int64]int{}
+		for id := int64(1); id <= 6; id++ {
+			m[id] = humanAccount(id, PacingModeHumanized).dailyRestStartMinute()
+		}
+		return m
+	}
+	SetPacingCellPhaseSalt("http://10.0.0.1:8091")
+	saltA := pacingCellPhaseSalt
+	startsA := restStarts()
+	SetPacingCellPhaseSalt("http://10.0.0.2:8091")
+	saltB := pacingCellPhaseSalt
+	startsB := restStarts()
+	// id*373 项在两 cell 相同,休息起点相等当且仅当 salt mod 1440 相等 → 断言不等
+	// 即保证同一批 ID 在两个 cell 上全部错峰。
+	require.NotEqual(t, saltA%int64(pacingDayMinutes), saltB%int64(pacingDayMinutes),
+		"两种子 salt 不应 mod 1440 相等")
+	for id := int64(1); id <= 6; id++ {
+		require.NotEqual(t, startsA[id], startsB[id], "id=%d 两 cell 应错峰", id)
+	}
+}
+
+func TestPacing_CellSalt_ShiftsCooldownPhase(t *testing.T) {
+	t.Cleanup(func() { SetPacingCellPhaseSalt("") })
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pattern := func(id int64) []bool {
+		a := humanAccount(id, PacingModeHumanized)
+		out := make([]bool, pacingCycleMin)
+		for m := 0; m < pacingCycleMin; m++ {
+			out[m] = a.IsInCooldownPhase(base.Add(time.Duration(m) * time.Minute))
+		}
+		return out
+	}
+	SetPacingCellPhaseSalt("")
+	zero := pattern(3)
+	SetPacingCellPhaseSalt("http://10.0.0.9:8091")
+	if pacingCellPhaseSalt%int64(pacingCycleMin) == 0 {
+		t.Skip("罕见:该种子 salt%60==0,冷却相位不受影响")
+	}
+	require.NotEqual(t, zero, pattern(3), "cell 盐应错开冷却相位")
+}
+
+// TestPacing_Cooldown_ConsecutiveIDsSpread 单 cell 内连号的冷却也应打散:
+// 乘质数 7 后,连续 ID 的冷却起点在 60 分钟周期里铺开,不再相邻扎堆。
+func TestPacing_Cooldown_ConsecutiveIDsSpread(t *testing.T) {
+	SetPacingCellPhaseSalt("")
+	t.Cleanup(func() { SetPacingCellPhaseSalt("") })
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	// 统计每个连号账号在周期内进入冷却的起始分钟,应互不相同(7 与 60 互质)。
+	starts := map[int]bool{}
+	for id := int64(1); id <= 6; id++ {
+		a := humanAccount(id, PacingModeHumanized)
+		for m := 0; m < pacingCycleMin; m++ {
+			cur := a.IsInCooldownPhase(base.Add(time.Duration(m) * time.Minute))
+			prev := a.IsInCooldownPhase(base.Add(time.Duration(m-1) * time.Minute))
+			if cur && !prev { // 冷却段的起始分钟
+				starts[m] = true
+			}
+		}
+	}
+	require.Equal(t, 6, len(starts), "连续 6 个 ID 的冷却起点应互不相同(已打散)")
 }
 
 func TestPacing_Humanization_NoPacingModeNeverDormant(t *testing.T) {
