@@ -293,6 +293,9 @@ func RegisterGatewayRoutes(
 			// 用量日志查询（只接受 Authorization: Bearer，不消耗余额，不记 usage log）
 			g.GET("/usage-logs", bearerOnly, auth, h.AccountAPI.GetUsageLogs)
 			g.GET("/sub-key/usage-logs", bearerOnly, auth, h.AccountAPI.GetSubKeyUsageLogs)
+
+			// 系统公告（按密钥所属用户返回其当前最新一条可见公告，忽略已读；无则 data 为 null）
+			g.GET("/notice", bearerOnly, auth, h.Announcement.Latest)
 		}
 		registerAccountAPI(r)
 		registerAccountAPI(r.Group("/api/account"))

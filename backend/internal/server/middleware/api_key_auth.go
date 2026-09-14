@@ -193,7 +193,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		path := strings.TrimPrefix(c.Request.URL.Path, "/api/account")
 		skipBilling := path == "/v1/usage" || path == "/balance" ||
 			path == "/sub-key/balance" || path == "/sub-key/usage-logs" ||
-			path == "/usage-logs" ||
+			path == "/usage-logs" || path == "/notice" ||
 			path == "/sub-keys" || strings.HasPrefix(path, "/sub-keys/")
 
 		var subscription *service.UserSubscription

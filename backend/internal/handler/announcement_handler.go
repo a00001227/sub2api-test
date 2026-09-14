@@ -48,6 +48,33 @@ func (h *AnnouncementHandler) List(c *gin.Context) {
 	response.Success(c, out)
 }
 
+// Latest returns the single most-recent announcement visible to the current
+// user, ignoring read state. Data is null when nothing is visible.
+// GET /announcements  (API-key gateway route)
+func (h *AnnouncementHandler) Latest(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not found in context")
+		return
+	}
+
+	items, err := h.announcementService.ListForUser(c.Request.Context(), subject.UserID, false)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// ListForUser sorts unread-first, so pick the globally newest by ID here.
+	var latest *service.UserAnnouncement
+	for i := range items {
+		if latest == nil || items[i].Announcement.ID > latest.Announcement.ID {
+			latest = &items[i]
+		}
+	}
+
+	response.Success(c, dto.UserAnnouncementFromService(latest))
+}
+
 // MarkRead marks an announcement as read for current user
 // POST /api/v1/announcements/:id/read
 func (h *AnnouncementHandler) MarkRead(c *gin.Context) {
