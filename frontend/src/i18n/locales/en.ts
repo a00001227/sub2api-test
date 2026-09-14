@@ -5074,7 +5074,9 @@ export default {
           model_not_supported: 'Model unsupported',
           client_version_gate: 'Client too old',
           proxy_down: 'Proxy down',
-          other_5xx: 'Upstream 5xx'
+          other_5xx: 'Upstream 5xx',
+          request_too_large: 'Request too large',
+          client_canceled: 'Client canceled'
         }
       },
       // Error Details Modal

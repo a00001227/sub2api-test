@@ -27,6 +27,8 @@ const (
 	UpstreamCauseClientVersionGate = "client_version_gate" // 客户端版本门槛(如 fable 要求新版 CLI)
 	UpstreamCauseProxyDown         = "proxy_down"          // 传输层错误(无 HTTP 响应,疑似代理出口异常)
 	UpstreamCauseOther5xx          = "other_5xx"           // 其它 5xx 上游错误(兜底)
+	UpstreamCauseRequestTooLarge   = "request_too_large"   // 上游 413:请求体超上限(客户端上下文过大,非中转的锅)
+	UpstreamCauseClientCanceled    = "client_canceled"     // 传输层 context canceled:客户端中途断开(非中转的锅,区别于 proxy_down)
 )
 
 // ClassifyUpstreamCause 按(上游状态码, 上游原始文案)归一出一个错误分类 slug。
@@ -45,10 +47,19 @@ func ClassifyUpstreamCause(upstreamStatus int, upstreamMsg string) string {
 		return UpstreamCauseModelNotSupported
 	case strings.Contains(m, "overloaded"):
 		return UpstreamCauseOverloaded
+	case strings.Contains(m, "request_too_large") || strings.Contains(m, "exceeds the maximum size"):
+		return UpstreamCauseRequestTooLarge
 	}
 	switch {
 	case upstreamStatus <= 0:
+		// 传输层无 HTTP 响应。context canceled = 客户端中途断开(非中转的锅);
+		// 与真正的出口拨号/连接失败(proxy_down,计入中转 SLA)区分开。
+		if strings.Contains(m, "context canceled") || strings.Contains(m, "context cancelled") {
+			return UpstreamCauseClientCanceled
+		}
 		return UpstreamCauseProxyDown
+	case upstreamStatus == 413:
+		return UpstreamCauseRequestTooLarge
 	case upstreamStatus == 529:
 		return UpstreamCauseOverloaded
 	case upstreamStatus >= 500:

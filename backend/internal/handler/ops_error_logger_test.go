@@ -908,6 +908,8 @@ func TestClassifyOpsUpstreamCauseSLAExclusion(t *testing.T) {
 		{name: "model_not_supported", slug: service.UpstreamCauseModelNotSupported, upstreamCode: 400, wantExcluded: true},
 		{name: "client_version_gate", slug: service.UpstreamCauseClientVersionGate, upstreamCode: 400, wantExcluded: true},
 		{name: "other_5xx", slug: service.UpstreamCauseOther5xx, upstreamCode: 503, wantExcluded: true},
+		{name: "request_too_large", slug: service.UpstreamCauseRequestTooLarge, upstreamCode: 413, wantExcluded: true},
+		{name: "client_canceled", slug: service.UpstreamCauseClientCanceled, upstreamCode: 0, wantExcluded: true},
 		{name: "proxy_down_still_counts", slug: service.UpstreamCauseProxyDown, upstreamCode: 0, wantExcluded: false},
 	}
 	for _, tt := range tests {

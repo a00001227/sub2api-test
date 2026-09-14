@@ -481,6 +481,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
+					// 传输失败(无上游 HTTP 响应):把真因分类经脱敏头带回中央——
+					// context canceled=客户端中途断开(client_canceled),与出口拨号失败
+					// (proxy_down)区分,让中央 ops 显形真因而非笼统 502。仅在响应尚未写出
+					// (headers 未 flush)时能加头,已写出则由后续 forward_failed 日志兜底。
+					service.SetEdgeUpstreamCauseHeader(c, streamStarted, 0, err.Error())
 					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
 				}
 				forwardFailedFields := []zap.Field{
@@ -908,6 +913,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
+					// 传输失败(无上游 HTTP 响应):把真因分类经脱敏头带回中央——
+					// context canceled=客户端中途断开(client_canceled),与出口拨号失败
+					// (proxy_down)区分,让中央 ops 显形真因而非笼统 502。仅在响应尚未写出
+					// (headers 未 flush)时能加头,已写出则由后续 forward_failed 日志兜底。
+					service.SetEdgeUpstreamCauseHeader(c, streamStarted, 0, err.Error())
 					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
 				}
 				forwardFailedFields := []zap.Field{
@@ -1650,6 +1660,10 @@ func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) 
 		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"
 	case 403:
 		return http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"
+	case 413:
+		// 请求体过大是客户端的锅:必须回真实 4xx,否则压平成 5xx 会被客户端当可重试错误
+		// → 同一超大请求无限重投(413 风暴)。与 handleErrorResponse 的 413 处理一致。
+		return http.StatusRequestEntityTooLarge, "invalid_request_error", "Request exceeds the maximum size"
 	case 429:
 		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
 	case 529:

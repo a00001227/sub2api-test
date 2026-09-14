@@ -14,10 +14,16 @@ func TestClassifyUpstreamCause(t *testing.T) {
 		{"codex model not supported (gpt-5.4)", 400, "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.", UpstreamCauseModelNotSupported},
 		{"client version gate (fable)", 400, "Claude Code 2.1.161 does not support this model; version 2.1.251 or newer is required. Run 'claude update'", UpstreamCauseClientVersionGate},
 		{"version gate precedence over not-supported", 400, "this model does not support this model; version 2.1.251 or newer is required", UpstreamCauseClientVersionGate},
+		{"request_too_large by msg on 400", 400, "request_too_large: prompt is too long", UpstreamCauseRequestTooLarge},
+		{"exceeds maximum size by msg", 400, "input length exceeds the maximum size", UpstreamCauseRequestTooLarge},
 
 		// 状态码兜底(文案未命中)
 		{"transport error → proxy_down", 0, "", UpstreamCauseProxyDown},
 		{"negative status → proxy_down", -1, "read: connection reset by peer", UpstreamCauseProxyDown},
+		{"context canceled → client_canceled", 0, "context canceled", UpstreamCauseClientCanceled},
+		{"context cancelled (British) → client_canceled", -1, "Post ...: context cancelled", UpstreamCauseClientCanceled},
+		{"deadline exceeded stays proxy_down", 0, "context deadline exceeded", UpstreamCauseProxyDown},
+		{"413 → request_too_large", 413, "", UpstreamCauseRequestTooLarge},
 		{"529 → overloaded", 529, "", UpstreamCauseOverloaded},
 		{"generic 502 → other_5xx", 502, "", UpstreamCauseOther5xx},
 		{"generic 503 → other_5xx", 503, "temporarily unavailable", UpstreamCauseOther5xx},

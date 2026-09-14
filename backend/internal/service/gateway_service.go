@@ -8230,6 +8230,22 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, summary)
+	case 413:
+		// 上游「请求体过大」是客户端的锅(本次上下文超上限)。必须原样把 413 回给客户端:
+		// 压平成 5xx 会被客户端(Claude Code 等)当可重试错误 → 同一超大请求无限重投,
+		// 形成 413 风暴。回真实 4xx,客户端即停重试、自行压缩上下文。原样透传上游 body
+		// (Anthropic 原生 request_too_large,不含敏感信息),并把分类经脱敏头带回中央
+		// (供 ops 显形 + SLA 排除:非中转可用性故障)。
+		SetEdgeUpstreamCauseHeader(c, c.Writer.Written(), resp.StatusCode, upstreamMsg)
+		c.Data(http.StatusRequestEntityTooLarge, "application/json", body)
+		summary := upstreamMsg
+		if summary == "" {
+			summary = truncateForLog(body, 512)
+		}
+		if summary == "" {
+			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, summary)
 	case 401:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"

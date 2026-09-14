@@ -5232,7 +5232,9 @@ export default {
           model_not_supported: '模型不支持',
           client_version_gate: '客户端版本过低',
           proxy_down: '代理出口异常',
-          other_5xx: '上游 5xx'
+          other_5xx: '上游 5xx',
+          request_too_large: '请求过大',
+          client_canceled: '客户端断开'
         }
       },
       // Error Details Modal

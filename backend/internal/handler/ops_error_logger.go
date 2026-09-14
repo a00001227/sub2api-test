@@ -1244,6 +1244,15 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	// 唯独 proxy_down(代理出口挂)是中转要负责的资源,保留计入。
 	upstreamBusinessLimited := upstreamError && classifyOpsUpstreamBusinessLimited(c)
 	isBusinessLimited = routingCapacityLimited || (clientBusinessLimited && !upstreamError) || localBusinessLimited || upstreamBusinessLimited
+	// 权威 slug 直判:request_too_large(413,请求体超上限)与 client_canceled(传输层
+	// context canceled,客户端中途断开)都是客户端侧成因,非中转可用性故障 → 排除出 SLA/健康分。
+	// client_canceled 走传输层(无上游状态码),upstreamError 为 false → 上面的 upstream 口径
+	// 盖不住;这两个 slug 只由 cell 的 ClassifyUpstreamCause 权威产出,直接据 slug 排除最稳,
+	// 且不硬塞进 upstream 相位(避免把「客户端断开」误标成 provider 侧错误)。
+	if slug, _ := opsUpstreamCauseSlug(c); slug == service.UpstreamCauseRequestTooLarge ||
+		slug == service.UpstreamCauseClientCanceled {
+		isBusinessLimited = true
+	}
 	// invalid_request_error(400)= 客户端把请求本身发错(prompt 过长 / 参数非法 / 字段不支持等)。
 	// 中转如实转发,由上游或本地校验拒绝——非中转可用性故障 → 排除出 SLA/健康分(仍留错误列表可见)。
 	// 与 upstreamError 无关地判定:请求内容错就是客户端的锅,哪层拒的都一样。极少数「中转请求
@@ -1315,7 +1324,8 @@ func opsUpstreamCauseSlug(c *gin.Context) (slug string, upstreamStatus int) {
 			switch strings.TrimSpace(s) {
 			case service.UpstreamCauseOverloaded, service.UpstreamCauseModelNotSupported,
 				service.UpstreamCauseClientVersionGate, service.UpstreamCauseProxyDown,
-				service.UpstreamCauseOther5xx:
+				service.UpstreamCauseOther5xx, service.UpstreamCauseRequestTooLarge,
+				service.UpstreamCauseClientCanceled:
 				return strings.TrimSpace(s), upstreamStatus
 			}
 		}
@@ -1329,7 +1339,8 @@ func opsUpstreamCauseSlug(c *gin.Context) (slug string, upstreamStatus int) {
 	switch msg {
 	case service.UpstreamCauseOverloaded, service.UpstreamCauseModelNotSupported,
 		service.UpstreamCauseClientVersionGate, service.UpstreamCauseProxyDown,
-		service.UpstreamCauseOther5xx:
+		service.UpstreamCauseOther5xx, service.UpstreamCauseRequestTooLarge,
+		service.UpstreamCauseClientCanceled:
 		return msg, upstreamStatus // 中央 edge 行:已是规范 slug
 	}
 	return "", upstreamStatus
@@ -1346,7 +1357,10 @@ func classifyOpsUpstreamBusinessLimited(c *gin.Context) bool {
 	slug, upstreamStatus := opsUpstreamCauseSlug(c)
 	switch slug {
 	case service.UpstreamCauseOverloaded, service.UpstreamCauseModelNotSupported,
-		service.UpstreamCauseClientVersionGate, service.UpstreamCauseOther5xx:
+		service.UpstreamCauseClientVersionGate, service.UpstreamCauseOther5xx,
+		service.UpstreamCauseRequestTooLarge, service.UpstreamCauseClientCanceled:
+		// request_too_large / client_canceled 都是客户端侧成因(请求过大 / 主动断开),
+		// 非中转可控 → 排除出 SLA/健康分,口径与上游过载等一致。
 		return true
 	case service.UpstreamCauseProxyDown:
 		return false
