@@ -94,10 +94,41 @@ type ProviderAccountMetrics struct {
 	// ErrorMessage 是上游状态描述(如 "OAuth token revoked" / "429")，非凭据；
 	// 防御性截断,避免把大体响应体透出。空 = 无错误。
 	ErrorMessage string `json:"error_message,omitempty"`
-	// RateLimited = 当前是否处于限流窗口内(派生自 reset_at)；RateLimitResetAt
-	// = 限流解除时间 RFC3339(nil = 未限流或无重置时间)。
+	// RateLimited = 当前是否处于"暂不派单"窗口内；RateLimitResetAt = 窗口解除时间
+	// RFC3339(nil = 无窗口)。窗口有三种来源,取其中最晚到期的一个,RateLimitSource
+	// 标明来源:
+	//   rate_limit        上游 429 带 reset 头 → rate_limit_reset_at
+	//   temp_unschedulable 临时不可调度规则命中(429/529/503 关键词)→ temp_unschedulable_until
+	//   overload          上游 529 过载冷却 → overload_until
+	// 三种在调度器里同样让账号不可调度(Account.IsSchedulable),但 sub2api 的 429
+	// 规则命中后会早退、不写 rate_limit_reset_at,所以只看后者会把被罚的号当成"正常"。
 	RateLimited      bool    `json:"rate_limited"`
 	RateLimitResetAt *string `json:"rate_limit_reset_at,omitempty"`
+	RateLimitSource  string  `json:"rate_limit_source,omitempty"`
+}
+
+// Provider metrics 里 RateLimitSource 的取值。
+const (
+	ProviderRateLimitSourceRateLimit         = "rate_limit"
+	ProviderRateLimitSourceTempUnschedulable = "temp_unschedulable"
+	ProviderRateLimitSourceOverload          = "overload"
+)
+
+// activeUnschedulableWindow 返回账号此刻仍生效的暂不派单窗口中最晚到期的一个及其来源;
+// 没有则 ok=false。
+func activeUnschedulableWindow(acc *Account, now time.Time) (until time.Time, source string, ok bool) {
+	consider := func(t *time.Time, src string) {
+		if t == nil || !now.Before(*t) {
+			return
+		}
+		if !ok || t.After(until) {
+			until, source, ok = *t, src, true
+		}
+	}
+	consider(acc.RateLimitResetAt, ProviderRateLimitSourceRateLimit)
+	consider(acc.TempUnschedulableUntil, ProviderRateLimitSourceTempUnschedulable)
+	consider(acc.OverloadUntil, ProviderRateLimitSourceOverload)
+	return until, source, ok
 }
 
 // maxProviderErrorMessageLen 限制回流给 Portal 的错误详情长度,纯防御性——
@@ -215,10 +246,11 @@ func (s *ProviderAccountMetricsService) Metrics(
 	if msg := truncateProviderErrorMessage(acc.ErrorMessage); msg != "" {
 		out.ErrorMessage = msg
 	}
-	if acc.RateLimitResetAt != nil && s.now().Before(*acc.RateLimitResetAt) {
+	if until, source, ok := activeUnschedulableWindow(acc, s.now()); ok {
 		out.RateLimited = true
-		reset := acc.RateLimitResetAt.UTC().Format(time.RFC3339)
+		reset := until.UTC().Format(time.RFC3339)
 		out.RateLimitResetAt = &reset
+		out.RateLimitSource = source
 	}
 
 	// Current concurrency occupancy (DeRouter's 0/2 left value). Best-effort.

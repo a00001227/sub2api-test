@@ -43,11 +43,23 @@ type AccountRuntimeBlocker interface {
 type SuccessfulTestRecoveryResult struct {
 	ClearedError     bool
 	ClearedRateLimit bool
+	// SkippedActiveWindow 表示账号仍处于未到期的限流/过载/临时不可调度窗口,
+	// 且调用方要求保留该窗口(见 AccountRecoveryOptions.PreserveActiveWindows),
+	// 因此本次未清理运行时状态。
+	SkippedActiveWindow bool
 }
 
 // AccountRecoveryOptions 控制账号恢复时的附加行为。
 type AccountRecoveryOptions struct {
 	InvalidateToken bool
+	// PreserveActiveWindows 为 true 时,不清除尚未到期的限流 / 过载 / 临时不可调度
+	// 窗口,让其自然到期;仅清理已过期的残留状态与 error 状态。
+	//
+	// 用于定时探活(ScheduledTestRunner)的自动恢复:探活用的是平台默认模型,
+	// 一次成功只能证明凭证有效,证明不了上游对其它模型的限流已解除。若无条件清窗,
+	// 会把上游刚给的 429 罚号在几秒内解掉 → 账号回池 → 同一客户端再打 → 再罚,
+	// 形成"罚了又罚"的循环;DB/面板上也看不到号曾被罚。手动"测试"按钮仍走无条件清理。
+	PreserveActiveWindows bool
 }
 
 type geminiUsageCacheEntry struct {
@@ -1626,10 +1638,14 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 	}
 
 	if hasRecoverableRuntimeState(account) {
-		if err := s.ClearRateLimit(ctx, accountID); err != nil {
-			return nil, err
+		if options.PreserveActiveWindows && hasActiveRuntimeWindow(account, time.Now()) {
+			result.SkippedActiveWindow = true
+		} else {
+			if err := s.ClearRateLimit(ctx, accountID); err != nil {
+				return nil, err
+			}
+			result.ClearedRateLimit = true
 		}
-		result.ClearedRateLimit = true
 	}
 	if result.ClearedError || result.ClearedRateLimit {
 		s.ResetOpenAI403Counter(ctx, accountID)
@@ -1662,6 +1678,25 @@ func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID
 	}
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
+}
+
+// hasActiveRuntimeWindow 账号是否仍处于未到期的限流 / 过载 / 临时不可调度窗口。
+// 与 hasRecoverableRuntimeState 的区别:后者只看字段是否有值(含已过期残留),
+// 这里只认"此刻仍生效"的窗口。
+func hasActiveRuntimeWindow(account *Account, now time.Time) bool {
+	if account == nil {
+		return false
+	}
+	if account.RateLimitResetAt != nil && now.Before(*account.RateLimitResetAt) {
+		return true
+	}
+	if account.OverloadUntil != nil && now.Before(*account.OverloadUntil) {
+		return true
+	}
+	if account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil) {
+		return true
+	}
+	return false
 }
 
 func hasRecoverableRuntimeState(account *Account) bool {

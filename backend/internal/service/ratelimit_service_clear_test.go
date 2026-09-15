@@ -284,6 +284,79 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearErrorFailed(t *
 	require.Equal(t, 0, repo.clearRateLimitCalls)
 }
 
+// 定时探活的自动恢复:窗口仍生效时保留(不清限流/临时不可调度),但 error 态照常清。
+func TestRateLimitService_RecoverAccountState_PreserveActiveWindows_SkipsActiveBench(t *testing.T) {
+	until := time.Now().Add(5 * time.Minute)
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:                     31,
+			Status:                 StatusError,
+			TempUnschedulableUntil: &until,
+		},
+	}
+	cache := &tempUnschedCacheRecorder{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+
+	result, err := svc.RecoverAccountState(context.Background(), 31, AccountRecoveryOptions{
+		PreserveActiveWindows: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.ClearedError)
+	require.False(t, result.ClearedRateLimit)
+	require.True(t, result.SkippedActiveWindow)
+
+	require.Equal(t, 1, repo.clearErrorCalls)
+	require.Equal(t, 0, repo.clearRateLimitCalls)
+	require.Equal(t, 0, repo.clearTempUnschedCalls)
+	require.Empty(t, cache.deletedIDs)
+}
+
+// 窗口已过期只剩残留字段:PreserveActiveWindows 不阻止清理,行为与原来一致。
+func TestRateLimitService_RecoverAccountState_PreserveActiveWindows_ClearsExpiredResidue(t *testing.T) {
+	past := time.Now().Add(-time.Minute)
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:                     32,
+			Status:                 StatusActive,
+			RateLimitResetAt:       &past,
+			TempUnschedulableUntil: &past,
+		},
+	}
+	cache := &tempUnschedCacheRecorder{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+
+	result, err := svc.RecoverAccountState(context.Background(), 32, AccountRecoveryOptions{
+		PreserveActiveWindows: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.SkippedActiveWindow)
+	require.True(t, result.ClearedRateLimit)
+	require.Equal(t, 1, repo.clearRateLimitCalls)
+	require.Equal(t, 1, repo.clearTempUnschedCalls)
+	require.Equal(t, []int64{32}, cache.deletedIDs)
+}
+
+// 手动"测试"按钮(无选项)仍无条件清理生效中的窗口,保持原行为。
+func TestRateLimitService_RecoverAccountAfterSuccessfulTest_StillClearsActiveBench(t *testing.T) {
+	until := time.Now().Add(5 * time.Minute)
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:                     33,
+			Status:                 StatusActive,
+			TempUnschedulableUntil: &until,
+		},
+	}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	result, err := svc.RecoverAccountAfterSuccessfulTest(context.Background(), 33)
+	require.NoError(t, err)
+	require.True(t, result.ClearedRateLimit)
+	require.False(t, result.SkippedActiveWindow)
+	require.Equal(t, 1, repo.clearTempUnschedCalls)
+}
+
 func TestRateLimitService_RecoverAccountState_InvalidatesOAuthTokenOnErrorRecovery(t *testing.T) {
 	repo := &rateLimitClearRepoStub{
 		getByIDAccount: &Account{

@@ -98,6 +98,40 @@ func TestMetrics_HealthErrorDetail_Active(t *testing.T) {
 	require.Equal(t, "2026-07-31T12:30:00Z", *m.RateLimitResetAt)
 }
 
+// 临时不可调度(429 规则罚号)没有 rate_limit_reset_at,也要按"限流中"透出,并标明来源;
+// 多个窗口同时生效时取最晚到期的。
+func TestMetrics_HealthErrorDetail_TempUnschedulableCountsAsRateLimited(t *testing.T) {
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	bench := now.Add(10 * time.Minute)
+	svc := &ProviderAccountMetricsService{
+		locator: &fakeMetricsLocator{id: 5, found: true},
+		accounts: &fakeMetricsAccountReader{acc: &Account{
+			Status:                 StatusActive,
+			TempUnschedulableUntil: &bench,
+		}},
+		usage: &fakeMetricsUsageReader{},
+		now:   func() time.Time { return now },
+	}
+	m, err := svc.Metrics(context.Background(), "pa_abc")
+	require.NoError(t, err)
+	require.True(t, m.RateLimited)
+	require.NotNil(t, m.RateLimitResetAt)
+	require.Equal(t, "2026-07-31T12:10:00Z", *m.RateLimitResetAt)
+	require.Equal(t, ProviderRateLimitSourceTempUnschedulable, m.RateLimitSource)
+
+	// 429 reset 头更晚到期 → 以它为准。
+	later := now.Add(30 * time.Minute)
+	svc.accounts = &fakeMetricsAccountReader{acc: &Account{
+		Status:                 StatusActive,
+		TempUnschedulableUntil: &bench,
+		RateLimitResetAt:       &later,
+	}}
+	m, err = svc.Metrics(context.Background(), "pa_abc")
+	require.NoError(t, err)
+	require.Equal(t, "2026-07-31T12:30:00Z", *m.RateLimitResetAt)
+	require.Equal(t, ProviderRateLimitSourceRateLimit, m.RateLimitSource)
+}
+
 // 已过期的限流窗口 → 不算限流；超长错误信息 → 截断 + 省略号。
 func TestMetrics_HealthErrorDetail_ExpiredAndTruncate(t *testing.T) {
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
@@ -116,6 +150,7 @@ func TestMetrics_HealthErrorDetail_ExpiredAndTruncate(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, m.RateLimited)
 	require.Nil(t, m.RateLimitResetAt)
+	require.Empty(t, m.RateLimitSource)
 	require.Equal(t, maxProviderErrorMessageLen+1, len([]rune(m.ErrorMessage)))
 	require.True(t, strings.HasSuffix(m.ErrorMessage, "…"))
 }

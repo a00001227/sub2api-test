@@ -152,7 +152,12 @@ func (s *ScheduledTestRunnerService) tryRecoverAccount(ctx context.Context, acco
 		return
 	}
 
-	recovery, err := s.rateLimitSvc.RecoverAccountAfterSuccessfulTest(ctx, accountID)
+	// 定时探活的成功只证明凭证可用,不代表上游对其它模型的限流已解除:保留未到期的
+	// 限流 / 过载 / 临时不可调度窗口,让其自然到期;只清 error 状态与已过期残留。
+	// 否则会把刚落下的 429 罚号在几秒内解掉,账号回池后立刻被同一客户端再罚。
+	recovery, err := s.rateLimitSvc.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{
+		PreserveActiveWindows: true,
+	})
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d auto-recover failed: %v", planID, err)
 		return
@@ -166,5 +171,8 @@ func (s *ScheduledTestRunnerService) tryRecoverAccount(ctx context.Context, acco
 	}
 	if recovery.ClearedRateLimit {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d auto-recover: account=%d cleared rate-limit/runtime state", planID, accountID)
+	}
+	if recovery.SkippedActiveWindow {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d auto-recover: account=%d still in an active rate-limit/overload/temp-unschedulable window, left to expire", planID, accountID)
 	}
 }

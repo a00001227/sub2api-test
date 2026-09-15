@@ -14,9 +14,11 @@ CellSelfHealSeeder(#92 cell 自动健康检测/自愈配置)
 
 背景:sub2api 的定时测试 + 自愈闭环已经存在 —— ScheduledTestRunnerService 周期性
 扫「测试计划」执行,测失败会让号进入 error 状态(经 #87 回流成 Portal 的 invalid),
-测成功且计划 AutoRecover 时调 RateLimitService.RecoverAccountAfterSuccessfulTest 把
-瞬时 error / 限流态清回可调度(同样回流)。但计划本身是中央 admin UI 手建的;cell 上
-没有 admin 面、没人建计划,于是 runner 在 cell 上空转,自愈闭环形同虚设。
+测成功且计划 AutoRecover 时调 RateLimitService.RecoverAccountState 把瞬时 error 态
+与已过期的限流残留清回可调度(同样回流);**未到期**的限流 / 过载 / 临时不可调度窗口
+会被保留(PreserveActiveWindows)——探活模型成功证明不了别的模型没被 429,提前解禁只会
+让号回池后立刻再被罚。但计划本身是中央 admin UI 手建的;cell 上没有 admin 面、没人建
+计划,于是 runner 在 cell 上空转,自愈闭环形同虚设。
 
 这个播种器补上这一环:EDGE_MODE 下用一个声明式对账循环,保证「每个在役本地号 desired=
 1 个 enabled 计划」。幂等 —— 已有计划的号跳过;新接入的号在下一次 tick 被补上。计划用
