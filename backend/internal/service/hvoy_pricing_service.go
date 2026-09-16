@@ -11,8 +11,9 @@ import (
 // Provider Pricing API schema 1.1 的格式对外发布(https://hvoyai.com/docs/provider-price-api)。
 //
 // 口径:
-//   - 价格源 = pricing_models(官网价格页那份,USD / token),× 分组 rate_multiplier(与计费同口径)
-//     × 固定汇率 → CNY / 1M tokens。
+//   - 价格源 = pricing_models(官网价格页那份,USD / token)。这份展示价**已经是客户最终价**
+//     (= 官方价 × 分组倍率,与计费口径一致),所以这里只乘固定汇率 → CNY / 1M tokens,
+//     不再叠加分组 rate_multiplier(否则会重复打折)。
 //   - 每条 = model + group;只发 hvoyPricingGroups 里列出的分组(按 name 或 slug 匹配),
 //     模型按平台归属分组(claude* → anthropic 组,gpt/codex/o* → openai 组)。
 //   - 1 小时缓存写价:我们的表只有单档写价,按 LiteLLM 目录里该模型 1h/5m 官方比价折算;
@@ -164,13 +165,9 @@ func (s *HvoyPricingService) selectGroups(active []Group) []hvoySelectedGroup {
 	return out
 }
 
-// buildModel 把一条展示价(USD / 1M tokens)换算成该分组的 CNY / 1M tokens。
-func (s *HvoyPricingService) buildModel(item *PricingDisplayItem, group Group, groupName string) HvoyPricingModel {
-	multiplier := group.RateMultiplier
-	if multiplier <= 0 {
-		multiplier = 1
-	}
-	factor := multiplier * hvoyPricingUSDToCNY
+// buildModel 把一条展示价(USD / 1M tokens,已是最终价)按汇率换算成 CNY / 1M tokens。
+func (s *HvoyPricingService) buildModel(item *PricingDisplayItem, _ Group, groupName string) HvoyPricingModel {
+	factor := hvoyPricingUSDToCNY
 	text := item.Pricing.Text
 
 	m := HvoyPricingModel{
@@ -211,7 +208,7 @@ func hvoyPricePtr(usdPer1M, factor float64) *float64 {
 	return &v
 }
 
-// hvoyRound 保留 4 位小数(CNY / 1M tokens,足够表达 0.0001 元级别的缓存价)。
+// hvoyRound 保留 2 位小数(CNY / 1M tokens,运营要求)。
 func hvoyRound(v float64) float64 {
-	return math.Round(v*10000) / 10000
+	return math.Round(v*100) / 100
 }

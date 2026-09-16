@@ -31,7 +31,7 @@ func newHvoyServiceForTest(t *testing.T, records []*PricingModelRecord, groups [
 	}
 }
 
-// 价格 = 展示价(USD/1M) × 分组倍率 × 6.7;模型按平台归到对应分组,group_name 发分组名;未列出的分组不发;
+// 价格 = 展示价(USD/1M,已是最终价)× 6.7,不再叠加分组倍率;模型按平台归到对应分组,group_name 发分组名;未列出的分组不发;
 // 图片模型与非终端用户价不发;顶层结构与 hvoy schema 1.1 一致。
 func TestHvoyPricingService_Build(t *testing.T) {
 	// 存储为 USD / token:claude 3/15/0.3/3.75 per 1M;gpt 1.25/10/0.125/0(无写价)
@@ -67,18 +67,18 @@ func TestHvoyPricingService_Build(t *testing.T) {
 	claude := resp.Data.Models[0]
 	require.Equal(t, "claude-sonnet-4-5", claude.ModelName)
 	require.Equal(t, "EiRouter-Claude-Standard", claude.GroupName)
-	require.InDelta(t, 3*6.7, claude.InputPrice, 1e-9)
-	require.InDelta(t, 15*6.7, *claude.OutputPrice, 1e-9)
-	require.InDelta(t, 0.3*6.7, *claude.CacheInputPrice, 1e-9)
-	require.InDelta(t, 3.75*6.7, *claude.CacheCreatePrice, 1e-9)
-	require.Nil(t, claude.CacheCreatePrice1h) // 无 LiteLLM 目录 → null
+	require.InDelta(t, 20.1, claude.InputPrice, 1e-9)         // 3 × 6.7
+	require.InDelta(t, 100.5, *claude.OutputPrice, 1e-9)      // 15 × 6.7
+	require.InDelta(t, 2.01, *claude.CacheInputPrice, 1e-9)   // 0.3 × 6.7
+	require.InDelta(t, 25.13, *claude.CacheCreatePrice, 1e-9) // 3.75 × 6.7 = 25.125 → 2 位小数
+	require.Nil(t, claude.CacheCreatePrice1h)                 // 无 LiteLLM 目录 → null
 	require.True(t, claude.Enabled)
 
 	gpt := resp.Data.Models[1]
 	require.Equal(t, "gpt-5", gpt.ModelName)
 	require.Equal(t, "EiRouter-GPT-Standard", gpt.GroupName)
-	require.InDelta(t, 1.25*1.2*6.7, gpt.InputPrice, 1e-9)
-	require.InDelta(t, 10*1.2*6.7, *gpt.OutputPrice, 1e-9)
+	require.InDelta(t, 8.38, gpt.InputPrice, 1e-9) // 1.25 × 6.7 = 8.375 → 8.38;分组倍率 1.2 不参与
+	require.InDelta(t, 67, *gpt.OutputPrice, 1e-9)
 	require.Nil(t, gpt.CacheCreatePrice) // 未设写价 → null
 	require.Nil(t, gpt.CacheCreatePrice1h)
 
