@@ -14,3 +14,9 @@ func RegisterPublicRoutes(v1 *gin.RouterGroup, h *handler.Handlers) {
 		public.GET("/pricing-display", h.PricingDisplay.GetPricingDisplay)
 	}
 }
+
+// RegisterProviderPricingRoutes 注册对外的 hvoyai.com Provider Pricing API(无鉴权)。
+// 路径按 hvoy 规范固定为 /api/provider/pricing(不在 /api/v1 下),故挂在引擎根上。
+func RegisterProviderPricingRoutes(r *gin.Engine, h *handler.Handlers) {
+	r.GET("/api/provider/pricing", h.HvoyPricing.GetPricing)
+}

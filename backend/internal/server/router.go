@@ -122,6 +122,7 @@ func registerRoutes(
 	if !cfg.EdgeMode {
 		routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, settingService)
 		routes.RegisterPublicRoutes(v1, h)
+		routes.RegisterProviderPricingRoutes(r, h)
 	}
 
 	// Provider Portal 内部接入面（Phase 21E-6C-2B-1）：独立 secret 鉴权，

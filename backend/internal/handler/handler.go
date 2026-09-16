@@ -66,6 +66,7 @@ type Handlers struct {
 	AvailableChannel *AvailableChannelHandler
 	PublicPricing    *PublicPricingHandler
 	PricingDisplay   *PricingDisplayHandler
+	HvoyPricing      *HvoyPricingHandler
 	Feedback         *FeedbackHandler
 	AccountAPI       *AccountAPIHandler
 	// ProviderConnect Provider Portal 内部接入面（Phase 21E-6C-2B-1）。

@@ -684,6 +684,7 @@ var ProviderSet = wire.NewSet(
 	NewModelPricingResolver,
 	NewPublicPricingService,
 	NewPricingDisplayService,
+	NewHvoyPricingService,
 	NewFeedbackService,
 	NewContentModerationService,
 	NewPromptAuditService,
