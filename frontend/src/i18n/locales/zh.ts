@@ -377,6 +377,7 @@ export default {
     dashboard: '仪表盘',
     announcements: '公告',
     feedbacks: '用户反馈',
+    feedbacksPending: '{count} 条未处理',
     apiKeys: 'API 密钥',
     usage: '使用记录',
     redeem: '兑换',

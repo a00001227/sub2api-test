@@ -159,11 +159,13 @@ import type { Column } from '@/components/common/types'
 import { adminAPI } from '@/api/admin'
 import type { Feedback } from '@/types'
 import { useAppStore } from '@/stores/app'
+import { useAdminFeedbackStore } from '@/stores/adminFeedbacks'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const adminFeedbackStore = useAdminFeedbackStore()
 
 const feedbacks = ref<Feedback[]>([])
 const loading = ref(false)
@@ -278,6 +280,7 @@ async function submitReply() {
     if (idx !== -1) feedbacks.value[idx] = updated
     detail.value = updated
     appStore.showSuccess(t('common.success'))
+    void adminFeedbackStore.refresh() // 回复即视为已处理,同步侧边栏角标
   } catch (err: unknown) {
     appStore.showError(
       (err as { message?: string })?.message || t('admin.feedbacks.failedToReply'),
@@ -295,6 +298,7 @@ async function changeStatus(row: Feedback, status: 'pending' | 'resolved') {
     if (idx !== -1) feedbacks.value[idx] = updated
     if (detail.value?.id === row.id) detail.value = updated
     appStore.showSuccess(t('common.success'))
+    void adminFeedbackStore.refresh() // 同步侧边栏角标
   } catch (err: unknown) {
     appStore.showError(
       (err as { message?: string })?.message || t('admin.feedbacks.failedToUpdate'),

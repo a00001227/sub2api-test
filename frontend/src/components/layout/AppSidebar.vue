@@ -86,9 +86,25 @@
               "
               @click="handleMenuItemClick(item.path)"
             >
-              <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
-              <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
-              <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+              <span class="relative flex-shrink-0">
+                <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+                <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+                <!-- 折叠态:角标贴在图标右上角 -->
+                <span
+                  v-if="sidebarCollapsed && badgeCount(item) > 0"
+                  class="sidebar-badge sidebar-badge-dot"
+                  :title="badgeTitle(item)"
+                >{{ badgeText(item) }}</span>
+              </span>
+              <span
+                class="sidebar-label"
+                :class="{ 'sidebar-label-collapsed': sidebarCollapsed, 'sidebar-label-flex': badgeCount(item) > 0 }"
+                :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+              >
+                <span class="min-w-0 truncate">{{ item.label }}</span>
+                <!-- 展开态:角标在文字右侧 -->
+                <span v-if="badgeCount(item) > 0" class="sidebar-badge" :title="badgeTitle(item)">{{ badgeText(item) }}</span>
+              </span>
             </router-link>
           </template>
         </div>
@@ -180,10 +196,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useAdminFeedbackStore, useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
@@ -207,6 +223,29 @@ interface NavItem {
    * 开关切换时菜单自动更新。
    */
   featureFlag?: () => boolean | undefined
+  /**
+   * 可选的数字角标 getter(如「用户反馈」的未处理数)。返回 0/undefined 时不显示。
+   * 同 featureFlag,getter 里访问的 store 会被模板自动追踪,数值变化即时刷新。
+   */
+  badge?: () => number | undefined
+  /** 角标的悬停提示(可选)。 */
+  badgeTitle?: () => string
+}
+
+const BADGE_MAX = 99
+
+function badgeCount(item: NavItem): number {
+  const n = item.badge?.()
+  return typeof n === 'number' && n > 0 ? n : 0
+}
+
+function badgeText(item: NavItem): string {
+  const n = badgeCount(item)
+  return n > BADGE_MAX ? `${BADGE_MAX}+` : String(n)
+}
+
+function badgeTitle(item: NavItem): string | undefined {
+  return item.badgeTitle?.()
 }
 
 // applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
@@ -232,6 +271,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
+const adminFeedbackStore = useAdminFeedbackStore()
 
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
@@ -769,7 +809,14 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
-    { path: '/admin/feedbacks', label: t('nav.feedbacks'), icon: ChatIcon, hideInSimpleMode: true },
+    {
+      path: '/admin/feedbacks',
+      label: t('nav.feedbacks'),
+      icon: ChatIcon,
+      hideInSimpleMode: true,
+      badge: () => adminFeedbackStore.pendingCount,
+      badgeTitle: () => t('nav.feedbacksPending', { count: adminFeedbackStore.pendingCount }),
+    },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/regions', label: t('nav.regions'), icon: ServerIcon },
     {
@@ -924,11 +971,15 @@ if (
 }
 
 // Fetch admin settings (for feature-gated nav items like Ops).
+// 同时启动/停止「用户反馈」未处理数轮询(仅管理员)。
 watch(
   isAdmin,
   (v) => {
     if (v) {
       adminSettingsStore.fetch()
+      adminFeedbackStore.startPolling()
+    } else {
+      adminFeedbackStore.stopPolling()
     }
   },
   { immediate: true }
@@ -938,6 +989,10 @@ onMounted(() => {
   if (isAdmin.value) {
     adminSettingsStore.fetch()
   }
+})
+
+onUnmounted(() => {
+  adminFeedbackStore.stopPolling()
 })
 </script>
 
@@ -1056,6 +1111,40 @@ onMounted(() => {
   opacity: 0;
   transform: translateX(-4px);
   pointer-events: none;
+}
+
+/* 数字角标(如「用户反馈」未处理数) */
+.sidebar-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  border-radius: 9999px;
+  background: rgb(239 68 68);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 折叠态:缩小并贴到图标右上角 */
+.sidebar-badge-dot {
+  position: absolute;
+  top: -0.375rem;
+  right: -0.5rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  font-size: 0.625rem;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.dark .sidebar-badge-dot {
+  box-shadow: 0 0 0 2px rgb(17 24 39);
 }
 
 /* Custom SVG icon in sidebar: constrain size without overriding uploaded SVG colors */

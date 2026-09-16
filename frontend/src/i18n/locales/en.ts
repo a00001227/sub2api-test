@@ -377,6 +377,7 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     feedbacks: 'Feedback',
+    feedbacksPending: '{count} pending',
     apiKeys: 'API Keys',
     usage: 'Usage',
     redeem: 'Redeem',
