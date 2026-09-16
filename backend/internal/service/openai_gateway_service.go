@@ -3906,6 +3906,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					return resultWithUsage(),
 						s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage)
 				}
+				// 同 openai 格式流:失败事件透传时按文案落 slug,上游过载不计中转错误。
+				SetEdgeUpstreamCauseHeader(c, openAIStreamClientOutputStarted(c, clientOutputStarted), resp.StatusCode, failedMessage)
 				forceFlushFailedEvent = true
 				sawFailedEvent = true
 			}
@@ -4442,6 +4444,17 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	var statusCode int
 
 	switch resp.StatusCode {
+	case 400:
+		// 上游 400 = 请求本身不合法(json_object 缺 "json" 提示词、Codex 号不支持该模型…),
+		// 是客户端 / 选号的锅而非中转故障。按 400 invalid_request_error 回给客户端并带上
+		// (脱敏后的)上游原文,让客户端能自行修正;此前压成 502 会被 SDK 当可重试错误反复
+		// 重投,运营面板也把它算成中转错误。anthropic 路径早已原样透传 400,这里对齐。
+		statusCode = http.StatusBadRequest
+		errType = "invalid_request_error"
+		errMsg = upstreamMsg
+		if errMsg == "" {
+			errMsg = "Upstream rejected the request"
+		}
 	case 401:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
@@ -4461,8 +4474,16 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	default:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
-		errMsg = "Upstream request failed"
+		// 带上上游状态码与(脱敏)原文:此前只回一句裸 "Upstream request failed",中央和
+		// 客户端都分不清是 404 模型不存在还是 5xx,排障只能逐台翻 cell 库。
+		errMsg = fmt.Sprintf("Upstream request failed (upstream status %d)", resp.StatusCode)
+		if upstreamMsg != "" {
+			errMsg += ": " + upstreamMsg
+		}
 	}
+
+	// 把分类经脱敏头带回中央(edge 行据此归类 / SLA 排除),与 anthropic 路径 413 处理一致。
+	SetEdgeUpstreamCauseHeader(c, c.Writer.Written(), resp.StatusCode, upstreamMsg)
 
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{
@@ -4858,6 +4879,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 					streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, upstreamRequestID, dataBytes, failedMessage)
 					return
 				}
+				// 不再失败转移、把 response.failed 原样透传给客户端的场景:按文案归类落 slug
+				// (上游过载等非中转可控的原因不计入中转错误);流已开始时只落 ops slug,不发头。
+				SetEdgeUpstreamCauseHeader(c, openAIStreamClientOutputStarted(c, clientOutputStarted), resp.StatusCode, failedMessage)
 				forceFlushFailedEvent = true
 				sawFailedEvent = true
 			}
@@ -5438,12 +5462,23 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 	if message == "" {
 		message = "Upstream returned an invalid non-streaming response"
 	}
+	// 上游是 HTTP 200 的流、失败藏在终态 response.failed 里(如 OpenAI 过载
+	// "Our servers are currently overloaded"),没有 5xx/529 可依据。这里只按文案归类
+	// (状态码传上游真实的 200,ClassifyUpstreamCause 对 2xx 不做状态兜底,未命中关键词
+	// 即不打标,避免把转换错误等也排除出 SLA):过载与 handler 层 mapUpstreamError 同口径
+	// 回 503 overloaded_error(SDK 视为可重试),并写入 slug / edge 头,让 cell 自己的 ops 行
+	// 与中央 edge 行都不再把上游过载计成中转错误。其它文案维持 502 upstream_error。
+	status, errType := http.StatusBadGateway, "upstream_error"
+	if ClassifyUpstreamCause(resp.StatusCode, message) == UpstreamCauseOverloaded {
+		status, errType = http.StatusServiceUnavailable, "overloaded_error"
+	}
 	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+	SetEdgeUpstreamCauseHeader(c, false, resp.StatusCode, message)
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusBadGateway, gin.H{
+	c.JSON(status, gin.H{
 		"error": gin.H{
-			"type":    "upstream_error",
+			"type":    errType,
 			"message": message,
 		},
 	})

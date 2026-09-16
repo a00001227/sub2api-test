@@ -49,6 +49,11 @@ func ClassifyUpstreamCause(upstreamStatus int, upstreamMsg string) string {
 		return UpstreamCauseOverloaded
 	case strings.Contains(m, "request_too_large") || strings.Contains(m, "exceeds the maximum size"):
 		return UpstreamCauseRequestTooLarge
+	case strings.Contains(m, "an error occurred while processing your request") && strings.Contains(m, "help.openai.com"):
+		// OpenAI 网关级内部错误的固定模板(server_error:"…contact us through our help center at
+		// help.openai.com… include the request ID …")。常以 HTTP 200 流终态 response.failed 出现,
+		// 拿不到 5xx 状态码,只能按文案认;性质等同上游 5xx → 归 other_5xx,不计中转错误。
+		return UpstreamCauseOther5xx
 	}
 	switch {
 	case upstreamStatus <= 0:

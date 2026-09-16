@@ -5365,6 +5365,22 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if err := replaceBody(StripEmptyTextBlocks(body)); err != nil {
 		return nil, err
 	}
+	// 兼容:该模型已知拒收 thinking.type=disabled(上游拒过一次后记住,见
+	// anthropic_thinking_disabled_compat.go),发出前就改成 adaptive,免得每次白跑一趟 400。
+	// 放在 FilterThinkingBlocks 之前:改成 adaptive 后过滤器只剔无效签名块、保留合法 thinking
+	// 历史(tool_use 续轮时上游要求最后一条 assistant 的 thinking 原样回传)。
+	if modelRejectsThinkingDisabled(reqModel) {
+		if rewritten, applied := RewriteThinkingDisabledToAdaptive(body); applied {
+			if err := replaceBody(rewritten); err != nil {
+				return nil, err
+			}
+			parsed.ThinkingEnabled = true
+			if parsed.OutputEffort == "" {
+				parsed.OutputEffort = thinkingDisabledCompatEffort
+			}
+			logger.LegacyPrintf("service.gateway", "Account %d: %s rejects thinking.type=disabled, rewrote to adaptive before send", account.ID, reqModel)
+		}
+	}
 	// Pre-filter: remove thinking blocks with missing/invalid signatures before forwarding.
 	// Clients (e.g. Claude Code) sometimes send multi-turn conversations where a historical
 	// assistant message contains a thinking block that is missing the required "signature" field,
@@ -5560,6 +5576,51 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				}
 				// 不是签名错误（或整流器已关闭），继续检查 budget 约束
 				errMsg := extractUpstreamErrorMessage(respBody)
+				// 上游不接受 thinking.type=disabled(新模型只认 adaptive):记住该模型,改写后同号重试一次。
+				if isThinkingDisabledUnsupportedError(errMsg) {
+					markThinkingDisabledUnsupported(reqModel)
+					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+						Platform:           account.Platform,
+						AccountID:          account.ID,
+						AccountName:        account.Name,
+						UpstreamStatusCode: resp.StatusCode,
+						UpstreamRequestID:  resp.Header.Get("x-request-id"),
+						UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+						Kind:               "thinking_disabled_unsupported",
+						Message:            errMsg,
+					})
+					if rewritten, applied := RewriteThinkingDisabledToAdaptive(body); applied && time.Since(retryStart) < maxRetryElapsed {
+						logger.LegacyPrintf("service.gateway", "Account %d: %s rejects thinking.type=disabled, retrying with thinking.type=adaptive", account.ID, reqModel)
+						compatRetryCtx, releaseCompatRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
+						compatRetryReq, compatWireBody, buildErr := s.buildUpstreamRequest(compatRetryCtx, c, account, rewritten, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+						releaseCompatRetryCtx()
+						if buildErr == nil {
+							compatRetryResp, retryErr := s.httpUpstream.DoWithTLS(compatRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							if retryErr == nil {
+								if compatRetryResp.StatusCode < 400 {
+									// 被接受的是改写版:ParsedRequest 同步成实际发出的请求(usage/日志按 thinking 开启记)。
+									lastWireBody = compatWireBody
+									if err := replaceBody(compatWireBody); err != nil {
+										_ = compatRetryResp.Body.Close()
+										return nil, err
+									}
+									parsed.ThinkingEnabled = true
+									if parsed.OutputEffort == "" {
+										parsed.OutputEffort = thinkingDisabledCompatEffort
+									}
+								}
+								resp = compatRetryResp
+								break
+							}
+							if compatRetryResp != nil && compatRetryResp.Body != nil {
+								_ = compatRetryResp.Body.Close()
+							}
+							logger.LegacyPrintf("service.gateway", "Account %d: thinking.type compat retry failed: %v", account.ID, retryErr)
+						} else {
+							logger.LegacyPrintf("service.gateway", "Account %d: thinking.type compat retry build failed: %v", account.ID, buildErr)
+						}
+					}
+				}
 				if isThinkingBudgetConstraintError(errMsg) && s.settingService.IsBudgetRectifierEnabled(ctx) {
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						Platform:           account.Platform,
