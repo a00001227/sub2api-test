@@ -48532,6 +48532,10 @@ type UserPlatformQuotaMutation struct {
 	addweekly_limit_usd  *float64
 	monthly_limit_usd    *float64
 	addmonthly_limit_usd *float64
+	concurrency          *int
+	addconcurrency       *int
+	rpm_limit            *int
+	addrpm_limit         *int
 	daily_usage_usd      *float64
 	adddaily_usage_usd   *float64
 	weekly_usage_usd     *float64
@@ -49050,6 +49054,146 @@ func (m *UserPlatformQuotaMutation) ResetMonthlyLimitUsd() {
 	delete(m.clearedFields, userplatformquota.FieldMonthlyLimitUsd)
 }
 
+// SetConcurrency sets the "concurrency" field.
+func (m *UserPlatformQuotaMutation) SetConcurrency(i int) {
+	m.concurrency = &i
+	m.addconcurrency = nil
+}
+
+// Concurrency returns the value of the "concurrency" field in the mutation.
+func (m *UserPlatformQuotaMutation) Concurrency() (r int, exists bool) {
+	v := m.concurrency
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConcurrency returns the old "concurrency" field's value of the UserPlatformQuota entity.
+// If the UserPlatformQuota object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserPlatformQuotaMutation) OldConcurrency(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConcurrency is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConcurrency requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConcurrency: %w", err)
+	}
+	return oldValue.Concurrency, nil
+}
+
+// AddConcurrency adds i to the "concurrency" field.
+func (m *UserPlatformQuotaMutation) AddConcurrency(i int) {
+	if m.addconcurrency != nil {
+		*m.addconcurrency += i
+	} else {
+		m.addconcurrency = &i
+	}
+}
+
+// AddedConcurrency returns the value that was added to the "concurrency" field in this mutation.
+func (m *UserPlatformQuotaMutation) AddedConcurrency() (r int, exists bool) {
+	v := m.addconcurrency
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearConcurrency clears the value of the "concurrency" field.
+func (m *UserPlatformQuotaMutation) ClearConcurrency() {
+	m.concurrency = nil
+	m.addconcurrency = nil
+	m.clearedFields[userplatformquota.FieldConcurrency] = struct{}{}
+}
+
+// ConcurrencyCleared returns if the "concurrency" field was cleared in this mutation.
+func (m *UserPlatformQuotaMutation) ConcurrencyCleared() bool {
+	_, ok := m.clearedFields[userplatformquota.FieldConcurrency]
+	return ok
+}
+
+// ResetConcurrency resets all changes to the "concurrency" field.
+func (m *UserPlatformQuotaMutation) ResetConcurrency() {
+	m.concurrency = nil
+	m.addconcurrency = nil
+	delete(m.clearedFields, userplatformquota.FieldConcurrency)
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (m *UserPlatformQuotaMutation) SetRpmLimit(i int) {
+	m.rpm_limit = &i
+	m.addrpm_limit = nil
+}
+
+// RpmLimit returns the value of the "rpm_limit" field in the mutation.
+func (m *UserPlatformQuotaMutation) RpmLimit() (r int, exists bool) {
+	v := m.rpm_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRpmLimit returns the old "rpm_limit" field's value of the UserPlatformQuota entity.
+// If the UserPlatformQuota object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserPlatformQuotaMutation) OldRpmLimit(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRpmLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRpmLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRpmLimit: %w", err)
+	}
+	return oldValue.RpmLimit, nil
+}
+
+// AddRpmLimit adds i to the "rpm_limit" field.
+func (m *UserPlatformQuotaMutation) AddRpmLimit(i int) {
+	if m.addrpm_limit != nil {
+		*m.addrpm_limit += i
+	} else {
+		m.addrpm_limit = &i
+	}
+}
+
+// AddedRpmLimit returns the value that was added to the "rpm_limit" field in this mutation.
+func (m *UserPlatformQuotaMutation) AddedRpmLimit() (r int, exists bool) {
+	v := m.addrpm_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearRpmLimit clears the value of the "rpm_limit" field.
+func (m *UserPlatformQuotaMutation) ClearRpmLimit() {
+	m.rpm_limit = nil
+	m.addrpm_limit = nil
+	m.clearedFields[userplatformquota.FieldRpmLimit] = struct{}{}
+}
+
+// RpmLimitCleared returns if the "rpm_limit" field was cleared in this mutation.
+func (m *UserPlatformQuotaMutation) RpmLimitCleared() bool {
+	_, ok := m.clearedFields[userplatformquota.FieldRpmLimit]
+	return ok
+}
+
+// ResetRpmLimit resets all changes to the "rpm_limit" field.
+func (m *UserPlatformQuotaMutation) ResetRpmLimit() {
+	m.rpm_limit = nil
+	m.addrpm_limit = nil
+	delete(m.clearedFields, userplatformquota.FieldRpmLimit)
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (m *UserPlatformQuotaMutation) SetDailyUsageUsd(f float64) {
 	m.daily_usage_usd = &f
@@ -49426,7 +49570,7 @@ func (m *UserPlatformQuotaMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserPlatformQuotaMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 16)
 	if m.created_at != nil {
 		fields = append(fields, userplatformquota.FieldCreatedAt)
 	}
@@ -49450,6 +49594,12 @@ func (m *UserPlatformQuotaMutation) Fields() []string {
 	}
 	if m.monthly_limit_usd != nil {
 		fields = append(fields, userplatformquota.FieldMonthlyLimitUsd)
+	}
+	if m.concurrency != nil {
+		fields = append(fields, userplatformquota.FieldConcurrency)
+	}
+	if m.rpm_limit != nil {
+		fields = append(fields, userplatformquota.FieldRpmLimit)
 	}
 	if m.daily_usage_usd != nil {
 		fields = append(fields, userplatformquota.FieldDailyUsageUsd)
@@ -49493,6 +49643,10 @@ func (m *UserPlatformQuotaMutation) Field(name string) (ent.Value, bool) {
 		return m.WeeklyLimitUsd()
 	case userplatformquota.FieldMonthlyLimitUsd:
 		return m.MonthlyLimitUsd()
+	case userplatformquota.FieldConcurrency:
+		return m.Concurrency()
+	case userplatformquota.FieldRpmLimit:
+		return m.RpmLimit()
 	case userplatformquota.FieldDailyUsageUsd:
 		return m.DailyUsageUsd()
 	case userplatformquota.FieldWeeklyUsageUsd:
@@ -49530,6 +49684,10 @@ func (m *UserPlatformQuotaMutation) OldField(ctx context.Context, name string) (
 		return m.OldWeeklyLimitUsd(ctx)
 	case userplatformquota.FieldMonthlyLimitUsd:
 		return m.OldMonthlyLimitUsd(ctx)
+	case userplatformquota.FieldConcurrency:
+		return m.OldConcurrency(ctx)
+	case userplatformquota.FieldRpmLimit:
+		return m.OldRpmLimit(ctx)
 	case userplatformquota.FieldDailyUsageUsd:
 		return m.OldDailyUsageUsd(ctx)
 	case userplatformquota.FieldWeeklyUsageUsd:
@@ -49607,6 +49765,20 @@ func (m *UserPlatformQuotaMutation) SetField(name string, value ent.Value) error
 		}
 		m.SetMonthlyLimitUsd(v)
 		return nil
+	case userplatformquota.FieldConcurrency:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConcurrency(v)
+		return nil
+	case userplatformquota.FieldRpmLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRpmLimit(v)
+		return nil
 	case userplatformquota.FieldDailyUsageUsd:
 		v, ok := value.(float64)
 		if !ok {
@@ -49666,6 +49838,12 @@ func (m *UserPlatformQuotaMutation) AddedFields() []string {
 	if m.addmonthly_limit_usd != nil {
 		fields = append(fields, userplatformquota.FieldMonthlyLimitUsd)
 	}
+	if m.addconcurrency != nil {
+		fields = append(fields, userplatformquota.FieldConcurrency)
+	}
+	if m.addrpm_limit != nil {
+		fields = append(fields, userplatformquota.FieldRpmLimit)
+	}
 	if m.adddaily_usage_usd != nil {
 		fields = append(fields, userplatformquota.FieldDailyUsageUsd)
 	}
@@ -49689,6 +49867,10 @@ func (m *UserPlatformQuotaMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedWeeklyLimitUsd()
 	case userplatformquota.FieldMonthlyLimitUsd:
 		return m.AddedMonthlyLimitUsd()
+	case userplatformquota.FieldConcurrency:
+		return m.AddedConcurrency()
+	case userplatformquota.FieldRpmLimit:
+		return m.AddedRpmLimit()
 	case userplatformquota.FieldDailyUsageUsd:
 		return m.AddedDailyUsageUsd()
 	case userplatformquota.FieldWeeklyUsageUsd:
@@ -49724,6 +49906,20 @@ func (m *UserPlatformQuotaMutation) AddField(name string, value ent.Value) error
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddMonthlyLimitUsd(v)
+		return nil
+	case userplatformquota.FieldConcurrency:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddConcurrency(v)
+		return nil
+	case userplatformquota.FieldRpmLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRpmLimit(v)
 		return nil
 	case userplatformquota.FieldDailyUsageUsd:
 		v, ok := value.(float64)
@@ -49766,6 +49962,12 @@ func (m *UserPlatformQuotaMutation) ClearedFields() []string {
 	if m.FieldCleared(userplatformquota.FieldMonthlyLimitUsd) {
 		fields = append(fields, userplatformquota.FieldMonthlyLimitUsd)
 	}
+	if m.FieldCleared(userplatformquota.FieldConcurrency) {
+		fields = append(fields, userplatformquota.FieldConcurrency)
+	}
+	if m.FieldCleared(userplatformquota.FieldRpmLimit) {
+		fields = append(fields, userplatformquota.FieldRpmLimit)
+	}
 	if m.FieldCleared(userplatformquota.FieldDailyWindowStart) {
 		fields = append(fields, userplatformquota.FieldDailyWindowStart)
 	}
@@ -49800,6 +50002,12 @@ func (m *UserPlatformQuotaMutation) ClearField(name string) error {
 		return nil
 	case userplatformquota.FieldMonthlyLimitUsd:
 		m.ClearMonthlyLimitUsd()
+		return nil
+	case userplatformquota.FieldConcurrency:
+		m.ClearConcurrency()
+		return nil
+	case userplatformquota.FieldRpmLimit:
+		m.ClearRpmLimit()
 		return nil
 	case userplatformquota.FieldDailyWindowStart:
 		m.ClearDailyWindowStart()
@@ -49841,6 +50049,12 @@ func (m *UserPlatformQuotaMutation) ResetField(name string) error {
 		return nil
 	case userplatformquota.FieldMonthlyLimitUsd:
 		m.ResetMonthlyLimitUsd()
+		return nil
+	case userplatformquota.FieldConcurrency:
+		m.ResetConcurrency()
+		return nil
+	case userplatformquota.FieldRpmLimit:
+		m.ResetRpmLimit()
 		return nil
 	case userplatformquota.FieldDailyUsageUsd:
 		m.ResetDailyUsageUsd()

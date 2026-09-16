@@ -69,19 +69,19 @@ func (c *stubConcurrencyCacheForTest) DecrementAccountWaitCount(_ context.Contex
 func (c *stubConcurrencyCacheForTest) GetAccountWaitingCount(_ context.Context, _ int64) (int, error) {
 	return c.waitCount, c.waitCountErr
 }
-func (c *stubConcurrencyCacheForTest) AcquireUserSlot(_ context.Context, _ int64, _ int, _ string) (bool, error) {
+func (c *stubConcurrencyCacheForTest) AcquireUserSlot(_ context.Context, _ int64, _ string, _ int, _ string) (bool, error) {
 	return c.acquireResult, c.acquireErr
 }
-func (c *stubConcurrencyCacheForTest) ReleaseUserSlot(_ context.Context, _ int64, _ string) error {
+func (c *stubConcurrencyCacheForTest) ReleaseUserSlot(_ context.Context, _ int64, _ string, _ string) error {
 	return c.releaseErr
 }
-func (c *stubConcurrencyCacheForTest) GetUserConcurrency(_ context.Context, _ int64) (int, error) {
+func (c *stubConcurrencyCacheForTest) GetUserConcurrency(_ context.Context, _ int64, _ string) (int, error) {
 	return c.concurrency, c.concurrencyErr
 }
-func (c *stubConcurrencyCacheForTest) IncrementWaitCount(_ context.Context, _ int64, _ int) (bool, error) {
+func (c *stubConcurrencyCacheForTest) IncrementWaitCount(_ context.Context, _ int64, _ string, _ int) (bool, error) {
 	return c.waitAllowed, c.waitErr
 }
-func (c *stubConcurrencyCacheForTest) DecrementWaitCount(_ context.Context, _ int64) error {
+func (c *stubConcurrencyCacheForTest) DecrementWaitCount(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 func (c *stubConcurrencyCacheForTest) GetAccountsLoadBatch(_ context.Context, _ []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
@@ -183,7 +183,7 @@ func TestAcquireUserSlot_IndependentFromAccount(t *testing.T) {
 	svc := NewConcurrencyService(cache)
 
 	// 用户槽位获取应独立于账户槽位
-	result, err := svc.AcquireUserSlot(context.Background(), 100, 3)
+	result, err := svc.AcquireUserSlot(context.Background(), 100, "", 3)
 	require.NoError(t, err)
 	require.True(t, result.Acquired)
 	require.NotNil(t, result.ReleaseFunc)
@@ -192,7 +192,7 @@ func TestAcquireUserSlot_IndependentFromAccount(t *testing.T) {
 func TestAcquireUserSlot_UnlimitedConcurrency(t *testing.T) {
 	svc := NewConcurrencyService(&stubConcurrencyCacheForTest{})
 
-	result, err := svc.AcquireUserSlot(context.Background(), 1, 0)
+	result, err := svc.AcquireUserSlot(context.Background(), 1, "", 0)
 	require.NoError(t, err)
 	require.True(t, result.Acquired)
 }
@@ -286,7 +286,7 @@ func TestIncrementWaitCount_Success(t *testing.T) {
 	cache := &stubConcurrencyCacheForTest{waitAllowed: true}
 	svc := NewConcurrencyService(cache)
 
-	allowed, err := svc.IncrementWaitCount(context.Background(), 1, 25)
+	allowed, err := svc.IncrementWaitCount(context.Background(), 1, "", 25)
 	require.NoError(t, err)
 	require.True(t, allowed)
 }
@@ -295,7 +295,7 @@ func TestIncrementWaitCount_QueueFull(t *testing.T) {
 	cache := &stubConcurrencyCacheForTest{waitAllowed: false}
 	svc := NewConcurrencyService(cache)
 
-	allowed, err := svc.IncrementWaitCount(context.Background(), 1, 25)
+	allowed, err := svc.IncrementWaitCount(context.Background(), 1, "", 25)
 	require.NoError(t, err)
 	require.False(t, allowed)
 }
@@ -305,7 +305,7 @@ func TestIncrementWaitCount_FailOpen(t *testing.T) {
 	cache := &stubConcurrencyCacheForTest{waitErr: errors.New("redis timeout")}
 	svc := NewConcurrencyService(cache)
 
-	allowed, err := svc.IncrementWaitCount(context.Background(), 1, 25)
+	allowed, err := svc.IncrementWaitCount(context.Background(), 1, "", 25)
 	require.NoError(t, err, "Redis 错误不应传播")
 	require.True(t, allowed, "Redis 错误时应 fail-open")
 }
@@ -313,7 +313,7 @@ func TestIncrementWaitCount_FailOpen(t *testing.T) {
 func TestIncrementWaitCount_NilCache(t *testing.T) {
 	svc := &ConcurrencyService{cache: nil}
 
-	allowed, err := svc.IncrementWaitCount(context.Background(), 1, 25)
+	allowed, err := svc.IncrementWaitCount(context.Background(), 1, "", 25)
 	require.NoError(t, err)
 	require.True(t, allowed, "nil cache 应 fail-open")
 }

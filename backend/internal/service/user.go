@@ -60,8 +60,48 @@ type User struct {
 	// 避免每请求查 DB。字段不持久化到数据库。
 	UserGroupRPMOverride *int
 
+	// PlatformLimits 用户 × 平台 专属并发 / RPM 上限（来自 user_platform_quotas，经鉴权
+	// 缓存快照带入，不持久化在 users 表）。key = 平台名（anthropic/openai/…）。
+	// 只收录至少设了一项的平台；某平台缺失或字段为 nil = 沿用全局值（Concurrency / RPMLimit）。
+	// 语义：专属值**替代**全局值，不叠加；0 = 该平台不限。
+	PlatformLimits map[string]UserPlatformLimit
+
 	APIKeys       []APIKey
 	Subscriptions []UserSubscription
+}
+
+// UserPlatformLimit 某平台的专属并发 / RPM 上限。nil 字段 = 沿用全局值；0 = 不限；>0 = 专属上限。
+type UserPlatformLimit struct {
+	Concurrency *int
+	RPMLimit    *int
+}
+
+// EffectiveConcurrency 返回 platform 上生效的并发上限，以及是否为平台专属值。
+// 专属值替代全局值（不叠加）；platform 为空或未设专属值时回退到 u.Concurrency（scoped=false）。
+func (u *User) EffectiveConcurrency(platform string) (limit int, scoped bool) {
+	if u == nil {
+		return 0, false
+	}
+	if platform != "" {
+		if l, ok := u.PlatformLimits[platform]; ok && l.Concurrency != nil {
+			return *l.Concurrency, true
+		}
+	}
+	return u.Concurrency, false
+}
+
+// EffectiveRPMLimit 返回 platform 上生效的用户级 RPM 上限，以及是否为平台专属值。
+// 语义同 EffectiveConcurrency。
+func (u *User) EffectiveRPMLimit(platform string) (limit int, scoped bool) {
+	if u == nil {
+		return 0, false
+	}
+	if platform != "" {
+		if l, ok := u.PlatformLimits[platform]; ok && l.RPMLimit != nil {
+			return *l.RPMLimit, true
+		}
+	}
+	return u.RPMLimit, false
 }
 
 func (u *User) IsAdmin() bool {

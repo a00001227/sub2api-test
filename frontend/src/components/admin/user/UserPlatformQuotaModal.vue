@@ -135,6 +135,9 @@ interface QuotaRow {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
+  // 平台专属并发 / RPM 在「编辑用户」里设置；这里只原样带回（PUT 是全量替换，不带会被清掉）
+  concurrency: number | null
+  rpm_limit: number | null
   daily_usage_usd: number
   weekly_usage_usd: number
   monthly_usage_usd: number
@@ -155,6 +158,8 @@ function emptyRow(p: PlatformQuotaPlatform): QuotaRow {
     daily_limit_usd: null,
     weekly_limit_usd: null,
     monthly_limit_usd: null,
+    concurrency: null,
+    rpm_limit: null,
     daily_usage_usd: 0,
     weekly_usage_usd: 0,
     monthly_usage_usd: 0,
@@ -172,6 +177,8 @@ function normalize(items: PlatformQuotaItem[]): QuotaRow[] {
       daily_limit_usd: it.daily_limit_usd ?? null,
       weekly_limit_usd: it.weekly_limit_usd ?? null,
       monthly_limit_usd: it.monthly_limit_usd ?? null,
+      concurrency: it.concurrency ?? null,
+      rpm_limit: it.rpm_limit ?? null,
       daily_usage_usd: it.daily_usage_usd ?? 0,
       weekly_usage_usd: it.weekly_usage_usd ?? 0,
       monthly_usage_usd: it.monthly_usage_usd ?? 0,
@@ -241,6 +248,8 @@ async function onSave() {
       daily_limit_usd: normalizeLimit(r.daily_limit_usd),
       weekly_limit_usd: normalizeLimit(r.weekly_limit_usd),
       monthly_limit_usd: normalizeLimit(r.monthly_limit_usd),
+      concurrency: r.concurrency,
+      rpm_limit: r.rpm_limit,
     }))
     await adminAPI.users.updatePlatformQuotas(props.user.id, payload)
     appStore.showSuccess(t('admin.users.platformQuota.updateSuccess'))

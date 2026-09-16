@@ -2041,23 +2041,23 @@ func (m *mockConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accou
 	return 0, nil
 }
 
-func (m *mockConcurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+func (m *mockConcurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, platform string, maxConcurrency int, requestID string) (bool, error) {
 	return true, nil
 }
 
-func (m *mockConcurrencyCache) ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error {
+func (m *mockConcurrencyCache) ReleaseUserSlot(ctx context.Context, userID int64, platform string, requestID string) error {
 	return nil
 }
 
-func (m *mockConcurrencyCache) GetUserConcurrency(ctx context.Context, userID int64) (int, error) {
+func (m *mockConcurrencyCache) GetUserConcurrency(ctx context.Context, userID int64, platform string) (int, error) {
 	return 0, nil
 }
 
-func (m *mockConcurrencyCache) IncrementWaitCount(ctx context.Context, userID int64, maxWait int) (bool, error) {
+func (m *mockConcurrencyCache) IncrementWaitCount(ctx context.Context, userID int64, platform string, maxWait int) (bool, error) {
 	return true, nil
 }
 
-func (m *mockConcurrencyCache) DecrementWaitCount(ctx context.Context, userID int64) error {
+func (m *mockConcurrencyCache) DecrementWaitCount(ctx context.Context, userID int64, platform string) error {
 	return nil
 }
 

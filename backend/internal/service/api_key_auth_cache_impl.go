@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 16 // v16: include user.lane (workload tier / 号池 confinement)
+const apiKeyAuthSnapshotVersion = 17 // v17: include user.platform_limits (per-platform concurrency / RPM)
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -250,6 +250,21 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		}
 		// 查询失败或无 override 时留 nil，checkRPM 会回退到 DB 查询
 	}
+	// 填充用户 × 平台 专属并发 / RPM 上限 —— 同样只在 snapshot 构建时查一次 DB。
+	// 只收录至少设了一项的平台；查询失败 fail-open（视为无专属值，沿用全局）。
+	if s.userPlatformQuotaRepo != nil {
+		if records, err := s.userPlatformQuotaRepo.ListByUser(ctx, apiKey.UserID); err == nil {
+			for _, r := range records {
+				if r.Concurrency == nil && r.RPMLimit == nil {
+					continue
+				}
+				if snapshot.User.PlatformLimits == nil {
+					snapshot.User.PlatformLimits = make(map[string]UserPlatformLimit, len(records))
+				}
+				snapshot.User.PlatformLimits[r.Platform] = UserPlatformLimit{Concurrency: r.Concurrency, RPMLimit: r.RPMLimit}
+			}
+		}
+	}
 	if apiKey.Group != nil {
 		snapshot.Group = &APIKeyAuthGroupSnapshot{
 			ID:                              apiKey.Group.ID,
@@ -326,6 +341,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			TotalRecharged:             snapshot.User.TotalRecharged,
 			RPMLimit:                   snapshot.User.RPMLimit,
 			UserGroupRPMOverride:       snapshot.User.UserGroupRPMOverride,
+			PlatformLimits:             snapshot.User.PlatformLimits,
 		},
 	}
 	if snapshot.Group != nil {

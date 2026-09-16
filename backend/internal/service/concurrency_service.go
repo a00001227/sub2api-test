@@ -32,14 +32,16 @@ type ConcurrencyCache interface {
 	GetAccountWaitingCount(ctx context.Context, accountID int64) (int, error)
 
 	// 用户槽位管理
-	// 键格式: concurrency:user:{userID}（有序集合，成员为 requestID）
-	AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error)
-	ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error
-	GetUserConcurrency(ctx context.Context, userID int64) (int, error)
+	// 键格式: concurrency:user:{userID}（有序集合，成员为 requestID）；
+	// platform 非空时为该用户在该平台的专属槽位 concurrency:user:{userID}:{platform}
+	// （用户设了平台专属并发时使用），空串 = 全平台共享槽位。
+	AcquireUserSlot(ctx context.Context, userID int64, platform string, maxConcurrency int, requestID string) (bool, error)
+	ReleaseUserSlot(ctx context.Context, userID int64, platform string, requestID string) error
+	GetUserConcurrency(ctx context.Context, userID int64, platform string) (int, error)
 
-	// 等待队列计数（只在首次创建时设置 TTL）
-	IncrementWaitCount(ctx context.Context, userID int64, maxWait int) (bool, error)
-	DecrementWaitCount(ctx context.Context, userID int64) error
+	// 等待队列计数（只在首次创建时设置 TTL）；platform 语义同上（concurrency:wait:{userID}[:{platform}]）
+	IncrementWaitCount(ctx context.Context, userID int64, platform string, maxWait int) (bool, error)
+	DecrementWaitCount(ctx context.Context, userID int64, platform string) error
 
 	// 批量负载查询（只读）
 	GetAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error)
@@ -201,7 +203,7 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 // AcquireUserSlot attempts to acquire a concurrency slot for a user.
 // If the user is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
-func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int) (*AcquireResult, error) {
+func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, platform string, maxConcurrency int) (*AcquireResult, error) {
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
 		return &AcquireResult{
@@ -213,7 +215,7 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 	// Generate unique request ID for this slot
 	requestID := generateRequestID()
 
-	acquired, err := s.cache.AcquireUserSlot(ctx, userID, maxConcurrency, requestID)
+	acquired, err := s.cache.AcquireUserSlot(ctx, userID, platform, maxConcurrency, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +226,7 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 			ReleaseFunc: func() {
 				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				if err := s.cache.ReleaseUserSlot(bgCtx, userID, requestID); err != nil {
+				if err := s.cache.ReleaseUserSlot(bgCtx, userID, platform, requestID); err != nil {
 					logger.LegacyPrintf("service.concurrency", "Warning: failed to release user slot for %d (req=%s): %v", userID, requestID, err)
 				}
 			},
@@ -244,13 +246,13 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 // IncrementWaitCount attempts to increment the wait queue counter for a user.
 // Returns true if successful, false if the wait queue is full.
 // maxWait should be user.Concurrency + defaultExtraWaitSlots
-func (s *ConcurrencyService) IncrementWaitCount(ctx context.Context, userID int64, maxWait int) (bool, error) {
+func (s *ConcurrencyService) IncrementWaitCount(ctx context.Context, userID int64, platform string, maxWait int) (bool, error) {
 	if s.cache == nil {
 		// Redis not available, allow request
 		return true, nil
 	}
 
-	result, err := s.cache.IncrementWaitCount(ctx, userID, maxWait)
+	result, err := s.cache.IncrementWaitCount(ctx, userID, platform, maxWait)
 	if err != nil {
 		// On error, allow the request to proceed (fail open)
 		logger.LegacyPrintf("service.concurrency", "Warning: increment wait count failed for user %d: %v", userID, err)
@@ -261,7 +263,7 @@ func (s *ConcurrencyService) IncrementWaitCount(ctx context.Context, userID int6
 
 // DecrementWaitCount decrements the wait queue counter for a user.
 // Should be called when a request completes or exits the wait queue.
-func (s *ConcurrencyService) DecrementWaitCount(ctx context.Context, userID int64) {
+func (s *ConcurrencyService) DecrementWaitCount(ctx context.Context, userID int64, platform string) {
 	if s.cache == nil {
 		return
 	}
@@ -270,7 +272,7 @@ func (s *ConcurrencyService) DecrementWaitCount(ctx context.Context, userID int6
 	bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := s.cache.DecrementWaitCount(bgCtx, userID); err != nil {
+	if err := s.cache.DecrementWaitCount(bgCtx, userID, platform); err != nil {
 		logger.LegacyPrintf("service.concurrency", "Warning: decrement wait count failed for user %d: %v", userID, err)
 	}
 }

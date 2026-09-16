@@ -3088,21 +3088,38 @@
                     {{ t("admin.settings.defaults.defaultBalanceHint") }}
                   </p>
                 </div>
-                <div>
+                <!-- 新用户默认并发 / RPM：按平台（Claude / GPT）分别设置，注册时直接写入用户的平台记录；
+                     底层的 default_concurrency / default_user_rpm_limit 只给未暴露的平台兜底，不再展示 -->
+                <div class="md:col-span-2">
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
-                    {{ t("admin.settings.defaults.defaultConcurrency") }}
+                    {{ t("admin.settings.defaults.platformLimits.title") }}
                   </label>
-                  <input
-                    v-model.number="form.default_concurrency"
-                    type="number"
-                    min="1"
-                    class="input"
-                    placeholder="1"
-                  />
+                  <div class="grid max-w-md grid-cols-[7rem_1fr_1fr] items-center gap-x-3 gap-y-2">
+                    <span></span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.defaults.platformLimits.concurrency") }}</span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.defaults.platformLimits.rpm") }}</span>
+                    <template v-for="p in PLATFORM_LIMIT_PLATFORMS" :key="p">
+                      <span class="text-sm text-gray-700 dark:text-gray-300">{{ t(`admin.settings.defaults.platformLimits.${p}`) }}</span>
+                      <input
+                        v-model.number="form.default_platform_quotas[p]!.concurrency"
+                        type="number"
+                        min="0"
+                        step="1"
+                        class="input"
+                      />
+                      <input
+                        v-model.number="form.default_platform_quotas[p]!.rpm"
+                        type="number"
+                        min="0"
+                        step="1"
+                        class="input"
+                      />
+                    </template>
+                  </div>
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.defaults.defaultConcurrencyHint") }}
+                    {{ t("admin.settings.defaults.platformLimits.hint") }}
                   </p>
                 </div>
                 <div>
@@ -3120,24 +3137,6 @@
                   />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     {{ t("admin.settings.defaults.proxyDefaultMaxBindingsHint") }}
-                  </p>
-                </div>
-                <div>
-                  <label
-                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{ t("admin.settings.defaults.defaultUserRpmLimit") }}
-                  </label>
-                  <input
-                    v-model.number="form.default_user_rpm_limit"
-                    type="number"
-                    min="0"
-                    step="1"
-                    class="input"
-                    placeholder="0"
-                  />
-                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.defaults.defaultUserRpmLimitHint") }}
                   </p>
                 </div>
               </div>
@@ -7087,6 +7086,21 @@ import {
   parseRegistrationEmailSuffixWhitelistInput,
 } from "@/utils/registrationEmailPolicy";
 
+// 新用户默认并发 / RPM 按平台设置：只开放 Claude(anthropic) / GPT(openai)。
+const PLATFORM_LIMIT_PLATFORMS = ["anthropic", "openai"] as const;
+
+// 把 Claude / GPT 两行补成确定的数字：后端没值时用底层的全局默认兜底，保证新用户注册时
+// 两个平台都拿到明确的专属并发 / RPM（界面上不再有"留空 = 沿用"这一层概念）。
+function prefillPlatformLimits(map: DefaultPlatformQuotasMap, concurrency: number, rpm: number): DefaultPlatformQuotasMap {
+  for (const p of PLATFORM_LIMIT_PLATFORMS) {
+    const row = map[p];
+    if (!row) continue;
+    if (typeof row.concurrency !== "number" || !Number.isFinite(row.concurrency)) row.concurrency = concurrency;
+    if (typeof row.rpm !== "number" || !Number.isFinite(row.rpm)) row.rpm = rpm;
+  }
+  return map;
+}
+
 const { t, locale } = useI18n();
 const appStore = useAppStore();
 const adminSettingsStore = useAdminSettingsStore();
@@ -8562,7 +8576,11 @@ async function loadSettings() {
           }))
         : defaultLoginAgreementDocuments();
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(settings));
-    form.default_platform_quotas = normalizePlatformQuotasMap(settings.default_platform_quotas);
+    form.default_platform_quotas = prefillPlatformLimits(
+      normalizePlatformQuotasMap(settings.default_platform_quotas),
+      settings.default_concurrency,
+      settings.default_user_rpm_limit,
+    );
     form.backend_mode_enabled = settings.backend_mode_enabled;
     form.default_subscriptions = normalizeDefaultSubscriptionSettings(
       settings.default_subscriptions,
@@ -9138,7 +9156,11 @@ async function saveSettings() {
       };
     }
 
-    payload.default_platform_quotas = sanitizePlatformQuotasMap(form.default_platform_quotas);
+    payload.default_platform_quotas = prefillPlatformLimits(
+      sanitizePlatformQuotasMap(form.default_platform_quotas),
+      form.default_concurrency,
+      form.default_user_rpm_limit,
+    );
     appendAuthSourceDefaultsToUpdateRequest(payload, authSourceDefaults);
 
     const updated = await adminAPI.settings.updateSettings(payload);
@@ -9149,7 +9171,11 @@ async function saveSettings() {
       }
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
-    form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
+    form.default_platform_quotas = prefillPlatformLimits(
+      normalizePlatformQuotasMap(updated.default_platform_quotas),
+      updated.default_concurrency,
+      updated.default_user_rpm_limit,
+    );
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(
         updated.registration_email_suffix_whitelist,

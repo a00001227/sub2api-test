@@ -1867,7 +1867,17 @@ export default {
       form: {
         rpmLimit: 'Requests Per Minute (RPM)',
         rpmLimitPlaceholder: '0 = unlimited',
-        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.'
+        rpmLimitHint: 'Max requests per minute for this user (enforced together with the group RPM); 0 = unlimited',
+        platformLimits: {
+          title: 'Concurrency / RPM (per platform)',
+          hint: 'Each platform is counted independently; 0 = unlimited on that platform. A group RPM, if set, applies as well.',
+          concurrency: 'Concurrency',
+          rpm: 'RPM (requests per minute)',
+          anthropic: 'Claude',
+          openai: 'GPT',
+          invalid: 'Concurrency / RPM must be integers ≥ 0',
+          loadFailed: 'Failed to load this user\'s platform settings; concurrency / RPM will not be changed this time',
+        }
       },
       columns: {
         user: 'User',
@@ -5879,6 +5889,14 @@ export default {
           'Rebate percentage credited to inviter after recharge (0-100%, e.g. 10 means 10%)',
         defaultConcurrency: 'Default Concurrency',
         defaultConcurrencyHint: 'Maximum concurrent requests for new users',
+        platformLimits: {
+          title: 'Default concurrency / RPM (per platform)',
+          hint: 'Written per platform when a new user signs up; Claude and GPT are counted independently. 0 = unlimited on that platform. Existing users are unaffected — edit them individually under "Edit user".',
+          concurrency: 'Concurrency',
+          rpm: 'RPM (requests per minute)',
+          anthropic: 'Claude',
+          openai: 'GPT',
+        },
         proxyDefaultMaxBindings: 'Proxy default max bindings',
         proxyDefaultMaxBindingsHint: 'Default accounts a new proxy accepts when unspecified: 1 = exclusive, N = shared, 0 = unlimited',
         defaultUserRpmLimit: 'Default User RPM Limit',

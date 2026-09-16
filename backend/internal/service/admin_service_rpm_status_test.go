@@ -68,6 +68,14 @@ func (s *rpmStatusCacheStub) GetUserRPM(context.Context, int64) (int, error) {
 	return s.userUsed, nil
 }
 
+func (s *rpmStatusCacheStub) IncrementUserPlatformRPM(context.Context, int64, string) (int, error) {
+	return 0, nil
+}
+
+func (s *rpmStatusCacheStub) GetUserPlatformRPM(context.Context, int64, string) (int, error) {
+	return 0, nil
+}
+
 func TestAdminService_GetUserRPMStatus_AggregatesUserAndGroupLimits(t *testing.T) {
 	groupOneID := int64(1)
 	groupTwoID := int64(2)

@@ -26,6 +26,9 @@ func LazyZeroQuotaForResponse(r service.UserPlatformQuotaRecord, now time.Time, 
 		"monthly_usage_usd":        monthly.usage,
 		"monthly_limit_usd":        monthly.limit,
 		"monthly_window_resets_at": monthly.resetsAt,
+		// 平台专属并发 / RPM：null = 沿用用户全局值；0 = 不限；>0 = 专属上限
+		"concurrency": r.Concurrency,
+		"rpm_limit":   r.RPMLimit,
 	}
 	if includeWindowStart {
 		out["daily_window_start"] = daily.windowStart

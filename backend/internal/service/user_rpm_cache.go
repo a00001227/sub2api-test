@@ -22,4 +22,11 @@ type UserRPMCache interface {
 
 	// GetUserRPM 获取用户当前分钟已用 RPM（只读，不递增）。
 	GetUserRPM(ctx context.Context, userID int64) (count int, err error)
+
+	// IncrementUserPlatformRPM 原子递增用户在某平台的分钟计数并返回最新值。
+	// 用于用户设了平台专属 RPM（user_platform_quotas.rpm_limit）的分支，键 rpm:u:{uid}:{platform}:{minute}。
+	IncrementUserPlatformRPM(ctx context.Context, userID int64, platform string) (count int, err error)
+
+	// GetUserPlatformRPM 获取用户在某平台当前分钟已用 RPM（只读，不递增）。
+	GetUserPlatformRPM(ctx context.Context, userID int64, platform string) (count int, err error)
 }

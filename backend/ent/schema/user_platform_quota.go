@@ -65,6 +65,19 @@ func (UserPlatformQuota) Fields() []ent.Field {
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
 
+		// 平台专属并发 / RPM 上限（与 USD 限额同表同键 (user_id, platform)）：
+		//   nil / not set → 沿用用户全局值（users.concurrency / users.rpm_limit）
+		//   0            → 该平台不限
+		//   > 0          → 该平台专属上限（替代全局值，不叠加）
+		// 生效点：并发 = 网关用户槽位（键 concurrency:user:{uid}:{platform}）；
+		// RPM = billing_cache_service.checkRPM 用户级（键 rpm:u:{uid}:{platform}:{minute}）。
+		field.Int("concurrency").
+			Optional().
+			Nillable(),
+		field.Int("rpm_limit").
+			Optional().
+			Nillable(),
+
 		// 当前窗口已用量（USD，preflight 时与 limit 比较）
 		field.Float("daily_usage_usd").
 			Default(0).

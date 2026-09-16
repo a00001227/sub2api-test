@@ -53,27 +53,27 @@ func (m *concurrencyCacheMock) GetAccountWaitingCount(ctx context.Context, accou
 	return 0, nil
 }
 
-func (m *concurrencyCacheMock) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+func (m *concurrencyCacheMock) AcquireUserSlot(ctx context.Context, userID int64, platform string, maxConcurrency int, requestID string) (bool, error) {
 	if m.acquireUserSlotFn != nil {
 		return m.acquireUserSlotFn(ctx, userID, maxConcurrency, requestID)
 	}
 	return false, nil
 }
 
-func (m *concurrencyCacheMock) ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error {
+func (m *concurrencyCacheMock) ReleaseUserSlot(ctx context.Context, userID int64, platform string, requestID string) error {
 	atomic.AddInt32(&m.releaseUserCalled, 1)
 	return nil
 }
 
-func (m *concurrencyCacheMock) GetUserConcurrency(ctx context.Context, userID int64) (int, error) {
+func (m *concurrencyCacheMock) GetUserConcurrency(ctx context.Context, userID int64, platform string) (int, error) {
 	return 0, nil
 }
 
-func (m *concurrencyCacheMock) IncrementWaitCount(ctx context.Context, userID int64, maxWait int) (bool, error) {
+func (m *concurrencyCacheMock) IncrementWaitCount(ctx context.Context, userID int64, platform string, maxWait int) (bool, error) {
 	return true, nil
 }
 
-func (m *concurrencyCacheMock) DecrementWaitCount(ctx context.Context, userID int64) error {
+func (m *concurrencyCacheMock) DecrementWaitCount(ctx context.Context, userID int64, platform string) error {
 	return nil
 }
 
@@ -101,7 +101,7 @@ func TestConcurrencyHelper_TryAcquireUserSlot(t *testing.T) {
 	}
 	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second)
 
-	release, acquired, err := helper.TryAcquireUserSlot(context.Background(), 101, 2)
+	release, acquired, err := helper.TryAcquireUserSlot(context.Background(), 101, "", 2)
 	require.NoError(t, err)
 	require.True(t, acquired)
 	require.NotNil(t, release)

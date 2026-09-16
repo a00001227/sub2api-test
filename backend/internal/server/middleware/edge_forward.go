@@ -49,6 +49,14 @@ type ModelAllowFunc func(ctx context.Context, model string) bool
 // 路径一致)。nil = 不接线(默认 no-op,不限并发)。
 type EdgeUserSlotFunc func(c *gin.Context, isStream bool) (release func(), ok bool)
 
+// EdgeRPMCheckFunc 在转发到 cell 之前执行「消费者 RPM 限流」(override → group → user/平台)。
+//
+// 与 EdgeUserSlotFunc 同因:RPM 的唯一检查点在 handler 的 CheckBillingEligibility 里,中央命中
+// 转发即 c.Abort() 短路 handler,cell 侧对转发流量又是免检的可信身份——不在这里补,edge 模式下
+// 用户级/分组级/覆盖级 RPM 三层全部失效。返回 true = 放行;false = 已按客户端协议写好 429
+// (含 Retry-After),调用方直接 c.Abort() 收尾。nil = 不接线(不限 RPM)。
+type EdgeRPMCheckFunc func(c *gin.Context) bool
+
 // EdgeForward 是中央网关“执行→转发”中间件。
 //
 // 开启且请求组 slug 命中配置列表时,把该 /v1 请求手动流式反向代理到边缘 cell(不带
@@ -62,7 +70,7 @@ type EdgeUserSlotFunc func(c *gin.Context, isStream bool) (release func(), ok bo
 //
 // 用手写流式代理而非 httputil.ReverseProxy:后者会触碰 gin 的 CloseNotify(在某些
 // ResponseWriter / h2c 下会 panic),且手写更利于逐块 flush SSE。
-func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc) gin.HandlerFunc {
+func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc, checkRPM EdgeRPMCheckFunc) gin.HandlerFunc {
 	noop := func(c *gin.Context) { c.Next() }
 	if !cfg.Enabled || len(cfg.Groups) == 0 {
 		return noop
@@ -132,7 +140,7 @@ func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelA
 		slog.Info("edge_forward: 组→工作道路由启用", "group_lanes", groupLanes)
 	}
 
-	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture, acquireUserSlot)
+	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture, acquireUserSlot, checkRPM)
 }
 
 // edgeCellDialTimeout 是 central→cell 转发的连接建立(dial)超时。内部机房跳,健康 cell
@@ -166,7 +174,7 @@ func newEdgeCellTransport() *http.Transport {
 
 // newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
 // 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
-func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc) gin.HandlerFunc {
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc, checkRPM EdgeRPMCheckFunc) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	// 但把 central→cell 的 dial(连接建立)超时从 DefaultTransport 的 30s 收紧到
 	// edgeCellDialTimeout:cell 池每 15s 才从 Portal 刷新一次 routable,存在「cell 刚死、
@@ -305,6 +313,14 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			if release != nil {
 				defer release()
 			}
+		}
+
+		// 消费者 RPM 限流(中央职责,与并发同因):handler 里的 CheckBillingEligibility 被
+		// c.Abort() 短路,cell 侧对转发流量免检,这里补上 RPM 级联(override → group → user/平台)。
+		// 放在持槽之后,与本地 handler「先占槽、再校验」的顺序一致;超限时回调已写好 429。
+		if checkRPM != nil && !checkRPM(c) {
+			c.Abort()
+			return
 		}
 
 		// 会话亲和(P3-3c):进行中会话固定回同一 cell —— sub2api 的号级粘性只有在

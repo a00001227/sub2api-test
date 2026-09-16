@@ -324,6 +324,9 @@ export interface PlatformQuotaItem {
   daily_window_resets_at?: string | null
   weekly_window_resets_at?: string | null
   monthly_window_resets_at?: string | null
+  // 平台专属并发 / RPM：null = 沿用用户全局值；0 = 不限；>0 = 专属上限（替代全局值）
+  concurrency?: number | null
+  rpm_limit?: number | null
 }
 
 export interface PlatformQuotaUpdateItem {
@@ -331,6 +334,8 @@ export interface PlatformQuotaUpdateItem {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
+  concurrency?: number | null
+  rpm_limit?: number | null
 }
 
 export interface PlatformQuotasResponse {

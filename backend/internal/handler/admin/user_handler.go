@@ -29,6 +29,7 @@ type UserHandler struct {
 	concurrencyService    *service.ConcurrencyService
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository // T13 admin quota view
 	billingCache          service.BillingCache                // T17/T18 缓存失效（PUT/POST 路径）
+	authCacheInvalidator  service.APIKeyAuthCacheInvalidator  // 平台并发/RPM 改动后失效鉴权快照
 }
 
 // NewUserHandler creates a new admin user handler
@@ -37,12 +38,14 @@ func NewUserHandler(
 	concurrencyService *service.ConcurrencyService,
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository,
 	billingCache service.BillingCache,
+	authCacheInvalidator service.APIKeyAuthCacheInvalidator,
 ) *UserHandler {
 	return &UserHandler{
 		adminService:          adminService,
 		concurrencyService:    concurrencyService,
 		userPlatformQuotaRepo: userPlatformQuotaRepo,
 		billingCache:          billingCache,
+		authCacheInvalidator:  authCacheInvalidator,
 	}
 }
 
@@ -604,11 +607,14 @@ type UpdateUserPlatformQuotasRequest struct {
 }
 
 // PlatformQuotaInput 单平台限额输入；limit 字段为 nil 表示不限制。
+// concurrency / rpm_limit 为平台专属并发 / RPM：nil = 沿用用户全局值；0 = 不限；>0 = 专属上限。
 type PlatformQuotaInput struct {
 	Platform        string   `json:"platform" binding:"required"`
 	DailyLimitUSD   *float64 `json:"daily_limit_usd"`
 	WeeklyLimitUSD  *float64 `json:"weekly_limit_usd"`
 	MonthlyLimitUSD *float64 `json:"monthly_limit_usd"`
+	Concurrency     *int     `json:"concurrency"`
+	RPMLimit        *int     `json:"rpm_limit"`
 }
 
 // platform 合法性由 service.IsAllowedQuotaPlatform / service.AllowedQuotaPlatforms 统一判断（单一源）。
@@ -675,6 +681,14 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 				return
 			}
 		}
+		if q.Concurrency != nil && *q.Concurrency < 0 {
+			response.BadRequest(c, "concurrency must be >= 0")
+			return
+		}
+		if q.RPMLimit != nil && *q.RPMLimit < 0 {
+			response.BadRequest(c, "rpm_limit must be >= 0")
+			return
+		}
 	}
 
 	records := make([]service.UserPlatformQuotaRecord, 0, len(req.Quotas))
@@ -685,6 +699,8 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 			DailyLimitUSD:   q.DailyLimitUSD,
 			WeeklyLimitUSD:  q.WeeklyLimitUSD,
 			MonthlyLimitUSD: q.MonthlyLimitUSD,
+			Concurrency:     q.Concurrency,
+			RPMLimit:        q.RPMLimit,
 		})
 	}
 
@@ -720,11 +736,15 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 			"daily_limit_usd":   r.DailyLimitUSD,
 			"weekly_limit_usd":  r.WeeklyLimitUSD,
 			"monthly_limit_usd": r.MonthlyLimitUSD,
+			"concurrency":       r.Concurrency,
+			"rpm_limit":         r.RPMLimit,
 		}
 		if prev, ok := beforeByPlatform[r.Platform]; ok {
 			entry["before_daily_limit_usd"] = prev.DailyLimitUSD
 			entry["before_weekly_limit_usd"] = prev.WeeklyLimitUSD
 			entry["before_monthly_limit_usd"] = prev.MonthlyLimitUSD
+			entry["before_concurrency"] = prev.Concurrency
+			entry["before_rpm_limit"] = prev.RPMLimit
 		}
 		changes = append(changes, entry)
 	}
@@ -761,6 +781,11 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 				slog.Error("ALERT: quota cache invalidation failed after UpsertForUser; limit 生效可能延迟至 sentinel TTL(最长 1h),需人工确认或重试失效", "user_id", userID, "platform", p, "err", err)
 			}
 		}
+	}
+	// 平台专属并发 / RPM 走鉴权缓存快照（api_key_auth_cache），改完必须失效该用户的快照，
+	// 否则新值要等一个 L2 TTL 才生效（与 admin UpdateUser 改 concurrency/rpm_limit 同理）。
+	if h.authCacheInvalidator != nil {
+		h.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 	}
 
 	// 返回最新状态

@@ -20,11 +20,15 @@ export interface DefaultSubscriptionSetting {
 export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity"
 export type QuotaWindowType = "daily" | "weekly" | "monthly"
 
-/** 单平台三档限额；null = 不限制，undefined = 未填（等价 null） */
+/** 单平台三档限额；null = 不限制，undefined = 未填（等价 null）。
+ *  concurrency / rpm = 平台专属并发 / RPM：省略或 null = 沿用「默认并发数 / 默认用户 RPM」，
+ *  0 = 该平台不限，>0 = 专属上限（替代全局值）。仅 anthropic / openai 开放设置。 */
 export interface PlatformQuotaLimits {
   daily:   number | null
   weekly:  number | null
   monthly: number | null
+  concurrency?: number | null
+  rpm?: number | null
 }
 
 /** 全平台默认限额 map（key = PlatformType） */
@@ -42,6 +46,9 @@ export function normalizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | nu
       weekly:  typeof src?.weekly === "number" ? src.weekly : null,
       monthly: typeof src?.monthly === "number" ? src.monthly : null,
     }
+    // 并发 / RPM 仅在后端有值时带出（未设置 = 字段缺省，模板里显示为空 = 沿用全局）
+    if (typeof src?.concurrency === "number") result[p]!.concurrency = src.concurrency
+    if (typeof src?.rpm === "number") result[p]!.rpm = src.rpm
   }
   return result
 }
@@ -49,10 +56,17 @@ export function normalizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | nu
 /** 提交前清洗：非有限数/负数/空字符串 → null（保留 0 = 显式禁用），返回全 4 平台嵌套 map */
 export function sanitizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | null): DefaultPlatformQuotasMap {
   const clean = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null)
+  // 并发 / RPM 是整数：非有限数/负数/空 → 省略（= 沿用全局），保留 0（= 不限）
+  const cleanInt = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined
   const result: DefaultPlatformQuotasMap = {}
   for (const p of PLATFORMS) {
     const src = input?.[p]
     result[p] = { daily: clean(src?.daily), weekly: clean(src?.weekly), monthly: clean(src?.monthly) }
+    const concurrency = cleanInt(src?.concurrency)
+    const rpm = cleanInt(src?.rpm)
+    if (concurrency !== undefined) result[p]!.concurrency = concurrency
+    if (rpm !== undefined) result[p]!.rpm = rpm
   }
   return result
 }

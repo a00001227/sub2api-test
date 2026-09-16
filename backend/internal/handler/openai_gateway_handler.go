@@ -286,7 +286,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
 
-	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
+	slotUserID, slotPlatform, slotMax := middleware2.ResolveUserSlot(c)
+	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, slotUserID, slotPlatform, slotMax, reqStream, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}
@@ -737,7 +738,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
 
-	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
+	slotUserID, slotPlatform, slotMax := middleware2.ResolveUserSlot(c)
+	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, slotUserID, slotPlatform, slotMax, reqStream, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}
@@ -1079,24 +1081,44 @@ func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context,
 // 复用 acquireResponsesUserSlot(OpenAI 的 ping 格式与错误写法)。供中央 EdgeForward
 // 转发 OpenAI 组前调用,补上 cell 侧缺失的用户级并发限制。
 func (h *OpenAIGatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream bool) (func(), bool) {
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
+	if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
 		return func() {}, true
 	}
 	streamStarted := false
-	return h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, isStream, &streamStarted, logger.L())
+	slotUserID, slotPlatform, slotMax := middleware2.ResolveUserSlot(c)
+	return h.acquireResponsesUserSlot(c, slotUserID, slotPlatform, slotMax, isStream, &streamStarted, logger.L())
+}
+
+// CheckForwardRPM 中央 edge 转发路径的消费者 RPM 限流(OpenAI 协议错误写法),语义同
+// GatewayHandler.CheckForwardRPM。
+func (h *OpenAIGatewayHandler) CheckForwardRPM(c *gin.Context) bool {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.User == nil || h.billingCacheService == nil {
+		return true
+	}
+	err := h.billingCacheService.CheckRPMEligibility(c.Request.Context(), apiKey.User, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey))
+	if err == nil {
+		return true
+	}
+	status, code, message, retryAfter := billingErrorDetails(err)
+	if retryAfter > 0 {
+		c.Header("Retry-After", strconv.Itoa(retryAfter))
+	}
+	h.handleStreamingAwareError(c, status, code, message, false)
+	return false
 }
 
 func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 	c *gin.Context,
 	userID int64,
+	platform string,
 	userConcurrency int,
 	reqStream bool,
 	streamStarted *bool,
 	reqLog *zap.Logger,
 ) (func(), bool) {
 	ctx := c.Request.Context()
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, userID, userConcurrency, reqStream, streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, userID, platform, userConcurrency, reqStream, streamStarted)
 	if err != nil {
 		reqLog.Warn("openai.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", *streamStarted)
@@ -1334,7 +1356,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 必须尽早注册，确保任何 early return 都能释放已获取的并发槽位。
 	defer releaseTurnSlots()
 
-	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+	wsSlotUserID, wsSlotPlatform, wsSlotMax := middleware2.ResolveUserSlot(c)
+	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, wsSlotUserID, wsSlotPlatform, wsSlotMax)
 	if err != nil {
 		reqLog.Warn("openai.websocket_user_slot_acquire_failed", zap.Error(err))
 		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
@@ -1349,7 +1372,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if currentUserRelease != nil {
 			return true
 		}
-		userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+		userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, wsSlotUserID, wsSlotPlatform, wsSlotMax)
 		if err != nil {
 			reqLog.Warn("openai.websocket_user_slot_reacquire_failed", zap.Error(err))
 			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
@@ -1494,7 +1517,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 防御式清理：避免异常路径下旧槽位覆盖导致泄漏。
 				releaseTurnSlots()
 				// 非首轮 turn 需要重新抢占并发槽位，避免长连接空闲占槽。
-				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, wsSlotUserID, wsSlotPlatform, wsSlotMax)
 				if err != nil {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire user concurrency slot", err)
 				}

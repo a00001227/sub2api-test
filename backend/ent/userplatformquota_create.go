@@ -119,6 +119,34 @@ func (_c *UserPlatformQuotaCreate) SetNillableMonthlyLimitUsd(v *float64) *UserP
 	return _c
 }
 
+// SetConcurrency sets the "concurrency" field.
+func (_c *UserPlatformQuotaCreate) SetConcurrency(v int) *UserPlatformQuotaCreate {
+	_c.mutation.SetConcurrency(v)
+	return _c
+}
+
+// SetNillableConcurrency sets the "concurrency" field if the given value is not nil.
+func (_c *UserPlatformQuotaCreate) SetNillableConcurrency(v *int) *UserPlatformQuotaCreate {
+	if v != nil {
+		_c.SetConcurrency(*v)
+	}
+	return _c
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_c *UserPlatformQuotaCreate) SetRpmLimit(v int) *UserPlatformQuotaCreate {
+	_c.mutation.SetRpmLimit(v)
+	return _c
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_c *UserPlatformQuotaCreate) SetNillableRpmLimit(v *int) *UserPlatformQuotaCreate {
+	if v != nil {
+		_c.SetRpmLimit(*v)
+	}
+	return _c
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (_c *UserPlatformQuotaCreate) SetDailyUsageUsd(v float64) *UserPlatformQuotaCreate {
 	_c.mutation.SetDailyUsageUsd(v)
@@ -360,6 +388,14 @@ func (_c *UserPlatformQuotaCreate) createSpec() (*UserPlatformQuota, *sqlgraph.C
 		_spec.SetField(userplatformquota.FieldMonthlyLimitUsd, field.TypeFloat64, value)
 		_node.MonthlyLimitUsd = &value
 	}
+	if value, ok := _c.mutation.Concurrency(); ok {
+		_spec.SetField(userplatformquota.FieldConcurrency, field.TypeInt, value)
+		_node.Concurrency = &value
+	}
+	if value, ok := _c.mutation.RpmLimit(); ok {
+		_spec.SetField(userplatformquota.FieldRpmLimit, field.TypeInt, value)
+		_node.RpmLimit = &value
+	}
 	if value, ok := _c.mutation.DailyUsageUsd(); ok {
 		_spec.SetField(userplatformquota.FieldDailyUsageUsd, field.TypeFloat64, value)
 		_node.DailyUsageUsd = value
@@ -576,6 +612,54 @@ func (u *UserPlatformQuotaUpsert) AddMonthlyLimitUsd(v float64) *UserPlatformQuo
 // ClearMonthlyLimitUsd clears the value of the "monthly_limit_usd" field.
 func (u *UserPlatformQuotaUpsert) ClearMonthlyLimitUsd() *UserPlatformQuotaUpsert {
 	u.SetNull(userplatformquota.FieldMonthlyLimitUsd)
+	return u
+}
+
+// SetConcurrency sets the "concurrency" field.
+func (u *UserPlatformQuotaUpsert) SetConcurrency(v int) *UserPlatformQuotaUpsert {
+	u.Set(userplatformquota.FieldConcurrency, v)
+	return u
+}
+
+// UpdateConcurrency sets the "concurrency" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsert) UpdateConcurrency() *UserPlatformQuotaUpsert {
+	u.SetExcluded(userplatformquota.FieldConcurrency)
+	return u
+}
+
+// AddConcurrency adds v to the "concurrency" field.
+func (u *UserPlatformQuotaUpsert) AddConcurrency(v int) *UserPlatformQuotaUpsert {
+	u.Add(userplatformquota.FieldConcurrency, v)
+	return u
+}
+
+// ClearConcurrency clears the value of the "concurrency" field.
+func (u *UserPlatformQuotaUpsert) ClearConcurrency() *UserPlatformQuotaUpsert {
+	u.SetNull(userplatformquota.FieldConcurrency)
+	return u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsert) SetRpmLimit(v int) *UserPlatformQuotaUpsert {
+	u.Set(userplatformquota.FieldRpmLimit, v)
+	return u
+}
+
+// UpdateRpmLimit sets the "rpm_limit" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsert) UpdateRpmLimit() *UserPlatformQuotaUpsert {
+	u.SetExcluded(userplatformquota.FieldRpmLimit)
+	return u
+}
+
+// AddRpmLimit adds v to the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsert) AddRpmLimit(v int) *UserPlatformQuotaUpsert {
+	u.Add(userplatformquota.FieldRpmLimit, v)
+	return u
+}
+
+// ClearRpmLimit clears the value of the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsert) ClearRpmLimit() *UserPlatformQuotaUpsert {
+	u.SetNull(userplatformquota.FieldRpmLimit)
 	return u
 }
 
@@ -876,6 +960,62 @@ func (u *UserPlatformQuotaUpsertOne) UpdateMonthlyLimitUsd() *UserPlatformQuotaU
 func (u *UserPlatformQuotaUpsertOne) ClearMonthlyLimitUsd() *UserPlatformQuotaUpsertOne {
 	return u.Update(func(s *UserPlatformQuotaUpsert) {
 		s.ClearMonthlyLimitUsd()
+	})
+}
+
+// SetConcurrency sets the "concurrency" field.
+func (u *UserPlatformQuotaUpsertOne) SetConcurrency(v int) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetConcurrency(v)
+	})
+}
+
+// AddConcurrency adds v to the "concurrency" field.
+func (u *UserPlatformQuotaUpsertOne) AddConcurrency(v int) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddConcurrency(v)
+	})
+}
+
+// UpdateConcurrency sets the "concurrency" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertOne) UpdateConcurrency() *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateConcurrency()
+	})
+}
+
+// ClearConcurrency clears the value of the "concurrency" field.
+func (u *UserPlatformQuotaUpsertOne) ClearConcurrency() *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.ClearConcurrency()
+	})
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsertOne) SetRpmLimit(v int) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetRpmLimit(v)
+	})
+}
+
+// AddRpmLimit adds v to the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsertOne) AddRpmLimit(v int) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddRpmLimit(v)
+	})
+}
+
+// UpdateRpmLimit sets the "rpm_limit" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertOne) UpdateRpmLimit() *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateRpmLimit()
+	})
+}
+
+// ClearRpmLimit clears the value of the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsertOne) ClearRpmLimit() *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.ClearRpmLimit()
 	})
 }
 
@@ -1360,6 +1500,62 @@ func (u *UserPlatformQuotaUpsertBulk) UpdateMonthlyLimitUsd() *UserPlatformQuota
 func (u *UserPlatformQuotaUpsertBulk) ClearMonthlyLimitUsd() *UserPlatformQuotaUpsertBulk {
 	return u.Update(func(s *UserPlatformQuotaUpsert) {
 		s.ClearMonthlyLimitUsd()
+	})
+}
+
+// SetConcurrency sets the "concurrency" field.
+func (u *UserPlatformQuotaUpsertBulk) SetConcurrency(v int) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetConcurrency(v)
+	})
+}
+
+// AddConcurrency adds v to the "concurrency" field.
+func (u *UserPlatformQuotaUpsertBulk) AddConcurrency(v int) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddConcurrency(v)
+	})
+}
+
+// UpdateConcurrency sets the "concurrency" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertBulk) UpdateConcurrency() *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateConcurrency()
+	})
+}
+
+// ClearConcurrency clears the value of the "concurrency" field.
+func (u *UserPlatformQuotaUpsertBulk) ClearConcurrency() *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.ClearConcurrency()
+	})
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsertBulk) SetRpmLimit(v int) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetRpmLimit(v)
+	})
+}
+
+// AddRpmLimit adds v to the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsertBulk) AddRpmLimit(v int) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddRpmLimit(v)
+	})
+}
+
+// UpdateRpmLimit sets the "rpm_limit" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertBulk) UpdateRpmLimit() *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateRpmLimit()
+	})
+}
+
+// ClearRpmLimit clears the value of the "rpm_limit" field.
+func (u *UserPlatformQuotaUpsertBulk) ClearRpmLimit() *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.ClearRpmLimit()
 	})
 }
 

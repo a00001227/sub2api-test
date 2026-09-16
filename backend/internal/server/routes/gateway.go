@@ -50,6 +50,14 @@ func RegisterGatewayRoutes(
 		}
 		return h.Gateway.AcquireForwardUserSlot(c, isStream)
 	}
+	// 消费者 RPM 限流:同上,handler 里的 CheckBillingEligibility 被转发短路,这里在转发前补查
+	// RPM 级联(override → group → user/平台),按分组平台选对协议的 429 写法。
+	edgeRPMCheck := func(c *gin.Context) bool {
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			return h.OpenAIGateway.CheckForwardRPM(c)
+		}
+		return h.Gateway.CheckForwardRPM(c)
+	}
 	edgeForward := middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time) {
 		if env.IsOpenAI() {
 			h.OpenAIGateway.RecordForwardedConsumerUsage(c, env)
@@ -62,7 +70,7 @@ func RegisterGatewayRoutes(
 	}, h.PricingDisplay.IsModelEnabled, func(c *gin.Context, userID, apiKeyID int64, reqBody []byte) {
 		// 疑似蒸馏取证：命中捕获名单才记原文(内部零开销闸门)；与转发/计费解耦。
 		h.Admin.EvidenceCapture.Capture(c, userID, apiKeyID, reqBody)
-	}, edgeUserSlot)
+	}, edgeUserSlot, edgeRPMCheck)
 
 	// 前置内容审计中间件：挂在 enforcement 之后、edgeForward 之前 → 转发路径也覆盖
 	// （原本审核只在网关 handler 内，EdgeForward 命中转发时短路 handler，cell 流量绕过审核）。

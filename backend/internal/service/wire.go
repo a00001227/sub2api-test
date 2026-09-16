@@ -578,10 +578,12 @@ func ProvideAPIKeyService(
 	cache APIKeyCache,
 	cfg *config.Config,
 	billingCacheService *BillingCacheService,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) *APIKeyService {
 	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
 	svc.SetRateLimitCacheInvalidator(billingCacheService)
 	svc.SetLockedBalanceInvalidator(billingCacheService)
+	svc.SetUserPlatformQuotaRepo(userPlatformQuotaRepo)
 	return svc
 }
 

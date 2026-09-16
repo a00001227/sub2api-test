@@ -1675,6 +1675,8 @@ func (s *AuthService) snapshotPlatformQuotaDefaults(ctx context.Context, userID 
 			rec.DailyLimitUSD = q.DailyLimitUSD
 			rec.WeeklyLimitUSD = q.WeeklyLimitUSD
 			rec.MonthlyLimitUSD = q.MonthlyLimitUSD
+			rec.Concurrency = q.Concurrency
+			rec.RPMLimit = q.RPMLimit
 		}
 		records = append(records, rec)
 	}

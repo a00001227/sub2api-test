@@ -34,6 +34,10 @@ type UserPlatformQuota struct {
 	WeeklyLimitUsd *float64 `json:"weekly_limit_usd,omitempty"`
 	// MonthlyLimitUsd holds the value of the "monthly_limit_usd" field.
 	MonthlyLimitUsd *float64 `json:"monthly_limit_usd,omitempty"`
+	// Concurrency holds the value of the "concurrency" field.
+	Concurrency *int `json:"concurrency,omitempty"`
+	// RpmLimit holds the value of the "rpm_limit" field.
+	RpmLimit *int `json:"rpm_limit,omitempty"`
 	// DailyUsageUsd holds the value of the "daily_usage_usd" field.
 	DailyUsageUsd float64 `json:"daily_usage_usd,omitempty"`
 	// WeeklyUsageUsd holds the value of the "weekly_usage_usd" field.
@@ -79,7 +83,7 @@ func (*UserPlatformQuota) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case userplatformquota.FieldDailyLimitUsd, userplatformquota.FieldWeeklyLimitUsd, userplatformquota.FieldMonthlyLimitUsd, userplatformquota.FieldDailyUsageUsd, userplatformquota.FieldWeeklyUsageUsd, userplatformquota.FieldMonthlyUsageUsd:
 			values[i] = new(sql.NullFloat64)
-		case userplatformquota.FieldID, userplatformquota.FieldUserID:
+		case userplatformquota.FieldID, userplatformquota.FieldUserID, userplatformquota.FieldConcurrency, userplatformquota.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
 		case userplatformquota.FieldPlatform:
 			values[i] = new(sql.NullString)
@@ -157,6 +161,20 @@ func (_m *UserPlatformQuota) assignValues(columns []string, values []any) error 
 			} else if value.Valid {
 				_m.MonthlyLimitUsd = new(float64)
 				*_m.MonthlyLimitUsd = value.Float64
+			}
+		case userplatformquota.FieldConcurrency:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field concurrency", values[i])
+			} else if value.Valid {
+				_m.Concurrency = new(int)
+				*_m.Concurrency = int(value.Int64)
+			}
+		case userplatformquota.FieldRpmLimit:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field rpm_limit", values[i])
+			} else if value.Valid {
+				_m.RpmLimit = new(int)
+				*_m.RpmLimit = int(value.Int64)
 			}
 		case userplatformquota.FieldDailyUsageUsd:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -267,6 +285,16 @@ func (_m *UserPlatformQuota) String() string {
 	builder.WriteString(", ")
 	if v := _m.MonthlyLimitUsd; v != nil {
 		builder.WriteString("monthly_limit_usd=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.Concurrency; v != nil {
+		builder.WriteString("concurrency=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.RpmLimit; v != nil {
+		builder.WriteString("rpm_limit=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")

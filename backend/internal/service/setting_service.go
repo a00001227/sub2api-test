@@ -227,10 +227,13 @@ type SettingService struct {
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）
+// 以及平台专属并发 / RPM（nil = 沿用「默认并发数 / 默认用户 RPM」；0 = 不限；>0 = 专属上限）。
 type DefaultPlatformQuotaSetting struct {
 	DailyLimitUSD   *float64 `json:"daily"`
 	WeeklyLimitUSD  *float64 `json:"weekly"`
 	MonthlyLimitUSD *float64 `json:"monthly"`
+	Concurrency     *int     `json:"concurrency,omitempty"`
+	RPMLimit        *int     `json:"rpm,omitempty"`
 }
 
 type ProviderDefaultGrantSettings struct {
@@ -5133,5 +5136,11 @@ func mergePlatformQuotaDefaults(dst, src *DefaultPlatformQuotaSetting) {
 	}
 	if src.MonthlyLimitUSD != nil {
 		dst.MonthlyLimitUSD = src.MonthlyLimitUSD
+	}
+	if src.Concurrency != nil {
+		dst.Concurrency = src.Concurrency
+	}
+	if src.RPMLimit != nil {
+		dst.RPMLimit = src.RPMLimit
 	}
 }

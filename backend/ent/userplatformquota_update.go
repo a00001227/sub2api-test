@@ -164,6 +164,60 @@ func (_u *UserPlatformQuotaUpdate) ClearMonthlyLimitUsd() *UserPlatformQuotaUpda
 	return _u
 }
 
+// SetConcurrency sets the "concurrency" field.
+func (_u *UserPlatformQuotaUpdate) SetConcurrency(v int) *UserPlatformQuotaUpdate {
+	_u.mutation.ResetConcurrency()
+	_u.mutation.SetConcurrency(v)
+	return _u
+}
+
+// SetNillableConcurrency sets the "concurrency" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdate) SetNillableConcurrency(v *int) *UserPlatformQuotaUpdate {
+	if v != nil {
+		_u.SetConcurrency(*v)
+	}
+	return _u
+}
+
+// AddConcurrency adds value to the "concurrency" field.
+func (_u *UserPlatformQuotaUpdate) AddConcurrency(v int) *UserPlatformQuotaUpdate {
+	_u.mutation.AddConcurrency(v)
+	return _u
+}
+
+// ClearConcurrency clears the value of the "concurrency" field.
+func (_u *UserPlatformQuotaUpdate) ClearConcurrency() *UserPlatformQuotaUpdate {
+	_u.mutation.ClearConcurrency()
+	return _u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_u *UserPlatformQuotaUpdate) SetRpmLimit(v int) *UserPlatformQuotaUpdate {
+	_u.mutation.ResetRpmLimit()
+	_u.mutation.SetRpmLimit(v)
+	return _u
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdate) SetNillableRpmLimit(v *int) *UserPlatformQuotaUpdate {
+	if v != nil {
+		_u.SetRpmLimit(*v)
+	}
+	return _u
+}
+
+// AddRpmLimit adds value to the "rpm_limit" field.
+func (_u *UserPlatformQuotaUpdate) AddRpmLimit(v int) *UserPlatformQuotaUpdate {
+	_u.mutation.AddRpmLimit(v)
+	return _u
+}
+
+// ClearRpmLimit clears the value of the "rpm_limit" field.
+func (_u *UserPlatformQuotaUpdate) ClearRpmLimit() *UserPlatformQuotaUpdate {
+	_u.mutation.ClearRpmLimit()
+	return _u
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (_u *UserPlatformQuotaUpdate) SetDailyUsageUsd(v float64) *UserPlatformQuotaUpdate {
 	_u.mutation.ResetDailyUsageUsd()
@@ -409,6 +463,24 @@ func (_u *UserPlatformQuotaUpdate) sqlSave(ctx context.Context) (_node int, err 
 	if _u.mutation.MonthlyLimitUsdCleared() {
 		_spec.ClearField(userplatformquota.FieldMonthlyLimitUsd, field.TypeFloat64)
 	}
+	if value, ok := _u.mutation.Concurrency(); ok {
+		_spec.SetField(userplatformquota.FieldConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrency(); ok {
+		_spec.AddField(userplatformquota.FieldConcurrency, field.TypeInt, value)
+	}
+	if _u.mutation.ConcurrencyCleared() {
+		_spec.ClearField(userplatformquota.FieldConcurrency, field.TypeInt)
+	}
+	if value, ok := _u.mutation.RpmLimit(); ok {
+		_spec.SetField(userplatformquota.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRpmLimit(); ok {
+		_spec.AddField(userplatformquota.FieldRpmLimit, field.TypeInt, value)
+	}
+	if _u.mutation.RpmLimitCleared() {
+		_spec.ClearField(userplatformquota.FieldRpmLimit, field.TypeInt)
+	}
 	if value, ok := _u.mutation.DailyUsageUsd(); ok {
 		_spec.SetField(userplatformquota.FieldDailyUsageUsd, field.TypeFloat64, value)
 	}
@@ -626,6 +698,60 @@ func (_u *UserPlatformQuotaUpdateOne) AddMonthlyLimitUsd(v float64) *UserPlatfor
 // ClearMonthlyLimitUsd clears the value of the "monthly_limit_usd" field.
 func (_u *UserPlatformQuotaUpdateOne) ClearMonthlyLimitUsd() *UserPlatformQuotaUpdateOne {
 	_u.mutation.ClearMonthlyLimitUsd()
+	return _u
+}
+
+// SetConcurrency sets the "concurrency" field.
+func (_u *UserPlatformQuotaUpdateOne) SetConcurrency(v int) *UserPlatformQuotaUpdateOne {
+	_u.mutation.ResetConcurrency()
+	_u.mutation.SetConcurrency(v)
+	return _u
+}
+
+// SetNillableConcurrency sets the "concurrency" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdateOne) SetNillableConcurrency(v *int) *UserPlatformQuotaUpdateOne {
+	if v != nil {
+		_u.SetConcurrency(*v)
+	}
+	return _u
+}
+
+// AddConcurrency adds value to the "concurrency" field.
+func (_u *UserPlatformQuotaUpdateOne) AddConcurrency(v int) *UserPlatformQuotaUpdateOne {
+	_u.mutation.AddConcurrency(v)
+	return _u
+}
+
+// ClearConcurrency clears the value of the "concurrency" field.
+func (_u *UserPlatformQuotaUpdateOne) ClearConcurrency() *UserPlatformQuotaUpdateOne {
+	_u.mutation.ClearConcurrency()
+	return _u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_u *UserPlatformQuotaUpdateOne) SetRpmLimit(v int) *UserPlatformQuotaUpdateOne {
+	_u.mutation.ResetRpmLimit()
+	_u.mutation.SetRpmLimit(v)
+	return _u
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdateOne) SetNillableRpmLimit(v *int) *UserPlatformQuotaUpdateOne {
+	if v != nil {
+		_u.SetRpmLimit(*v)
+	}
+	return _u
+}
+
+// AddRpmLimit adds value to the "rpm_limit" field.
+func (_u *UserPlatformQuotaUpdateOne) AddRpmLimit(v int) *UserPlatformQuotaUpdateOne {
+	_u.mutation.AddRpmLimit(v)
+	return _u
+}
+
+// ClearRpmLimit clears the value of the "rpm_limit" field.
+func (_u *UserPlatformQuotaUpdateOne) ClearRpmLimit() *UserPlatformQuotaUpdateOne {
+	_u.mutation.ClearRpmLimit()
 	return _u
 }
 
@@ -903,6 +1029,24 @@ func (_u *UserPlatformQuotaUpdateOne) sqlSave(ctx context.Context) (_node *UserP
 	}
 	if _u.mutation.MonthlyLimitUsdCleared() {
 		_spec.ClearField(userplatformquota.FieldMonthlyLimitUsd, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.Concurrency(); ok {
+		_spec.SetField(userplatformquota.FieldConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrency(); ok {
+		_spec.AddField(userplatformquota.FieldConcurrency, field.TypeInt, value)
+	}
+	if _u.mutation.ConcurrencyCleared() {
+		_spec.ClearField(userplatformquota.FieldConcurrency, field.TypeInt)
+	}
+	if value, ok := _u.mutation.RpmLimit(); ok {
+		_spec.SetField(userplatformquota.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRpmLimit(); ok {
+		_spec.AddField(userplatformquota.FieldRpmLimit, field.TypeInt, value)
+	}
+	if _u.mutation.RpmLimitCleared() {
+		_spec.ClearField(userplatformquota.FieldRpmLimit, field.TypeInt)
 	}
 	if value, ok := _u.mutation.DailyUsageUsd(); ok {
 		_spec.SetField(userplatformquota.FieldDailyUsageUsd, field.TypeFloat64, value)

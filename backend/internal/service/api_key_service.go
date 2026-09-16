@@ -233,6 +233,7 @@ type APIKeyService struct {
 	groupRepo             GroupRepository
 	userSubRepo           UserSubscriptionRepository
 	userGroupRateRepo     UserGroupRateRepository
+	userPlatformQuotaRepo UserPlatformQuotaRepository // optional: per-platform concurrency / RPM limits for the auth snapshot
 	cache                 APIKeyCache
 	rateLimitCacheInvalid RateLimitCacheInvalidator // optional: invalidate Redis rate limit cache
 	lockedBalanceInvalid  LockedBalanceInvalidator  // optional: invalidate locked balance cache
@@ -246,6 +247,12 @@ type APIKeyService struct {
 	// 预算变更（创建/增额），防止并发请求都读到同一份 locked 而双双通过校验
 	// 造成超额锁定。进程内锁：单实例下完全消除竞态，多实例下大幅收窄窗口。
 	subKeyBudgetMu sync.Map // userID(int64) -> *sync.Mutex
+}
+
+// SetUserPlatformQuotaRepo 注入用户平台限额仓储，使鉴权缓存快照带上用户 × 平台 的专属
+// 并发 / RPM 上限（未注入时视为全部沿用全局值）。
+func (s *APIKeyService) SetUserPlatformQuotaRepo(repo UserPlatformQuotaRepository) {
+	s.userPlatformQuotaRepo = repo
 }
 
 // SetLockedBalanceInvalidator sets the optional locked balance cache invalidator.

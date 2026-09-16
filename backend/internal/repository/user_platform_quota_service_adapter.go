@@ -59,6 +59,8 @@ func (a *userPlatformQuotaServiceAdapter) ListByUser(ctx context.Context, userID
 			DailyWindowStart:   r.DailyWindowStart,
 			WeeklyWindowStart:  r.WeeklyWindowStart,
 			MonthlyWindowStart: r.MonthlyWindowStart,
+			Concurrency:        r.Concurrency,
+			RPMLimit:           r.RPMLimit,
 		}
 	}
 	return out, nil
@@ -74,6 +76,8 @@ func (a *userPlatformQuotaServiceAdapter) BulkInsertInitial(ctx context.Context,
 			DailyLimitUSD:   r.DailyLimitUSD,
 			WeeklyLimitUSD:  r.WeeklyLimitUSD,
 			MonthlyLimitUSD: r.MonthlyLimitUSD,
+			Concurrency:     r.Concurrency,
+			RPMLimit:        r.RPMLimit,
 		}
 	}
 	return a.inner.BulkInsertInitial(ctx, repoRecords)
@@ -155,6 +159,8 @@ func (a *genericUserPlatformQuotaAdapter) ListByUser(ctx context.Context, userID
 			DailyWindowStart:   r.DailyWindowStart,
 			WeeklyWindowStart:  r.WeeklyWindowStart,
 			MonthlyWindowStart: r.MonthlyWindowStart,
+			Concurrency:        r.Concurrency,
+			RPMLimit:           r.RPMLimit,
 		}
 	}
 	return out, nil
@@ -170,6 +176,8 @@ func (a *genericUserPlatformQuotaAdapter) BulkInsertInitial(ctx context.Context,
 			DailyLimitUSD:   r.DailyLimitUSD,
 			WeeklyLimitUSD:  r.WeeklyLimitUSD,
 			MonthlyLimitUSD: r.MonthlyLimitUSD,
+			Concurrency:     r.Concurrency,
+			RPMLimit:        r.RPMLimit,
 		}
 	}
 	return a.inner.BulkInsertInitial(ctx, repoRecords)
@@ -227,6 +235,8 @@ func toServiceRecord(rec *UserPlatformQuotaRecord) *service.UserPlatformQuotaRec
 		DailyWindowStart:   rec.DailyWindowStart,
 		WeeklyWindowStart:  rec.WeeklyWindowStart,
 		MonthlyWindowStart: rec.MonthlyWindowStart,
+		Concurrency:        rec.Concurrency,
+		RPMLimit:           rec.RPMLimit,
 	}
 }
 
@@ -246,6 +256,8 @@ func toRepoRecords(records []service.UserPlatformQuotaRecord) []UserPlatformQuot
 			DailyWindowStart:   r.DailyWindowStart,
 			WeeklyWindowStart:  r.WeeklyWindowStart,
 			MonthlyWindowStart: r.MonthlyWindowStart,
+			Concurrency:        r.Concurrency,
+			RPMLimit:           r.RPMLimit,
 		}
 	}
 	return out

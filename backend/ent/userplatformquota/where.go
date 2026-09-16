@@ -95,6 +95,16 @@ func MonthlyLimitUsd(v float64) predicate.UserPlatformQuota {
 	return predicate.UserPlatformQuota(sql.FieldEQ(FieldMonthlyLimitUsd, v))
 }
 
+// Concurrency applies equality check predicate on the "concurrency" field. It's identical to ConcurrencyEQ.
+func Concurrency(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldConcurrency, v))
+}
+
+// RpmLimit applies equality check predicate on the "rpm_limit" field. It's identical to RpmLimitEQ.
+func RpmLimit(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldRpmLimit, v))
+}
+
 // DailyUsageUsd applies equality check predicate on the "daily_usage_usd" field. It's identical to DailyUsageUsdEQ.
 func DailyUsageUsd(v float64) predicate.UserPlatformQuota {
 	return predicate.UserPlatformQuota(sql.FieldEQ(FieldDailyUsageUsd, v))
@@ -488,6 +498,106 @@ func MonthlyLimitUsdIsNil() predicate.UserPlatformQuota {
 // MonthlyLimitUsdNotNil applies the NotNil predicate on the "monthly_limit_usd" field.
 func MonthlyLimitUsdNotNil() predicate.UserPlatformQuota {
 	return predicate.UserPlatformQuota(sql.FieldNotNull(FieldMonthlyLimitUsd))
+}
+
+// ConcurrencyEQ applies the EQ predicate on the "concurrency" field.
+func ConcurrencyEQ(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldConcurrency, v))
+}
+
+// ConcurrencyNEQ applies the NEQ predicate on the "concurrency" field.
+func ConcurrencyNEQ(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNEQ(FieldConcurrency, v))
+}
+
+// ConcurrencyIn applies the In predicate on the "concurrency" field.
+func ConcurrencyIn(vs ...int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldIn(FieldConcurrency, vs...))
+}
+
+// ConcurrencyNotIn applies the NotIn predicate on the "concurrency" field.
+func ConcurrencyNotIn(vs ...int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNotIn(FieldConcurrency, vs...))
+}
+
+// ConcurrencyGT applies the GT predicate on the "concurrency" field.
+func ConcurrencyGT(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGT(FieldConcurrency, v))
+}
+
+// ConcurrencyGTE applies the GTE predicate on the "concurrency" field.
+func ConcurrencyGTE(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGTE(FieldConcurrency, v))
+}
+
+// ConcurrencyLT applies the LT predicate on the "concurrency" field.
+func ConcurrencyLT(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLT(FieldConcurrency, v))
+}
+
+// ConcurrencyLTE applies the LTE predicate on the "concurrency" field.
+func ConcurrencyLTE(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLTE(FieldConcurrency, v))
+}
+
+// ConcurrencyIsNil applies the IsNil predicate on the "concurrency" field.
+func ConcurrencyIsNil() predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldIsNull(FieldConcurrency))
+}
+
+// ConcurrencyNotNil applies the NotNil predicate on the "concurrency" field.
+func ConcurrencyNotNil() predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNotNull(FieldConcurrency))
+}
+
+// RpmLimitEQ applies the EQ predicate on the "rpm_limit" field.
+func RpmLimitEQ(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldRpmLimit, v))
+}
+
+// RpmLimitNEQ applies the NEQ predicate on the "rpm_limit" field.
+func RpmLimitNEQ(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNEQ(FieldRpmLimit, v))
+}
+
+// RpmLimitIn applies the In predicate on the "rpm_limit" field.
+func RpmLimitIn(vs ...int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldIn(FieldRpmLimit, vs...))
+}
+
+// RpmLimitNotIn applies the NotIn predicate on the "rpm_limit" field.
+func RpmLimitNotIn(vs ...int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNotIn(FieldRpmLimit, vs...))
+}
+
+// RpmLimitGT applies the GT predicate on the "rpm_limit" field.
+func RpmLimitGT(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGT(FieldRpmLimit, v))
+}
+
+// RpmLimitGTE applies the GTE predicate on the "rpm_limit" field.
+func RpmLimitGTE(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGTE(FieldRpmLimit, v))
+}
+
+// RpmLimitLT applies the LT predicate on the "rpm_limit" field.
+func RpmLimitLT(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLT(FieldRpmLimit, v))
+}
+
+// RpmLimitLTE applies the LTE predicate on the "rpm_limit" field.
+func RpmLimitLTE(v int) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLTE(FieldRpmLimit, v))
+}
+
+// RpmLimitIsNil applies the IsNil predicate on the "rpm_limit" field.
+func RpmLimitIsNil() predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldIsNull(FieldRpmLimit))
+}
+
+// RpmLimitNotNil applies the NotNil predicate on the "rpm_limit" field.
+func RpmLimitNotNil() predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNotNull(FieldRpmLimit))
 }
 
 // DailyUsageUsdEQ applies the EQ predicate on the "daily_usage_usd" field.

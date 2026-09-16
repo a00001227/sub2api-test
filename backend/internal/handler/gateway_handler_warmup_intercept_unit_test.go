@@ -117,15 +117,19 @@ func (f *fakeConcurrencyCache) DecrementAccountWaitCount(context.Context, int64)
 func (f *fakeConcurrencyCache) GetAccountWaitingCount(context.Context, int64) (int, error) {
 	return 0, nil
 }
-func (f *fakeConcurrencyCache) AcquireUserSlot(context.Context, int64, int, string) (bool, error) {
+func (f *fakeConcurrencyCache) AcquireUserSlot(context.Context, int64, string, int, string) (bool, error) {
 	return true, nil
 }
-func (f *fakeConcurrencyCache) ReleaseUserSlot(context.Context, int64, string) error   { return nil }
-func (f *fakeConcurrencyCache) GetUserConcurrency(context.Context, int64) (int, error) { return 0, nil }
-func (f *fakeConcurrencyCache) IncrementWaitCount(context.Context, int64, int) (bool, error) {
+func (f *fakeConcurrencyCache) ReleaseUserSlot(context.Context, int64, string, string) error {
+	return nil
+}
+func (f *fakeConcurrencyCache) GetUserConcurrency(context.Context, int64, string) (int, error) {
+	return 0, nil
+}
+func (f *fakeConcurrencyCache) IncrementWaitCount(context.Context, int64, string, int) (bool, error) {
 	return true, nil
 }
-func (f *fakeConcurrencyCache) DecrementWaitCount(context.Context, int64) error { return nil }
+func (f *fakeConcurrencyCache) DecrementWaitCount(context.Context, int64, string) error { return nil }
 func (f *fakeConcurrencyCache) GetAccountsLoadBatch(context.Context, []service.AccountWithConcurrency) (map[int64]*service.AccountLoadInfo, error) {
 	return map[int64]*service.AccountLoadInfo{}, nil
 }

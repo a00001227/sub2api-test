@@ -33,21 +33,21 @@
         <label class="input-label">{{ t('admin.users.notes') }}</label>
         <textarea v-model="form.notes" rows="3" class="input"></textarea>
       </div>
+      <!-- 并发 / RPM 按平台（Claude / GPT）分别设置；格子里就是实际生效的数，保存后各平台独立计数 -->
       <div>
-        <label class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
-        <input v-model.number="form.concurrency" type="number" class="input" />
-      </div>
-      <div>
-        <label class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
-        <input
-          v-model.number="form.rpm_limit"
-          type="number"
-          min="0"
-          step="1"
-          class="input"
-          :placeholder="t('admin.users.form.rpmLimitPlaceholder')"
-        />
-        <p class="input-hint">{{ t('admin.users.form.rpmLimitHint') }}</p>
+        <label class="input-label">{{ t('admin.users.form.platformLimits.title') }}</label>
+        <div class="grid grid-cols-[6rem_1fr_1fr] items-center gap-x-3 gap-y-2">
+          <span></span>
+          <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.users.form.platformLimits.concurrency') }}</span>
+          <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.users.form.platformLimits.rpm') }}</span>
+          <template v-for="p in LIMIT_PLATFORMS" :key="p">
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t(`admin.users.form.platformLimits.${p}`) }}</span>
+            <input v-model.number="platformLimits[p].concurrency" type="number" min="0" step="1" class="input" :disabled="!platformLimitsLoaded" />
+            <input v-model.number="platformLimits[p].rpm_limit" type="number" min="0" step="1" class="input" :disabled="!platformLimitsLoaded" />
+          </template>
+        </div>
+        <p class="input-hint">{{ t('admin.users.form.platformLimits.hint') }}</p>
+        <p v-if="platformLimitsLoadFailed" class="input-hint text-amber-600 dark:text-amber-400">{{ t('admin.users.form.platformLimits.loadFailed') }}</p>
       </div>
       <UserAttributeForm v-model="form.customAttributes" :user-id="user?.id" />
     </form>
@@ -68,7 +68,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { adminAPI } from '@/api/admin'
-import type { AdminUser, UserAttributeValuesMap } from '@/types'
+import type { AdminUser, UserAttributeValuesMap, PlatformQuotaItem, PlatformQuotaPlatform } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import UserAttributeForm from '@/components/user/UserAttributeForm.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -78,12 +78,84 @@ const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
 const submitting = ref(false); const passwordCopied = ref(false)
-const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
+const form = reactive({ email: '', password: '', username: '', notes: '', customAttributes: {} as UserAttributeValuesMap })
+
+// 并发 / RPM 按平台设置（数据在 user_platform_quotas，与「平台限额」同一张表）。
+// 只暴露 Claude(anthropic) / GPT(openai)；格子里显示实际生效值：该平台设过就是它，
+// 没设过就是用户底层的全局值。保存后两个平台都写成明确的专属值，各自独立计数。
+const LIMIT_PLATFORMS = ['anthropic', 'openai'] as const
+type LimitPlatform = (typeof LIMIT_PLATFORMS)[number]
+type PlatformLimitForm = { concurrency: number | null; rpm_limit: number | null }
+const platformLimits = reactive<Record<LimitPlatform, PlatformLimitForm>>({
+  anthropic: { concurrency: null, rpm_limit: null },
+  openai: { concurrency: null, rpm_limit: null },
+})
+// 加载到的全部平台行（含 USD 限额）：保存时原样带回——PUT 是全量替换，不带会把 USD 限额清掉。
+let platformQuotaRows: PlatformQuotaItem[] = []
+const platformLimitsLoaded = ref(false)
+const platformLimitsLoadFailed = ref(false)
+
+function isLimitPlatform(p: PlatformQuotaPlatform): p is LimitPlatform {
+  return (LIMIT_PLATFORMS as readonly string[]).includes(p)
+}
+
+async function loadPlatformLimits(u: AdminUser) {
+  platformLimitsLoaded.value = false
+  platformLimitsLoadFailed.value = false
+  for (const p of LIMIT_PLATFORMS) {
+    platformLimits[p].concurrency = u.concurrency
+    platformLimits[p].rpm_limit = u.rpm_limit ?? 0
+  }
+  try {
+    const data = await adminAPI.users.getPlatformQuotas(u.id)
+    platformQuotaRows = data.platform_quotas || []
+    for (const row of platformQuotaRows) {
+      if (!isLimitPlatform(row.platform)) continue
+      if (typeof row.concurrency === 'number') platformLimits[row.platform].concurrency = row.concurrency
+      if (typeof row.rpm_limit === 'number') platformLimits[row.platform].rpm_limit = row.rpm_limit
+    }
+    platformLimitsLoaded.value = true
+  } catch {
+    // 拿不到既有平台行就不允许改这一块（否则全量替换会把 USD 限额清掉）
+    platformQuotaRows = []
+    platformLimitsLoadFailed.value = true
+  }
+}
+
+function toIntLimit(v: number | null): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null
+}
+
+async function savePlatformLimits(userId: number) {
+  if (!platformLimitsLoaded.value) return
+  const existing = new Map(platformQuotaRows.map((r) => [r.platform, r] as const))
+  const payload = platformQuotaRows.map((row) => ({
+    platform: row.platform,
+    daily_limit_usd: row.daily_limit_usd ?? null,
+    weekly_limit_usd: row.weekly_limit_usd ?? null,
+    monthly_limit_usd: row.monthly_limit_usd ?? null,
+    concurrency: isLimitPlatform(row.platform) ? toIntLimit(platformLimits[row.platform].concurrency) : (row.concurrency ?? null),
+    rpm_limit: isLimitPlatform(row.platform) ? toIntLimit(platformLimits[row.platform].rpm_limit) : (row.rpm_limit ?? null),
+  }))
+  for (const p of LIMIT_PLATFORMS) {
+    if (existing.has(p)) continue
+    payload.push({
+      platform: p,
+      daily_limit_usd: null,
+      weekly_limit_usd: null,
+      monthly_limit_usd: null,
+      concurrency: toIntLimit(platformLimits[p].concurrency),
+      rpm_limit: toIntLimit(platformLimits[p].rpm_limit),
+    })
+  }
+  await adminAPI.users.updatePlatformQuotas(userId, payload)
+}
 
 watch(() => props.user, (u) => {
   if (u) {
-    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
+    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', customAttributes: {} })
     passwordCopied.value = false
+    void loadPlatformLimits(u)
   }
 }, { immediate: true })
 
@@ -103,15 +175,20 @@ const handleUpdateUser = async () => {
     appStore.showError(t('admin.users.emailRequired'))
     return
   }
-  if (form.concurrency < 1) {
-    appStore.showError(t('admin.users.concurrencyMin'))
-    return
+  if (platformLimitsLoaded.value) {
+    for (const p of LIMIT_PLATFORMS) {
+      if (toIntLimit(platformLimits[p].concurrency) === null || toIntLimit(platformLimits[p].rpm_limit) === null) {
+        appStore.showError(t('admin.users.form.platformLimits.invalid'))
+        return
+      }
+    }
   }
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
+    const data: any = { email: form.email, username: form.username, notes: form.notes }
     if (form.password.trim()) data.password = form.password.trim()
     await adminAPI.users.update(props.user.id, data)
+    await savePlatformLimits(props.user.id)
     if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(props.user.id, form.customAttributes)
     appStore.showSuccess(t('admin.users.userUpdated'))
     emit('success'); emit('close')

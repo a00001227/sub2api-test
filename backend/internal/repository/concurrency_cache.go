@@ -227,12 +227,21 @@ func accountSlotKey(accountID int64) string {
 	return fmt.Sprintf("%s%d", accountSlotKeyPrefix, accountID)
 }
 
-func userSlotKey(userID int64) string {
-	return fmt.Sprintf("%s%d", userSlotKeyPrefix, userID)
+// userSlotKey / waitQueueKey：platform 非空 = 用户在该平台的专属槽位/队列
+// （concurrency:user:{id}:{platform}），空串 = 全平台共享（concurrency:user:{id}）。
+// 两种键都落在 concurrency:user:* / concurrency:wait:* 通配范围内，启动清理无需改动。
+func userSlotKey(userID int64, platform string) string {
+	if platform == "" {
+		return fmt.Sprintf("%s%d", userSlotKeyPrefix, userID)
+	}
+	return fmt.Sprintf("%s%d:%s", userSlotKeyPrefix, userID, platform)
 }
 
-func waitQueueKey(userID int64) string {
-	return fmt.Sprintf("%s%d", waitQueueKeyPrefix, userID)
+func waitQueueKey(userID int64, platform string) string {
+	if platform == "" {
+		return fmt.Sprintf("%s%d", waitQueueKeyPrefix, userID)
+	}
+	return fmt.Sprintf("%s%d:%s", waitQueueKeyPrefix, userID, platform)
 }
 
 func accountWaitKey(accountID int64) string {
@@ -305,8 +314,8 @@ func (c *concurrencyCache) GetAccountConcurrencyBatch(ctx context.Context, accou
 
 // User slot operations
 
-func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
-	key := userSlotKey(userID)
+func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, platform string, maxConcurrency int, requestID string) (bool, error) {
+	key := userSlotKey(userID, platform)
 	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取，确保多实例时钟一致
 	result, err := acquireScript.Run(ctx, c.rdb, []string{key}, maxConcurrency, c.slotTTLSeconds, requestID).Int()
 	if err != nil {
@@ -315,13 +324,13 @@ func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, ma
 	return result == 1, nil
 }
 
-func (c *concurrencyCache) ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error {
-	key := userSlotKey(userID)
+func (c *concurrencyCache) ReleaseUserSlot(ctx context.Context, userID int64, platform string, requestID string) error {
+	key := userSlotKey(userID, platform)
 	return c.rdb.ZRem(ctx, key, requestID).Err()
 }
 
-func (c *concurrencyCache) GetUserConcurrency(ctx context.Context, userID int64) (int, error) {
-	key := userSlotKey(userID)
+func (c *concurrencyCache) GetUserConcurrency(ctx context.Context, userID int64, platform string) (int, error) {
+	key := userSlotKey(userID, platform)
 	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取
 	result, err := getCountScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds).Int()
 	if err != nil {
@@ -332,8 +341,8 @@ func (c *concurrencyCache) GetUserConcurrency(ctx context.Context, userID int64)
 
 // Wait queue operations
 
-func (c *concurrencyCache) IncrementWaitCount(ctx context.Context, userID int64, maxWait int) (bool, error) {
-	key := waitQueueKey(userID)
+func (c *concurrencyCache) IncrementWaitCount(ctx context.Context, userID int64, platform string, maxWait int) (bool, error) {
+	key := waitQueueKey(userID, platform)
 	result, err := incrementWaitScript.Run(ctx, c.rdb, []string{key}, maxWait, c.waitQueueTTLSeconds).Int()
 	if err != nil {
 		return false, err
@@ -341,8 +350,8 @@ func (c *concurrencyCache) IncrementWaitCount(ctx context.Context, userID int64,
 	return result == 1, nil
 }
 
-func (c *concurrencyCache) DecrementWaitCount(ctx context.Context, userID int64) error {
-	key := waitQueueKey(userID)
+func (c *concurrencyCache) DecrementWaitCount(ctx context.Context, userID int64, platform string) error {
+	key := waitQueueKey(userID, platform)
 	_, err := decrementWaitScript.Run(ctx, c.rdb, []string{key}).Result()
 	return err
 }

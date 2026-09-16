@@ -42,6 +42,9 @@ type UserPlatformQuotaRecord struct {
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
+	// 平台专属并发 / RPM 上限：nil = 沿用用户全局值；0 = 不限；>0 = 专属上限（替代全局值，不叠加）。
+	Concurrency *int
+	RPMLimit    *int
 }
 
 // UserPlatformQuotaRepository 定义 service 层所需的 user × platform quota 数据访问端口。

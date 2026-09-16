@@ -73,6 +73,33 @@ func (c *userRPMCacheImpl) IncrementUserRPM(ctx context.Context, userID int64) (
 	return c.atomicIncr(ctx, key)
 }
 
+// IncrementUserPlatformRPM 递增用户在某平台的分钟计数（用户设了平台专属 RPM 时）。
+func (c *userRPMCacheImpl) IncrementUserPlatformRPM(ctx context.Context, userID int64, platform string) (int, error) {
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := fmt.Sprintf("%s%d:%s:%d", userRPMKeyPrefix, userID, platform, minute)
+	return c.atomicIncr(ctx, key)
+}
+
+// GetUserPlatformRPM 获取用户在某平台当前分钟已用 RPM（只读）。
+func (c *userRPMCacheImpl) GetUserPlatformRPM(ctx context.Context, userID int64, platform string) (int, error) {
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := fmt.Sprintf("%s%d:%s:%d", userRPMKeyPrefix, userID, platform, minute)
+	val, err := c.rdb.Get(ctx, key).Int()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("user platform rpm get: %w", err)
+	}
+	return val, nil
+}
+
 // GetUserGroupRPM 获取 (user, group) 当前分钟已用 RPM（只读）。
 func (c *userRPMCacheImpl) GetUserGroupRPM(ctx context.Context, userID, groupID int64) (int, error) {
 	minute, err := c.minuteTS(ctx)

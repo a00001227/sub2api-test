@@ -1973,7 +1973,17 @@ export default {
         selectStatus: '选择状态',
         rpmLimit: '每分钟请求数 (RPM)',
         rpmLimitPlaceholder: '0 表示不限制',
-        rpmLimitHint: '该用户每分钟最大请求数，0 = 不限制；仅在所用分组未设置 rpm_limit 时作为兜底生效'
+        rpmLimitHint: '该用户每分钟最大请求数（与分组 RPM 同时生效），0 = 不限制',
+        platformLimits: {
+          title: '并发数 / RPM（按平台）',
+          hint: '各平台独立计数、互不影响；0 = 该平台不限。分组若另设了 RPM，两者同时生效。',
+          concurrency: '并发数',
+          rpm: 'RPM（每分钟请求数）',
+          anthropic: 'Claude',
+          openai: 'GPT',
+          invalid: '并发数 / RPM 必须是不小于 0 的整数',
+          loadFailed: '加载该用户的平台设置失败，本次不会修改并发 / RPM',
+        }
       },
       adjustBalance: '调整余额',
       adjustConcurrency: '调整并发数',
@@ -6035,6 +6045,14 @@ export default {
         affiliateRebateRateHint: '充值后返给邀请人的比例（0-100%，例如填写 10 表示返利 10%）',
         defaultConcurrency: '默认并发数',
         defaultConcurrencyHint: '新用户的最大并发请求数',
+        platformLimits: {
+          title: '默认并发数 / RPM（按平台）',
+          hint: '新用户注册时按平台写入，Claude 与 GPT 各自独立计数；0 = 该平台不限。已有用户不受影响，可在「编辑用户」里单独改。',
+          concurrency: '并发数',
+          rpm: 'RPM（每分钟请求数）',
+          anthropic: 'Claude',
+          openai: 'GPT',
+        },
         proxyDefaultMaxBindings: '代理默认最大绑定数',
         proxyDefaultMaxBindingsHint: '新建代理未指定时的默认绑定账号数：1=独占，N=共用，0=不限',
         defaultUserRpmLimit: '默认用户 RPM 限制',

@@ -755,12 +755,22 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 		}
 	}
 
-	// RPM 限流：级联回落（Override → Group → User），放在最后以避免为注定失败的请求增加计数。
-	if err := s.checkRPM(ctx, user, group); err != nil {
+	// RPM 限流：级联回落（Override → Group → User/平台），放在最后以避免为注定失败的请求增加计数。
+	if err := s.checkRPM(ctx, user, group, platform); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// CheckRPMEligibility 仅执行 RPM 级联限流（override → group → user/平台），不查余额/订阅/平台额度。
+// 供中央 edge 转发路径在转发前调用：EdgeForward 命中即 c.Abort()，handler 里的
+// CheckBillingEligibility 走不到，cell 侧又对转发流量免检，否则 edge 模式下 RPM 全链失效。
+func (s *BillingCacheService) CheckRPMEligibility(ctx context.Context, user *User, group *Group, platform string) error {
+	if s == nil || s.cfg == nil || s.cfg.RunMode == config.RunModeSimple {
+		return nil
+	}
+	return s.checkRPM(ctx, user, group, platform)
 }
 
 // checkRPM 执行并行 RPM 限流，所有适用的限制同时生效，任一超限即拒绝：
@@ -768,11 +778,13 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 //  1. (用户, 分组) rpm_override       — 最细粒度：管理员为特定用户在特定分组设定的专属限额。
 //     override=0 表示该用户在该分组免检（绿灯），但 user 级全局上限仍然生效。
 //  2. group.rpm_limit                 — 分组级：该分组的统一 RPM 容量（仅当无 override 时生效）。
-//  3. user.rpm_limit                  — 用户级全局硬上限：无论 override/group 如何配置，始终生效。
+//  3. user.rpm_limit                  — 用户级硬上限：无论 override/group 如何配置，始终生效。
+//     若用户为该 platform 设了专属 RPM（user_platform_quotas.rpm_limit），则用专属值与
+//     平台独立计数（rpm:u:{uid}:{platform}:{minute}）替代全局值；platform 为空则一律走全局。
 //
 // 与旧版"级联互斥"设计不同，新版确保 user.rpm_limit 作为全局天花板不会被 group 或 override 覆盖。
 // Redis 故障一律 fail-open（打 warning，不阻塞业务）。
-func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *Group) error {
+func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *Group, platform string) error {
 	if s == nil || s.userRPMCache == nil || user == nil {
 		return nil
 	}
@@ -828,18 +840,26 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 		}
 	}
 
-	// ── 第二层：用户级全局硬上限（始终生效） ──
-	if user.RPMLimit > 0 {
-		count, err := s.userRPMCache.IncrementUserRPM(ctx, user.ID)
+	// ── 第二层：用户级硬上限（始终生效）；平台设了专属值则用平台专属上限 + 平台独立计数 ──
+	if userLimit, scoped := user.EffectiveRPMLimit(platform); userLimit > 0 {
+		var (
+			count int
+			err   error
+		)
+		if scoped {
+			count, err = s.userRPMCache.IncrementUserPlatformRPM(ctx, user.ID, platform)
+		} else {
+			count, err = s.userRPMCache.IncrementUserRPM(ctx, user.ID)
+		}
 		if err != nil {
 			logger.LegacyPrintf(
 				"service.billing_cache",
-				"Warning: rpm increment (user) failed for user=%d: %v",
-				user.ID, err,
+				"Warning: rpm increment (user, platform=%q) failed for user=%d: %v",
+				platform, user.ID, err,
 			)
 			return nil // fail-open
 		}
-		if count > user.RPMLimit {
+		if count > userLimit {
 			return ErrUserRPMExceeded
 		}
 	}

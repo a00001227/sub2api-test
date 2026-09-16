@@ -232,7 +232,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
 	// 1. 首先获取用户并发槽位
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
+	slotUserID, slotPlatform, slotMax := middleware2.ResolveUserSlot(c)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, slotUserID, slotPlatform, slotMax, reqStream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
@@ -1582,18 +1583,40 @@ func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, su
 //
 // 返回 (release, true) 成功持槽;(nil, false) 表示已写好并发超限错误响应,调用方收尾。
 func (h *GatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream bool) (func(), bool) {
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
+	if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
 		// 理论不可达(转发路径已过 apiKeyAuth 鉴权);无身份则不阻塞。
 		return func() {}, true
 	}
 	streamStarted := false
-	releaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, isStream, &streamStarted)
+	slotUserID, slotPlatform, slotMax := middleware2.ResolveUserSlot(c)
+	releaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, slotUserID, slotPlatform, slotMax, isStream, &streamStarted)
 	if err != nil {
 		h.handleConcurrencyError(c, err, "user", streamStarted)
 		return nil, false
 	}
 	return wrapReleaseOnDone(c.Request.Context(), releaseFunc), true
+}
+
+// CheckForwardRPM 在中央 edge 转发路径上执行消费者 RPM 限流(override → group → user/平台)。
+//
+// 与 AcquireForwardUserSlot 同因:EdgeForward 命中即 c.Abort(),handler 里的 CheckBillingEligibility
+// (RPM 在其中)走不到,cell 侧又对转发流量免检——不补上,edge 模式下 RPM 三层全部失效。
+// 只查 RPM,不动余额/订阅/平台额度(职责划分不变)。返回 false 表示已写好 429 + Retry-After。
+func (h *GatewayHandler) CheckForwardRPM(c *gin.Context) bool {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.User == nil || h.billingCacheService == nil {
+		return true
+	}
+	err := h.billingCacheService.CheckRPMEligibility(c.Request.Context(), apiKey.User, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey))
+	if err == nil {
+		return true
+	}
+	status, code, message, retryAfter := billingErrorDetails(err)
+	if retryAfter > 0 {
+		c.Header("Retry-After", strconv.Itoa(retryAfter))
+	}
+	h.handleStreamingAwareError(c, status, code, message, false)
+	return false
 }
 
 // handleConcurrencyError handles concurrency-related acquire errors.

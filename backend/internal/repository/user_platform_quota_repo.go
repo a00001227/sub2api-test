@@ -27,6 +27,9 @@ type UserPlatformQuotaRecord struct {
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
+	// 平台专属并发 / RPM 上限：nil = 沿用用户全局值；0 = 不限；>0 = 专属上限（替代全局值）。
+	Concurrency *int
+	RPMLimit    *int
 }
 
 // ErrUserPlatformQuotaNotFound 用于 ResetExpiredWindow 等需要"必须命中已有记录"的方法。
@@ -96,21 +99,22 @@ func (r *userPlatformQuotaRepository) BulkInsertInitial(ctx context.Context, rec
 	client := clientFromContext(ctx, r.client)
 
 	var sb strings.Builder
-	_, _ = sb.WriteString("INSERT INTO user_platform_quotas (user_id, platform, daily_limit_usd, weekly_limit_usd, monthly_limit_usd, daily_usage_usd, weekly_usage_usd, monthly_usage_usd, created_at, updated_at) VALUES ")
-	args := make([]any, 0, len(records)*6)
+	_, _ = sb.WriteString("INSERT INTO user_platform_quotas (user_id, platform, daily_limit_usd, weekly_limit_usd, monthly_limit_usd, concurrency, rpm_limit, daily_usage_usd, weekly_usage_usd, monthly_usage_usd, created_at, updated_at) VALUES ")
+	args := make([]any, 0, len(records)*8)
 	// 统一时间戳：避免循环内多次 time.Now() 让同一批记录的 created_at/updated_at
 	// 出现亚毫秒级偏差（与 UpsertForUser 的 now := time.Now() 风格一致）。
 	now := time.Now()
 	for i, rec := range records {
-		base := i * 6
+		base := i * 8
 		if i > 0 {
 			_, _ = sb.WriteString(",")
 		}
-		fmt.Fprintf(&sb, "($%d,$%d,$%d,$%d,$%d,0,0,0,$%d,$%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+6)
+		fmt.Fprintf(&sb, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,0,0,0,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+8)
 		args = append(args,
 			rec.UserID, rec.Platform,
 			rec.DailyLimitUSD, rec.WeeklyLimitUSD, rec.MonthlyLimitUSD,
+			rec.Concurrency, rec.RPMLimit,
 			now,
 		)
 	}
@@ -123,6 +127,8 @@ func (r *userPlatformQuotaRepository) BulkInsertInitial(ctx context.Context, rec
 			daily_limit_usd   = COALESCE(user_platform_quotas.daily_limit_usd, EXCLUDED.daily_limit_usd),
 			weekly_limit_usd  = COALESCE(user_platform_quotas.weekly_limit_usd, EXCLUDED.weekly_limit_usd),
 			monthly_limit_usd = COALESCE(user_platform_quotas.monthly_limit_usd, EXCLUDED.monthly_limit_usd),
+			concurrency       = COALESCE(user_platform_quotas.concurrency, EXCLUDED.concurrency),
+			rpm_limit         = COALESCE(user_platform_quotas.rpm_limit, EXCLUDED.rpm_limit),
 			updated_at        = EXCLUDED.updated_at`)
 
 	_, err := client.ExecContext(ctx, sb.String(), args...)
@@ -307,6 +313,8 @@ func entQuotaToRecord(e *dbent.UserPlatformQuota) *UserPlatformQuotaRecord {
 		DailyWindowStart:   e.DailyWindowStart,
 		WeeklyWindowStart:  e.WeeklyWindowStart,
 		MonthlyWindowStart: e.MonthlyWindowStart,
+		Concurrency:        e.Concurrency,
+		RPMLimit:           e.RpmLimit,
 	}
 }
 
@@ -397,11 +405,12 @@ func softDeleteMissingPlatforms(ctx context.Context, client *dbent.Client, userI
 func updateLimitsRow(ctx context.Context, client *dbent.Client, userID int64, rec UserPlatformQuotaRecord, now time.Time) (int64, error) {
 	const query = `UPDATE user_platform_quotas
 		SET daily_limit_usd = $1, weekly_limit_usd = $2, monthly_limit_usd = $3,
+		    concurrency = $7, rpm_limit = $8,
 		    deleted_at = NULL, updated_at = $4
 		WHERE user_id = $5 AND platform = $6 AND deleted_at IS NULL`
 	res, err := client.ExecContext(ctx, query,
 		rec.DailyLimitUSD, rec.WeeklyLimitUSD, rec.MonthlyLimitUSD, now,
-		userID, rec.Platform)
+		userID, rec.Platform, rec.Concurrency, rec.RPMLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -415,13 +424,14 @@ func updateLimitsRow(ctx context.Context, client *dbent.Client, userID int64, re
 func insertLimitsRow(ctx context.Context, client *dbent.Client, userID int64, rec UserPlatformQuotaRecord, now time.Time) error {
 	const query = `INSERT INTO user_platform_quotas
 		(user_id, platform, daily_limit_usd, weekly_limit_usd, monthly_limit_usd,
+		 concurrency, rpm_limit,
 		 daily_usage_usd, weekly_usage_usd, monthly_usage_usd, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, 0, 0, 0, $6, $6)
+		VALUES ($1, $2, $3, $4, $5, $7, $8, 0, 0, 0, $6, $6)
 		ON CONFLICT (user_id, platform) WHERE deleted_at IS NULL DO NOTHING`
 	res, err := client.ExecContext(ctx, query,
 		userID, rec.Platform,
 		rec.DailyLimitUSD, rec.WeeklyLimitUSD, rec.MonthlyLimitUSD,
-		now)
+		now, rec.Concurrency, rec.RPMLimit)
 	if err != nil {
 		return err
 	}
