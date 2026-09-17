@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/rand"
@@ -294,6 +295,21 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				c.Header("Content-Type", "application/json")
 				c.String(http.StatusForbidden, `{"type":"error","error":{"type":"permission_error","message":"model not allowed"}}`)
 				c.Abort()
+				return
+			}
+		}
+
+		// 模型平台 ≠ 分组平台(如 key 绑在 Claude 组、请求 gpt-* 模型却没带 GPT 组的 slug 前缀):
+		// 转到 cell 也只会被拒回一条看不懂的 404 "model: gpt-xxx"。在源头回 400 并说明怎么改
+		// (带上分组 slug 前缀选对通道),不占 cell、不占并发槽。只在两侧平台都能判定时拦;
+		// 模型前缀不认识(PlatformForModelName 返回空)或分组无平台时放行,交由既有链路处理。
+		if apiKey.Group != nil {
+			reqModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+			if msg := edgeModelPlatformMismatch(reqModel, apiKey.Group); msg != "" {
+				slog.Info("edge_forward: 模型平台与分组平台不一致,拒绝转发", "model", reqModel, "group_slug", apiKey.Group.Slug, "group_platform", apiKey.Group.Platform)
+				// 客户端选错通道,非可用性故障 → 标记业务限制,排除出 SLA/健康分(仍留错误列表可见)。
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+				writeEdgeInvalidRequest(c, apiKey.Group.Platform, msg)
 				return
 			}
 		}
@@ -672,6 +688,43 @@ func pumpWS(ctx context.Context, src, dst *coderws.Conn, errc chan error) {
 			return
 		}
 	}
+}
+
+// edgeModelPlatformMismatch 判断请求模型所属平台与分组平台是否冲突;冲突时返回给客户端的
+// 说明文案,否则返回 ""。只比较 anthropic / openai 两侧都能由前缀判定的情况。
+func edgeModelPlatformMismatch(reqModel string, group *service.Group) string {
+	if group == nil || reqModel == "" {
+		return ""
+	}
+	groupPlatform := strings.TrimSpace(group.Platform)
+	modelPlatform := service.PlatformForModelName(reqModel)
+	if groupPlatform == "" || modelPlatform == "" || groupPlatform == modelPlatform {
+		return ""
+	}
+	channel := strings.TrimSpace(group.Name)
+	if channel == "" {
+		channel = strings.TrimSpace(group.Slug)
+	}
+	return fmt.Sprintf(
+		"Model '%s' belongs to platform '%s', but this request went to channel '%s' (platform '%s'). "+
+			"Select the matching channel by adding its slug prefix to the base URL: https://<host>/<channel-slug>/v1/...",
+		reqModel, modelPlatform, channel, groupPlatform,
+	)
+}
+
+// writeEdgeInvalidRequest 按分组平台的协议形状写 400 invalid_request_error。
+func writeEdgeInvalidRequest(c *gin.Context, groupPlatform, message string) {
+	c.Abort()
+	if groupPlatform == service.PlatformOpenAI {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{"type": "invalid_request_error", "message": message},
+		})
+		return
+	}
+	c.JSON(http.StatusBadRequest, gin.H{
+		"type":  "error",
+		"error": gin.H{"type": "invalid_request_error", "message": message},
+	})
 }
 
 func writeEdgeError(c *gin.Context) {

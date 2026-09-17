@@ -1192,7 +1192,7 @@ func classifyOpsPhase(errType, message, code string) string {
 			return "request"
 		}
 		return "upstream"
-	case "invalid_request_error":
+	case "invalid_request_error", "not_found_error":
 		return "request"
 	case "upstream_error", "overloaded_error":
 		return "upstream"
@@ -1208,7 +1208,11 @@ func classifyOpsPhase(errType, message, code string) string {
 
 func classifyOpsSeverity(errType string, status int) string {
 	switch errType {
-	case "invalid_request_error", "authentication_error", "billing_error", "subscription_error":
+	case "invalid_request_error", "authentication_error", "billing_error", "subscription_error", "not_found_error":
+		return "P3"
+	}
+	if status == 404 {
+		// 路径/模型名发错是客户端侧问题,与 invalid_request_error 同级。
 		return "P3"
 	}
 	if status >= 500 {
@@ -1259,6 +1263,17 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	// 转换 bug 导致的 400」会一并被盖,属已知取舍(仍可在错误列表发现)。
 	if errType == "invalid_request_error" {
 		isBusinessLimited = true
+	}
+	// 404「模型不存在」= 客户端把模型/分组发错(典型:key 绑在 Claude 组、请求 GPT 模型却没带
+	// GPT 组的 slug 前缀,请求进了 Claude 组;cell 回 "model: gpt-xxx"。OpenAI 形状则是
+	// "The model 'x' does not exist")。请求本身
+	// 指向不存在的模型,与中转可用性无关 → 归 request 相位(owner=client)并排除出 SLA/健康分,
+	// 仍留错误列表可见。覆盖 upstreamError 抬成的 "upstream" 相位:哪层拒的不重要,成因在客户端。
+	// 只认「模型不存在」形状的文案:其它上游 404(如 provider 端点不支持 count_tokens / images)
+	// 仍按既有口径计入(见 TestClassifyOpsUpstreamAuthTextStillCountsForSLA)。
+	if (status == 404 || errType == "not_found_error") && isOpsModelNotFoundMessage(msg) {
+		isBusinessLimited = true
+		phase = "request"
 	}
 	// 内部 429 限流——中转自身的闸(pacing RPM/RPH 软闸、enforcement 反蒸馏、并发闸、配额)
 	// 主动限流回客户端,属预期内的业务限制而非可用性故障 → 排除出 SLA/异常/请求错误率
@@ -1457,6 +1472,26 @@ func hasOpsUpstreamErrorContext(c *gin.Context) bool {
 		}
 	}
 	return false
+}
+
+// isOpsModelNotFoundMessage 识别「模型不存在」形状的 404 文案(入参已小写):
+//   - Anthropic:not_found_error 的 message 就是 "model: <name>"
+//   - OpenAI:"The model 'x' does not exist" / "model not found"
+func isOpsModelNotFoundMessage(msgLower string) bool {
+	m := strings.TrimSpace(msgLower)
+	if m == "" {
+		return false
+	}
+	if strings.HasPrefix(m, "model:") {
+		return true
+	}
+	if !strings.Contains(m, "model") {
+		return false
+	}
+	return strings.Contains(m, "does not exist") ||
+		strings.Contains(m, "not found") ||
+		strings.Contains(m, "unknown model") ||
+		strings.Contains(m, "no such model")
 }
 
 func isOpsNoAvailableAccountMessage(message string) bool {

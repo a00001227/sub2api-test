@@ -170,7 +170,7 @@ func (s *GatewayService) ForwardAsResponses(
 		}
 
 		// Non-failover error: return Responses-formatted error to client
-		writeResponsesError(c, mapUpstreamStatusCode(resp.StatusCode), "server_error", upstreamMsg)
+		writeResponsesError(c, mapUpstreamStatusCode(resp.StatusCode), upstreamForwardErrorType(resp.StatusCode), upstreamMsg)
 		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}
 
@@ -525,6 +525,24 @@ func writeResponsesError(c *gin.Context, statusCode int, code, message string) {
 			"message": message,
 		},
 	})
+}
+
+// upstreamForwardErrorType 按上游状态码给回包一个能被客户端与运营分类识别的错误类型。
+// 此前 chat_completions / responses 转发路径把所有上游错误一律标 "server_error":上游 404
+// (对未知模型回 not_found_error "model: xxx",典型是 key 绑在 Claude 组、请求 GPT 模型却没带
+// GPT 组的 slug 前缀)
+// 也被当成中转内部错误(ops 归「内部」P2、计入 SLA)。4xx 是请求/客户端侧的锅,按语义标型。
+func upstreamForwardErrorType(status int) string {
+	switch {
+	case status == http.StatusNotFound:
+		return "not_found_error"
+	case status == http.StatusBadRequest:
+		return "invalid_request_error"
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	default:
+		return "server_error"
+	}
 }
 
 // mapUpstreamStatusCode maps upstream HTTP status codes to appropriate client-facing codes.
