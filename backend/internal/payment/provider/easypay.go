@@ -95,15 +95,21 @@ func (e *EasyPay) apiBase() string {
 func (e *EasyPay) Name() string        { return "EasyPay" }
 func (e *EasyPay) ProviderKey() string { return payment.TypeEasyPay }
 func (e *EasyPay) SupportedTypes() []payment.PaymentType {
-	return []payment.PaymentType{payment.TypeAlipay, payment.TypeWxpay, payment.TypeUSDT}
+	return []payment.PaymentType{payment.TypeAlipay, payment.TypeWxpay, payment.TypeUSDT, payment.TypeUSDC}
 }
 
 // resolveType maps the internal payment type to the panel's channel code.
-// USDT panels often expose a bespoke channel code (e.g. "usdt", "trc20"),
-// configurable via the instance "usdtType" config key; it defaults to "usdt".
+// Stablecoin panels often expose a bespoke channel code (e.g. "usdt.trc20",
+// "usdc.solana"), configurable via the instance "usdtType" / "usdcType" config
+// keys; each defaults to the plain type ("usdt" / "usdc").
 func (e *EasyPay) resolveType(paymentType string) string {
-	if paymentType == payment.TypeUSDT {
+	switch paymentType {
+	case payment.TypeUSDT:
 		if v := strings.TrimSpace(e.config["usdtType"]); v != "" {
+			return v
+		}
+	case payment.TypeUSDC:
+		if v := strings.TrimSpace(e.config["usdcType"]); v != "" {
 			return v
 		}
 	}
@@ -454,6 +460,12 @@ func (e *EasyPay) resolveCID(paymentType string) string {
 	}
 	if strings.HasPrefix(paymentType, "usdt") {
 		if v := e.config["cidUsdt"]; v != "" {
+			return v
+		}
+		return e.config["cid"]
+	}
+	if strings.HasPrefix(paymentType, "usdc") {
+		if v := e.config["cidUsdc"]; v != "" {
 			return v
 		}
 		return e.config["cid"]

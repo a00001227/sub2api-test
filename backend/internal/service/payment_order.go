@@ -58,7 +58,8 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		limitAmount = plan.Price
 	} else if req.OrderType == payment.OrderTypeBalance {
 		multiplier := cfg.BalanceRechargeMultiplier
-		if req.PaymentType == payment.TypeUSDT {
+		if payment.IsStablecoinType(req.PaymentType) {
+			// USDT / USDC 共用稳定币倍率(都是 1:1 美元稳定币,产品决定不分开配)。
 			multiplier = cfg.USDTRechargeMultiplier
 		}
 		orderAmount = calculateCreditedBalance(req.Amount, multiplier)

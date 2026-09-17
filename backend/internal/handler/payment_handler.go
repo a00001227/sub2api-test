@@ -118,10 +118,10 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	service.ApplyRechargeConfigBounds(limitsResp, cfg.MinAmount, cfg.MaxAmount)
 
 	// Attach the per-method balance-credit multiplier so the client preview matches
-	// what the server credits (mirrors payment_order.go): USDT uses its dedicated
-	// multiplier, every other method uses the global one.
+	// what the server credits (mirrors payment_order.go): stablecoins (USDT/USDC)
+	// use the shared stablecoin multiplier, every other method uses the global one.
 	for pt, ml := range limitsResp.Methods {
-		if pt == payment.TypeUSDT {
+		if payment.IsStablecoinType(pt) {
 			ml.RechargeMultiplier = cfg.USDTRechargeMultiplier
 		} else {
 			ml.RechargeMultiplier = cfg.BalanceRechargeMultiplier

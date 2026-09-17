@@ -19,6 +19,7 @@ const (
 	TypeEasyPay      PaymentType = "easypay"
 	TypeAirwallex    PaymentType = "airwallex"
 	TypeUSDT         PaymentType = "usdt"
+	TypeUSDC         PaymentType = "usdc"
 )
 
 // Order status constants shared across payment and service layers.
@@ -80,6 +81,13 @@ const ConfigKeyPublishableKey = "publishableKey"
 
 // GetBasePaymentType extracts the base payment method from a composite key.
 // For example, "alipay_direct" -> "alipay".
+// IsStablecoinType reports whether the payment type is a USD stablecoin channel
+// (USDT / USDC). They share the stablecoin recharge multiplier and the
+// "N <COIN>" display shape instead of a fiat currency format.
+func IsStablecoinType(t string) bool {
+	return t == TypeUSDT || t == TypeUSDC
+}
+
 func GetBasePaymentType(t string) string {
 	switch {
 	case t == TypeEasyPay:

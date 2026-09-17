@@ -31,7 +31,7 @@ export interface CallbackPaths {
 
 /** Maps provider key → available payment types. */
 export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
-  easypay: ['alipay', 'wxpay', 'usdt'],
+  easypay: ['alipay', 'wxpay', 'usdt', 'usdc'],
   alipay: ['alipay'],
   wxpay: ['wxpay'],
   stripe: ['card', 'alipay', 'wxpay', 'link'],
@@ -42,7 +42,7 @@ export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
 export const EASYPAY_PAYMENT_MODES = ['qrcode', 'popup'] as const
 
 /** Fixed display order for user-facing payment methods */
-export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct', 'stripe', 'airwallex', 'usdt'] as const
+export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct', 'stripe', 'airwallex', 'usdt', 'usdc'] as const
 
 /** Payment mode constants */
 export const PAYMENT_MODE_QRCODE = 'qrcode'
@@ -119,6 +119,8 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'cidWxpay', label: '', sensitive: false, optional: true },
     { key: 'cidUsdt', label: '', sensitive: false, optional: true },
     { key: 'usdtType', label: '', sensitive: false, optional: true, defaultValue: 'usdt', hintKey: 'admin.settings.payment.field_usdtTypeHint' },
+    { key: 'cidUsdc', label: '', sensitive: false, optional: true },
+    { key: 'usdcType', label: '', sensitive: false, optional: true, defaultValue: 'usdc.solana', hintKey: 'admin.settings.payment.field_usdcTypeHint' },
     { key: 'currency', label: '', sensitive: false, optional: true, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
   ],
   alipay: [
