@@ -1,6 +1,11 @@
 package service
 
-import "testing"
+import (
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
 
 func TestClassifyUpstreamCause(t *testing.T) {
 	tests := []struct {
@@ -65,5 +70,79 @@ func TestParseEdgeUpstreamCauseHeader(t *testing.T) {
 					tt.in, status, slug, ok, tt.wantStatus, tt.wantSlug, tt.wantOK)
 			}
 		})
+	}
+}
+
+// 摘要头:编码/解析往返、限长脱敏、从 ops 事件补齐账号信息、没信息时不发头。
+func TestEdgeUpstreamDetail_RoundTrip(t *testing.T) {
+	in := &EdgeUpstreamDetail{Status: 403, Message: `Overloaded "中文" | x`, Platform: "anthropic",
+		AccountID: 9, AccountName: "pa_169da279", RequestID: "req_011", Kind: "stream_error"}
+	hv := EncodeEdgeUpstreamDetail(in)
+	for _, r := range hv {
+		if r > 0x7e || r < 0x21 {
+			t.Fatalf("header value must be printable ASCII, got %q", hv)
+		}
+	}
+	out := ParseEdgeUpstreamDetailHeader(hv)
+	if out == nil || *out != *in {
+		t.Fatalf("round trip mismatch: %+v vs %+v", out, in)
+	}
+	if ParseEdgeUpstreamDetailHeader("") != nil || ParseEdgeUpstreamDetailHeader("%zz") != nil || ParseEdgeUpstreamDetailHeader("{}") != nil {
+		t.Fatal("empty/garbage/blank must parse to nil")
+	}
+}
+
+func TestSanitizeEdgeDetailText_StripsControlAndTruncates(t *testing.T) {
+	got := sanitizeEdgeDetailText("a\r\nb\tc", 10)
+	if got != "a  b c" {
+		t.Fatalf("control chars should become spaces, got %q", got)
+	}
+	long := sanitizeEdgeDetailText("0123456789ABCDEF", 10)
+	if long != "0123456789…" {
+		t.Fatalf("truncate at max runes with ellipsis, got %q", long)
+	}
+}
+
+func TestBuildEdgeUpstreamDetail_FillsFromLastOpsEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	if BuildEdgeUpstreamDetail(c, 0, "") != nil {
+		t.Fatal("nothing known → nil")
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: "anthropic", AccountID: 3, AccountName: "pa_first", UpstreamStatusCode: 429, Message: "first"})
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: "anthropic", AccountID: 7, AccountName: "pa_last", UpstreamStatusCode: 403, UpstreamRequestID: "req_x", Kind: "stream_error", Message: "Overloaded"})
+
+	d := BuildEdgeUpstreamDetail(c, 0, "")
+	if d == nil || d.Status != 403 || d.Message != "Overloaded" || d.AccountName != "pa_last" || d.AccountID != 7 || d.RequestID != "req_x" || d.Kind != "stream_error" {
+		t.Fatalf("should fill from last event, got %+v", d)
+	}
+	// 显式传入的状态码/文案优先,账号仍取自事件。
+	d2 := BuildEdgeUpstreamDetail(c, 502, "explicit")
+	if d2.Status != 502 || d2.Message != "explicit" || d2.AccountName != "pa_last" {
+		t.Fatalf("explicit args must win, got %+v", d2)
+	}
+}
+
+// SetEdgeUpstreamCauseHeader:无 slug 的 401/403 也要发摘要头;流已开始则两个头都不发。
+func TestSetEdgeUpstreamCauseHeader_DetailWithoutSlug(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountName: "pa_x", UpstreamStatusCode: 401, Message: "invalid token"})
+	SetEdgeUpstreamCauseHeader(c, false, 401, "invalid token")
+	if c.Writer.Header().Get(EdgeUpstreamCauseHeader) != "" {
+		t.Fatal("401 has no slug → no cause header")
+	}
+	d := ParseEdgeUpstreamDetailHeader(c.Writer.Header().Get(EdgeUpstreamDetailHeader))
+	if d == nil || d.Status != 401 || d.Message != "invalid token" || d.AccountName != "pa_x" {
+		t.Fatalf("detail header expected, got %+v", d)
+	}
+
+	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
+	SetEdgeUpstreamCauseHeader(c2, true, 529, "Overloaded")
+	if c2.Writer.Header().Get(EdgeUpstreamCauseHeader) != "" || c2.Writer.Header().Get(EdgeUpstreamDetailHeader) != "" {
+		t.Fatal("stream started → no headers")
+	}
+	if v, _ := c2.Get(OpsUpstreamCauseSlugKey); v != "overloaded" {
+		t.Fatalf("slug key must still be set locally, got %v", v)
 	}
 }

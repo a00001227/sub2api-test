@@ -475,9 +475,44 @@ func isCellNoAvailableAccounts(body []byte) bool {
 // handler,故中央原本只能看到被压平的笼统 502;此处把 cell 已知的真实分类补进 ops,
 // 由 OpsErrorLoggerMiddleware 落库。该头不透传给消费者客户端(调用方已 continue 跳过拷贝)。
 func recordEdgeUpstreamCause(c *gin.Context, headerVal string) {
-	if status, slug, ok := service.ParseEdgeUpstreamCauseHeader(headerVal); ok {
-		service.SetOpsUpstreamError(c, status, slug, "")
+	status, slug, ok := service.ParseEdgeUpstreamCauseHeader(headerVal)
+	if !ok {
+		return
 	}
+	// slug 走权威 key(分类器优先读它);message 只在摘要头没先到时用 slug 兜底——
+	// 响应头 map 遍历无序,Detail 头可能先/后到,两种顺序都要让 message 最终是上游原话。
+	service.SetOpsUpstreamCauseSlug(c, slug)
+	if service.HasOpsUpstreamErrorMessage(c) {
+		service.SetOpsUpstreamError(c, status, "", "")
+		return
+	}
+	service.SetOpsUpstreamError(c, status, slug, "")
+}
+
+// recordEdgeUpstreamDetail 解析 cell 回传的上游摘要头(EdgeUpstreamDetailHeader):把脱敏后的
+// 上游原话写成中央 ops 行的 upstream_error_message,并追加一条上游事件(带 cell 上的账号名/
+// 平台/上游 request id),让运维弹窗不用翻 cell 日志就能看到"哪个号、上游说了什么"。
+// 注意 cell 的 account_id 是 cell 本地库主键,与中央 accounts 表无关,只进事件 JSON、不进
+// ops 行的 account_id 列(否则 JOIN 到中央无关的账号)。该头不透传给客户端。
+func recordEdgeUpstreamDetail(c *gin.Context, headerVal string) {
+	d := service.ParseEdgeUpstreamDetailHeader(headerVal)
+	if d == nil {
+		return
+	}
+	service.SetOpsUpstreamError(c, d.Status, d.Message, "")
+	kind := d.Kind
+	if kind == "" {
+		kind = "edge_relay"
+	}
+	service.AppendOpsUpstreamError(c, service.OpsUpstreamErrorEvent{
+		Platform:           d.Platform,
+		AccountID:          d.AccountID,
+		AccountName:        d.AccountName,
+		UpstreamStatusCode: d.Status,
+		UpstreamRequestID:  d.RequestID,
+		Kind:               kind,
+		Message:            d.Message,
+	})
 }
 
 // relayBufferedResponse writes a fully-buffered cell response (headers + status
@@ -492,6 +527,10 @@ func relayBufferedResponse(c *gin.Context, resp *http.Response, body []byte) {
 		if strings.EqualFold(k, service.EdgeUpstreamCauseHeader) {
 			recordEdgeUpstreamCause(c, resp.Header.Get(k))
 			continue // 错误分类边信道:写入中央 ops,不透传给客户端
+		}
+		if strings.EqualFold(k, service.EdgeUpstreamDetailHeader) {
+			recordEdgeUpstreamDetail(c, resp.Header.Get(k))
+			continue // 上游摘要边信道:写入中央 ops,不透传给客户端
 		}
 		for _, v := range vv {
 			h.Add(k, v)
@@ -523,6 +562,10 @@ func streamCellResponse(c *gin.Context, resp *http.Response) (*service.EdgeUsage
 		if strings.EqualFold(k, service.EdgeUpstreamCauseHeader) {
 			recordEdgeUpstreamCause(c, resp.Header.Get(k))
 			continue // 错误分类边信道:写入中央 ops,不透传给客户端
+		}
+		if strings.EqualFold(k, service.EdgeUpstreamDetailHeader) {
+			recordEdgeUpstreamDetail(c, resp.Header.Get(k))
+			continue // 上游摘要边信道:写入中央 ops,不透传给客户端
 		}
 		for _, v := range vv {
 			h.Add(k, v)

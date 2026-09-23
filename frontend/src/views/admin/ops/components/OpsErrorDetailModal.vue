@@ -28,17 +28,19 @@
           </div>
         </div>
 
+        <!-- 用户常显(上游错误也要能看出是谁的请求);账号单独一张卡片:中央自己 JOIN 不到
+             转发到 cell 的号,则从 cell 带回的上游事件里取 account_name 兜底。 -->
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
-            {{ isUpstreamError(detail) ? t('admin.ops.errorDetail.account') : t('admin.ops.errorDetail.user') }}
-          </div>
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.user') }}</div>
           <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-            <template v-if="isUpstreamError(detail)">
-              {{ detail.account_name || (detail.account_id != null ? String(detail.account_id) : '—') }}
-            </template>
-            <template v-else>
-              {{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}
-            </template>
+            {{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.account') }}</div>
+          <div class="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">
+            {{ accountLabel(detail) }}
           </div>
         </div>
 
@@ -197,6 +199,10 @@
                 <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.requestId') }}:</span>
                 <span class="ml-1 font-mono">{{ ev.request_id || ev.client_request_id || '—' }}</span>
               </div>
+              <div>
+                <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.account') }}:</span>
+                <span class="ml-1 break-all font-mono">{{ accountLabel(ev) }}</span>
+              </div>
             </div>
 
             <div v-if="ev.message" class="mt-3 break-words text-sm font-medium text-gray-900 dark:text-white">{{ ev.message }}</div>
@@ -259,11 +265,26 @@ const title = computed(() => {
 
 const emptyText = computed(() => t('admin.ops.errorDetail.noErrorSelected'))
 
-function isUpstreamError(d: OpsErrorDetail | null): boolean {
-  if (!d) return false
-  const phase = String(d.phase || '').toLowerCase()
-  const owner = String(d.error_owner || '').toLowerCase()
-  return phase === 'upstream' && owner === 'provider'
+/** 账号显示名:中央 JOIN 得到的 account_name 优先;转发到 cell 的请求中央 JOIN 不到,
+ *  退回 cell 经上游事件带回的 account_name(取最后一条有值的事件);再退回 account_id。 */
+function accountLabel(d: Pick<OpsErrorDetail, 'account_name' | 'account_id' | 'upstream_errors'> | null): string {
+  if (!d) return '—'
+  if (d.account_name) return d.account_name
+  const raw = d.upstream_errors
+  if (raw) {
+    try {
+      const events = JSON.parse(raw) as Array<{ account_name?: string }>
+      if (Array.isArray(events)) {
+        for (let i = events.length - 1; i >= 0; i--) {
+          const name = events[i]?.account_name
+          if (name) return name
+        }
+      }
+    } catch {
+      // 非法 JSON 忽略,走下面的 account_id 兜底
+    }
+  }
+  return d.account_id != null && d.account_id !== 0 ? String(d.account_id) : '—'
 }
 
 function formatRequestTypeLabel(type: number | null | undefined): string {

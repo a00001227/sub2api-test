@@ -108,6 +108,35 @@ func SetOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 	setOpsUpstreamError(c, upstreamStatusCode, upstreamMessage, upstreamDetail)
 }
 
+// SetOpsUpstreamCauseSlug 写入权威分类 slug(中央 EdgeForward 从 cell 的 Cause 头剥取后用)。
+func SetOpsUpstreamCauseSlug(c *gin.Context, slug string) {
+	if c == nil {
+		return
+	}
+	if slug = strings.TrimSpace(slug); slug != "" {
+		c.Set(OpsUpstreamCauseSlugKey, slug)
+	}
+}
+
+// HasOpsUpstreamErrorMessage 报告 ops 上下文里是否已有上游文案(供中央按头到达顺序决定是否覆盖)。
+func HasOpsUpstreamErrorMessage(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(OpsUpstreamErrorMessageKey)
+	if !ok {
+		return false
+	}
+	s, _ := v.(string)
+	return strings.TrimSpace(s) != ""
+}
+
+// AppendOpsUpstreamError 是 appendOpsUpstreamError 的导出包装,供 middleware 层
+// (中央 EdgeForward 把 cell 带回的上游摘要落成一条上游事件)使用。
+func AppendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
+	appendOpsUpstreamError(c, ev)
+}
+
 func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage, upstreamDetail string) {
 	if c == nil {
 		return

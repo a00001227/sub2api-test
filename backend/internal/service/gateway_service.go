@@ -5873,9 +5873,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			var sseErr *sseStreamErrorEventError
 			if errors.As(err, &sseErr) {
 				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
-				// 保留 StatusCode=403 以兼容既有 failover/客户端响应语义，
-				// 但补全 ResponseBody 与 ops 上下文，让运维日志能反映上游真实错误。
+				// 状态码按帧内 error.type 映射(overloaded→529、rate_limit→429、api_error→500 …),
+				// 未知类型仍回 403 保持旧语义。failover 对 403/429/529/5xx 一视同仁,只影响
+				// 转移耗尽后给客户端的文案与 ops 分类 —— 否则 Anthropic 过载会被翻译成
+				// "Upstream access forbidden, please contact administrator",运维误往封号/代理查。
 				body := []byte(sseErr.RawData)
+				sseStatus := sseErrorEventStatusCode(body)
 
 				upstreamMsg := sanitizeUpstreamErrorMessage(
 					strings.TrimSpace(extractUpstreamErrorMessage(body)),
@@ -5894,7 +5897,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					Platform:           account.Platform,
 					AccountID:          account.ID,
 					AccountName:        account.Name,
-					UpstreamStatusCode: 403,
+					UpstreamStatusCode: sseStatus,
 					UpstreamRequestID:  resp.Header.Get("x-request-id"),
 					Kind:               "stream_error",
 					Message:            upstreamMsg,
@@ -5908,7 +5911,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				)
 
 				return nil, &UpstreamFailoverError{
-					StatusCode:   403,
+					StatusCode:   sseStatus,
 					ResponseBody: body,
 				}
 			}
@@ -8127,6 +8130,27 @@ func extractUpstreamErrorMessage(body []byte) string {
 
 	// 兜底：尝试顶层 message
 	return gjson.GetBytes(body, "message").String()
+}
+
+// sseErrorEventStatusCode 把 SSE 流内 event:error 帧(上游 HTTP 已是 200)的 error.type
+// 映射成等价的上游 HTTP 状态码,供 failover 与最终回包复用既有按状态码的处理。
+// 未知/缺失类型回 403(历史行为),避免把未见过的错误误判成可重试的 5xx。
+func sseErrorEventStatusCode(body []byte) int {
+	errType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.type").String()))
+	switch errType {
+	case "overloaded_error":
+		return 529
+	case "rate_limit_error":
+		return http.StatusTooManyRequests
+	case "api_error":
+		return http.StatusInternalServerError
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "permission_error":
+		return http.StatusForbidden
+	default:
+		return http.StatusForbidden
+	}
 }
 
 func extractUpstreamErrorCode(body []byte) string {

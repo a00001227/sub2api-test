@@ -5139,7 +5139,7 @@ export default {
           upstreamErrors: 'Upstream Errors'
         },
         upstreamEvent: {
-          account: 'Account',
+          account: 'Upstream Account',
           status: 'Status',
           requestId: 'Request ID'
         },
@@ -5158,7 +5158,7 @@ export default {
         model: 'Model',
         group: 'Group',
         user: 'User',
-        account: 'Account',
+        account: 'Upstream Account',
         latency: 'Request Duration',
         businessLimited: 'Business Limited',
         requestPath: 'Request Path',

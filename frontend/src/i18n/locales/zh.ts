@@ -5297,7 +5297,7 @@ export default {
           upstreamErrors: '上游错误列表'
         },
         upstreamEvent: {
-          account: '账号',
+          account: '上游账号',
           status: '状态码',
           requestId: '请求ID'
         },
@@ -5316,7 +5316,7 @@ export default {
         model: '模型',
         group: '分组',
         user: '用户',
-        account: '账号',
+        account: '上游账号',
         latency: '请求时长',
         businessLimited: '业务限制',
         requestPath: '请求路径',

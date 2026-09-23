@@ -1,9 +1,12 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +22,33 @@ import (
 // 值格式: "<upstreamStatus>|<slug>"。**绝不含上游原始文案**(文案可能带账号/请求痕迹);
 // 原始文案继续只留在 cell 本地 ops 记录,与现状一致。
 const EdgeUpstreamCauseHeader = "X-Sub2api-Upstream-Cause"
+
+// EdgeUpstreamDetailHeader 是 cell 回给中央的第二条边信道:上游错误的**脱敏摘要**
+// (状态码 + 脱敏后的上游文案 + cell 上的账号名/平台 + 上游 request id)。
+//
+// 与 EdgeUpstreamCauseHeader 的分工:Cause 只带规范 slug,供 SLA/健康分分类,永不变;
+// Detail 带"人看的"信息,供运维弹窗直接看到上游原话和是哪个号,免去逐台 cell 翻日志。
+// 文案已经过 sanitizeUpstreamErrorMessage + 控制字符剥离 + 限长;值为 url.QueryEscape 后的
+// JSON,保证纯 ASCII 可进响应头。中央剥掉不下发客户端;旧版中央不认识该头会原样透传给
+// 客户端,故 cell/中央要一起上线(先中央后 cell 更稳)。
+const EdgeUpstreamDetailHeader = "X-Sub2api-Upstream-Detail"
+
+// edgeUpstreamDetail 限长:文案 400 字符、账号名 128 字符,整头不超过 ~1.5KB。
+const (
+	edgeUpstreamDetailMaxMessage = 400
+	edgeUpstreamDetailMaxName    = 128
+)
+
+// EdgeUpstreamDetail 是 EdgeUpstreamDetailHeader 的载荷。
+type EdgeUpstreamDetail struct {
+	Status      int    `json:"s,omitempty"`
+	Message     string `json:"m,omitempty"`
+	Platform    string `json:"p,omitempty"`
+	AccountID   int64  `json:"aid,omitempty"`
+	AccountName string `json:"an,omitempty"`
+	RequestID   string `json:"rid,omitempty"`
+	Kind        string `json:"k,omitempty"`
+}
 
 // 上游错误分类 slug(与运营页展示一一对应)。
 const (
@@ -81,17 +111,110 @@ func SetEdgeUpstreamCauseHeader(c *gin.Context, streamStarted bool, upstreamStat
 		return
 	}
 	slug := ClassifyUpstreamCause(upstreamStatus, upstreamMsg)
-	if slug == "" {
-		return
+	if slug != "" {
+		// 先把权威 slug 落进 cell 自己的 ops context(与 streamStarted 无关:算 slug 不需要发头)——
+		// cell 落自己那条 ops 行时据此分类,SLA 排除口径与中央 edge 行统一。
+		c.Set(OpsUpstreamCauseSlugKey, slug)
 	}
-	// 先把权威 slug 落进 cell 自己的 ops context(与 streamStarted 无关:算 slug 不需要发头)——
-	// cell 落自己那条 ops 行时据此分类,SLA 排除口径与中央 edge 行统一。
-	c.Set(OpsUpstreamCauseSlugKey, slug)
 	// 响应头只在流未开始回写时能加(已开始则头已 flush);带回中央供其 edge 行分类。
 	if streamStarted {
 		return
 	}
-	c.Header(EdgeUpstreamCauseHeader, fmt.Sprintf("%d|%s", upstreamStatus, slug))
+	if slug != "" {
+		c.Header(EdgeUpstreamCauseHeader, fmt.Sprintf("%d|%s", upstreamStatus, slug))
+	}
+	// 摘要头不依赖 slug:上游 401/403/429 这类没有分类的错误也要让中央看到原话和账号。
+	if d := BuildEdgeUpstreamDetail(c, upstreamStatus, upstreamMsg); d != nil {
+		c.Header(EdgeUpstreamDetailHeader, EncodeEdgeUpstreamDetail(d))
+	}
+}
+
+// BuildEdgeUpstreamDetail 组装摘要:显式传入的状态码/文案优先,缺的部分从 cell 自己的
+// ops 上游事件列表(最后一条)补齐 —— 账号名/平台/上游 request id 只有事件里有。
+// 什么都没有时返回 nil(不发头)。
+func BuildEdgeUpstreamDetail(c *gin.Context, upstreamStatus int, upstreamMsg string) *EdgeUpstreamDetail {
+	if c == nil {
+		return nil
+	}
+	d := &EdgeUpstreamDetail{
+		Status:  upstreamStatus,
+		Message: sanitizeEdgeDetailText(upstreamMsg, edgeUpstreamDetailMaxMessage),
+	}
+	if v, ok := c.Get(OpsUpstreamErrorsKey); ok {
+		if events, ok := v.([]*OpsUpstreamErrorEvent); ok && len(events) > 0 {
+			if last := events[len(events)-1]; last != nil {
+				if d.Status == 0 {
+					d.Status = last.UpstreamStatusCode
+				}
+				if d.Message == "" {
+					d.Message = sanitizeEdgeDetailText(last.Message, edgeUpstreamDetailMaxMessage)
+				}
+				d.Platform = strings.TrimSpace(last.Platform)
+				d.AccountID = last.AccountID
+				d.AccountName = sanitizeEdgeDetailText(last.AccountName, edgeUpstreamDetailMaxName)
+				d.RequestID = sanitizeEdgeDetailText(last.UpstreamRequestID, edgeUpstreamDetailMaxName)
+				d.Kind = strings.TrimSpace(last.Kind)
+			}
+		}
+	}
+	if d.Status == 0 && d.Message == "" && d.AccountName == "" {
+		return nil
+	}
+	return d
+}
+
+// sanitizeEdgeDetailText 脱敏(复用上游文案脱敏)+ 剥控制字符 + 按 rune 限长。
+func sanitizeEdgeDetailText(s string, max int) string {
+	s = sanitizeUpstreamErrorMessage(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			r = ' '
+		}
+		if n >= max {
+			b.WriteString("…")
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// EncodeEdgeUpstreamDetail 序列化为纯 ASCII 头值(JSON → QueryEscape)。
+func EncodeEdgeUpstreamDetail(d *EdgeUpstreamDetail) string {
+	if d == nil {
+		return ""
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return ""
+	}
+	return url.QueryEscape(string(raw))
+}
+
+// ParseEdgeUpstreamDetailHeader 反解 EncodeEdgeUpstreamDetail 的头值;空/非法返回 nil。
+func ParseEdgeUpstreamDetailHeader(v string) *EdgeUpstreamDetail {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	raw, err := url.QueryUnescape(v)
+	if err != nil {
+		return nil
+	}
+	var d EdgeUpstreamDetail
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		return nil
+	}
+	if d.Status == 0 && d.Message == "" && d.AccountName == "" {
+		return nil
+	}
+	return &d
 }
 
 // ParseEdgeUpstreamCauseHeader 解析 "<status>|<slug>"。中央 EdgeForward 用;
