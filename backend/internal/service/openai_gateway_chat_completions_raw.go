@@ -181,6 +181,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
+		// 传输失败(无 HTTP 响应)也要把分类/摘要经脱敏头带回中央,否则中央 ops 只剩一句
+		// 笼统的 "Upstream request failed",看不到账号和真因(/v1/responses 路径早已如此做)。
+		SetEdgeUpstreamCauseHeader(c, c.Writer.Written(), 0, safeErr)
 		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
