@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -297,12 +298,18 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		if modelAllowed != nil {
 			reqModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 			if !modelAllowed(c.Request.Context(), reqModel) {
-				slog.Info("edge_forward: 模型不在白名单,拒绝转发", "model", reqModel, "path", c.Request.URL.Path)
+				reqURL := ClientRequestURL(c)
+				slog.Info("edge_forward: 模型不在白名单,拒绝转发", "model", reqModel, "path", c.Request.URL.Path, "url", reqURL)
 				// 模型白名单拒绝是中转自己的策略闸门(该 model 未配价/未启用),非可用性故障 →
 				// 标记业务限制,排除出 SLA/健康分(仍留错误列表可见)。与内容审核拦截同一套路。
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+				// 运维行的 model 列 + 错误文案都带上客户端实际发的模型和 Base URL,否则只见一句
+				// "model not allowed",分不清是模型名写错还是通道选错。
+				if reqModel != "" {
+					c.Set(service.OpsRequestModelKey, reqModel)
+				}
 				c.Header("Content-Type", "application/json")
-				c.String(http.StatusForbidden, `{"type":"error","error":{"type":"permission_error","message":"model not allowed"}}`)
+				c.String(http.StatusForbidden, modelNotAllowedBody(reqModel, c.Request.Method, reqURL))
 				c.Abort()
 				return
 			}
@@ -997,6 +1004,25 @@ func writeEdgeInvalidRequest(c *gin.Context, groupPlatform, message string) {
 		"type":  "error",
 		"error": gin.H{"type": "invalid_request_error", "message": message},
 	})
+}
+
+// modelNotAllowedBody 生成白名单拒绝的错误体:带客户端实际请求的模型与 URL。
+// 例:model "gpt-5.6-luna" is not allowed on this channel (POST https://api.eirouter.ai/openai/v1/responses)
+func modelNotAllowedBody(model, method, reqURL string) string {
+	var msg string
+	if model == "" {
+		msg = "model not allowed: request has no \"model\" field"
+	} else {
+		msg = "model " + strconv.Quote(model) + " is not allowed on this channel"
+	}
+	if reqURL != "" {
+		msg += " (" + method + " " + reqURL + ")"
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"type":  "error",
+		"error": map[string]string{"type": "permission_error", "message": msg},
+	})
+	return string(payload)
 }
 
 func writeEdgeError(c *gin.Context) {

@@ -84,6 +84,7 @@ func GroupPrefixRewrite(engine *gin.Engine, resolver *service.GroupSlugResolver)
 
 		ctx := context.WithValue(c.Request.Context(), ctxkey.ForcedGroup, group)
 		c.Request = c.Request.WithContext(ctx)
+		c.Set(string(ContextKeyOriginalPath), c.Request.URL.Path) // 改写前留档,供错误文案/运维还原 Base URL
 		c.Request.URL.Path = rest
 		if c.Request.URL.RawPath != "" {
 			// 编码路径同步剥前缀；无法对齐时清空让 net/http 回退使用 Path

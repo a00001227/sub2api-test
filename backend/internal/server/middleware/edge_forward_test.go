@@ -562,8 +562,16 @@ func TestEdgeForward_ModelWhitelist(t *testing.T) {
 	if cellHit {
 		t.Fatalf("白名单外模型不应转发到 cell")
 	}
-	if !strings.Contains(w.Body.String(), "model not allowed") {
-		t.Fatalf("应返回 model not allowed; got %q", w.Body.String())
+	// 文案带客户端实际请求的模型与 URL,运维行 model 列也要有值。
+	body := w.Body.String()
+	if !strings.Contains(body, `model \"blocked-model\" is not allowed`) || !strings.Contains(body, "POST http://example.com/v1/messages") {
+		t.Fatalf("应带模型名与请求 URL; got %q", body)
+	}
+	if !strings.Contains(body, `"type":"permission_error"`) {
+		t.Fatalf("错误类型应保持 permission_error; got %q", body)
+	}
+	if v, _ := capturedCtx.Get(service.OpsRequestModelKey); v != "blocked-model" {
+		t.Fatalf("应把请求模型写进 ops 上下文; got %v", v)
 	}
 	// 白名单拒绝是中转策略闸门 → 必须标记业务限制,以便排除出 SLA/健康分。
 	if !service.HasOpsClientBusinessLimited(capturedCtx) {

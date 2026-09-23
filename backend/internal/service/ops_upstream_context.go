@@ -15,6 +15,8 @@ const (
 	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
 	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
 	OpsUpstreamErrorsKey       = "ops_upstream_errors"
+	// OpsRequestModelKey 请求模型(handler 设;中间件拒绝时也应设,否则运维行 model 为空)。
+	OpsRequestModelKey = "ops_model"
 
 	// OpsUpstreamCauseSlugKey 存 cell 侧 ClassifyUpstreamCause 算好的**权威**错误分类 slug。
 	// SetEdgeUpstreamCauseHeader 计算 slug 时顺手写入:回中央的响应头带走的是同一个 slug,

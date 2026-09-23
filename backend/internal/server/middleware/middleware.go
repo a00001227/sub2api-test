@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
@@ -20,6 +21,10 @@ const (
 	ContextKeyUserRole ContextKey = "user_role"
 	// ContextKeyAPIKey API密钥上下文键
 	ContextKeyAPIKey ContextKey = "api_key"
+	// ContextKeyOriginalPath 分组前缀改写前的原始请求路径(如 /openai/v1/responses)。
+	// c.Request.URL.Path 在 GroupPrefixRewrite 后已剥掉前缀,运维/错误文案要还原客户端
+	// 实际请求的 Base URL 时读它。
+	ContextKeyOriginalPath ContextKey = "original_request_path"
 	// ContextKeySubscription 订阅上下文键
 	ContextKeySubscription ContextKey = "subscription"
 	// ContextKeyForcePlatform 强制平台（用于 /antigravity 路由）
@@ -166,4 +171,38 @@ func RequireGroupAssignment(settingService *service.SettingService, writeError G
 		writeError(c, http.StatusForbidden, "API Key is not assigned to any group and cannot be used. Please contact the administrator to assign it to a group.")
 		c.Abort()
 	}
+}
+
+// OriginalRequestPath 返回分组前缀改写前的原始路径;未改写过则返回当前路径。
+func OriginalRequestPath(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return ""
+	}
+	if v, ok := c.Get(string(ContextKeyOriginalPath)); ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return c.Request.URL.Path
+}
+
+// ClientRequestURL 还原客户端实际请求的 URL(scheme://host + 原始路径),供错误文案/运维显示。
+// scheme 优先取反代/隧道带来的 X-Forwarded-Proto,否则按 TLS 判断。
+func ClientRequestURL(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	scheme := strings.ToLower(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")))
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	host := strings.TrimSpace(c.Request.Host)
+	if host == "" {
+		return OriginalRequestPath(c)
+	}
+	return scheme + "://" + host + OriginalRequestPath(c)
 }
