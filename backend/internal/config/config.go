@@ -2543,8 +2543,11 @@ func setDefaults() {
 	viper.SetDefault("enforcement.counter_ttl_hours", 2)
 
 	// Gateway
-	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久
-	viper.SetDefault("gateway.openai_response_header_timeout", 0)
+	// 150s 等待上游响应头:正常首字节几秒,大上下文缓存失效重预填也很少超过 60s;更长
+	// 基本是连接在代理上挂死或上游压队列。超时后 Anthropic 路径同号重试 1 次再换号
+	// (见 anthropic_upstream_transport_error.go)。旧值 600s 意味着用户干等 10 分钟。
+	viper.SetDefault("gateway.response_header_timeout", 150)
+	viper.SetDefault("gateway.openai_response_header_timeout", 150)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)

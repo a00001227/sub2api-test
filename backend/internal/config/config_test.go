@@ -199,12 +199,15 @@ func TestLoadOpenAIHTTP2DisabledFromEnv(t *testing.T) {
 	require.False(t, cfg.Gateway.OpenAIHTTP2.Enabled)
 }
 
-func TestLoadDefaultOpenAIResponseHeaderTimeoutUnlimited(t *testing.T) {
+// 响应头超时默认 150s(Anthropic/OpenAI 一致):以前 600s/无限意味着连接挂死时用户干等
+// 10 分钟;中央 EdgeForward 心跳撑住客户端后,由 cell 超时 + 同号重试/换号兜底。
+func TestLoadDefaultResponseHeaderTimeouts(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	require.Equal(t, 0, cfg.Gateway.OpenAIResponseHeaderTimeout)
+	require.Equal(t, 150, cfg.Gateway.ResponseHeaderTimeout)
+	require.Equal(t, 150, cfg.Gateway.OpenAIResponseHeaderTimeout)
 }
 
 func TestLoadOpenAIResponseHeaderTimeoutFromEnv(t *testing.T) {

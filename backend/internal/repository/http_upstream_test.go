@@ -61,7 +61,7 @@ func (s *HTTPUpstreamSuite) TestNilConfigResponseHeaderTimeoutFallback() {
 	entry := mustGetOrCreateClient(s.T(), svc, "", 0, 0)
 	transport, ok := entry.client.Transport.(*http.Transport)
 	require.True(s.T(), ok, "expected *http.Transport")
-	require.Equal(s.T(), 300*time.Second, transport.ResponseHeaderTimeout, "ResponseHeaderTimeout mismatch")
+	require.Equal(s.T(), 150*time.Second, transport.ResponseHeaderTimeout, "ResponseHeaderTimeout mismatch")
 }
 
 // TestCustomResponseHeaderTimeout 测试自定义响应头超时配置

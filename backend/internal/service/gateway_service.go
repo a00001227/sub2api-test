@@ -582,6 +582,9 @@ type UpstreamFailoverError struct {
 	ResponseHeaders        http.Header // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
 	ForceCacheBilling      bool        // Antigravity 粘性会话切换时设为 true
 	RetryableOnSameAccount bool        // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
+	// SameAccountRetryLimit 覆盖同账号重试次数上限(0 = 用 handler 默认 maxSameAccountRetries)。
+	// 上游响应头超时这类"一次就是 150s"的错误只允许同号重试 1 次,否则等待时间成倍膨胀。
+	SameAccountRetryLimit int
 }
 
 func (e *UpstreamFailoverError) Error() string {

@@ -45,9 +45,9 @@ const (
 	// defaultIdleConnTimeout: 默认空闲连接超时时间（90秒）
 	// 超时后连接会被关闭，释放系统资源（建议小于上游 LB 超时）
 	defaultIdleConnTimeout = 90 * time.Second
-	// defaultResponseHeaderTimeout: 默认等待响应头超时时间（5分钟）
-	// LLM 请求可能排队较久，需要较长超时
-	defaultResponseHeaderTimeout = 300 * time.Second
+	// defaultResponseHeaderTimeout: 默认等待响应头超时时间（150s,与 config 默认一致）
+	// 正常首字节几秒;更长基本是连接挂死或上游压队列,由 gateway 超时后同号重试/换号兜底
+	defaultResponseHeaderTimeout = 150 * time.Second
 	// defaultMaxUpstreamClients: 默认最大客户端缓存数量
 	// 超出后会淘汰最久未使用的客户端
 	defaultMaxUpstreamClients = 5000
@@ -160,6 +160,7 @@ func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
 // 注意:
 //   - 调用方必须关闭 resp.Body，否则会导致 inFlight 计数泄漏
 //   - inFlight > 0 的客户端不会被淘汰，确保活跃请求不被中断
+//
 // effectiveUpstreamProxy 决定本次上游请求实际用哪个代理。中央模式(非 EdgeMode)
 // 永不覆盖,直接用传入的按账号 proxyURL(空=直连)。EDGE cell 下有两种出口策略:
 //   - 多出口(EdgeMultiEgress 开,Option A):每个账号走自己的按账号代理(proxyURL),

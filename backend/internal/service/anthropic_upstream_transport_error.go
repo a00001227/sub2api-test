@@ -46,6 +46,51 @@ const upstreamFailoverBudget = 60 * time.Second
 // gin.Context 在同一请求的跨账号 failover 循环中是共享的，故可用它累计请求已耗时。
 const anthropicTransportFailoverBudgetKey = "anthropic_upstream_failover_start"
 
+// anthropicHeaderTimeoutAttemptsKey 累计本请求因"上游响应头超时"触发的换号/重试次数。
+// 响应头超时(gateway.response_header_timeout,默认 150s)= 上游收到请求后一个字节都没回:
+// 连接在代理上挂死、或上游把请求压在队列里。以前的做法是直接 502 不换号,理由是
+// Cloudflare 100s 早已切断客户端;现在中央 EdgeForward 会在等 cell 期间发 SSE 心跳把
+// 客户端撑住,这个前提不再成立 —— 只要客户端还在线,就值得再试:
+//
+//	第 1 次超时 → 同号重试 1 次(前缀缓存大概率已在刚才那次预填中建立,重试快);
+//	第 2 次超时 → 换号(handler 顺带把该号临时下线);
+//	第 3 次超时 → 放弃,502。
+//
+// 最坏 3 × 150s;正常情况一次都不会触发。
+const anthropicHeaderTimeoutAttemptsKey = "anthropic_upstream_header_timeout_attempts"
+
+// anthropicHeaderTimeoutMaxAttempts:响应头超时最多允许的"再试"次数(同号重试 + 换号)。
+const anthropicHeaderTimeoutMaxAttempts = 2
+
+// isResponseHeaderTimeout 判断是否 http.Transport.ResponseHeaderTimeout 触发的超时
+// ("net/http: timeout awaiting response headers")。它不是 context.DeadlineExceeded,
+// 也不是 dial 阶段,故单独识别。
+func isResponseHeaderTimeout(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "timeout awaiting response headers")
+}
+
+// headerTimeoutFailoverAllowed 报告本请求是否还能因响应头超时再试一次(客户端仍在线且未超次数),
+// 允许时顺带把计数 +1。
+func headerTimeoutFailoverAllowed(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.Context().Err() != nil {
+		return false // 客户端已断,再试只会对上游重复执行
+	}
+	n := 0
+	if v, ok := c.Get(anthropicHeaderTimeoutAttemptsKey); ok {
+		if i, ok := v.(int); ok {
+			n = i
+		}
+	}
+	if n >= anthropicHeaderTimeoutMaxAttempts {
+		return false
+	}
+	c.Set(anthropicHeaderTimeoutAttemptsKey, n+1)
+	return true
+}
+
 // anthropicTransportFailoverBody 是失败透传给客户端的 Anthropic 格式错误体，与旧的内联
 // 502 body 保持一致：若 failover 最终耗尽，客户端看到的载荷不变。
 var anthropicTransportFailoverBody = []byte(`{"type":"error","error":{"type":"upstream_error","message":"Upstream request failed"}}`)
@@ -146,10 +191,16 @@ func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, ups
 	safeErr, failover := recordAnthropicTransportFailover(c, account, upstreamReq, err, passthrough)
 	if failover {
 		// 不写响应：由 handler 换号，或换号耗尽后写协议正确的错误。
-		return &UpstreamFailoverError{
+		fe := &UpstreamFailoverError{
 			StatusCode:   http.StatusBadGateway,
 			ResponseBody: anthropicTransportFailoverBody,
 		}
+		if isResponseHeaderTimeout(err) {
+			// 响应头超时:先同号重试 1 次(RetryableOnSameAccount + 上限 1),再换号。
+			fe.RetryableOnSameAccount = true
+			fe.SameAccountRetryLimit = 1
+		}
+		return fe
 	}
 
 	// 读侧超时 / 客户端断开 / 预算耗尽：保持原行为，直接写 502。
@@ -182,5 +233,10 @@ func recordAnthropicTransportFailover(c *gin.Context, account *Account, upstream
 		Kind:               "request_error",
 		Message:            safeErr,
 	})
+	if isResponseHeaderTimeout(err) {
+		// 响应头超时不受连接级预算约束(预算是为 Cloudflare 100s 设计的,中央心跳已解除),
+		// 但受次数与客户端在线约束。
+		return safeErr, headerTimeoutFailoverAllowed(c)
+	}
 	return safeErr, isConnectPhaseTransportError(err) && upstreamFailoverWithinBudget(c)
 }

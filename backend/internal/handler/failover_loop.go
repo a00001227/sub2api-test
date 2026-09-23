@@ -77,7 +77,11 @@ func (s *FailoverState) HandleFailoverError(
 	}
 
 	// 同账号重试：对 RetryableOnSameAccount 的临时性错误，先在同一账号上重试
-	if failoverErr.RetryableOnSameAccount && s.SameAccountRetryCount[accountID] < maxSameAccountRetries {
+	sameAccountLimit := maxSameAccountRetries
+	if failoverErr.SameAccountRetryLimit > 0 && failoverErr.SameAccountRetryLimit < sameAccountLimit {
+		sameAccountLimit = failoverErr.SameAccountRetryLimit
+	}
+	if failoverErr.RetryableOnSameAccount && s.SameAccountRetryCount[accountID] < sameAccountLimit {
 		s.SameAccountRetryCount[accountID]++
 		logger.FromContext(ctx).Warn("gateway.failover_same_account_retry",
 			zap.Int64("account_id", accountID),
