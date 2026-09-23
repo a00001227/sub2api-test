@@ -133,7 +133,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		}
 		// 连接建立阶段失败（含响应头之前的 EOF/RST，如死号被上游边缘掐断）在换号预算内换号，
 		// 由 handler 切到健康账号；否则（读侧超时/预算耗尽）保持原行为写 CC 格式 502。
-		safeErr, failover := recordAnthropicTransportFailover(c, account, upstreamReq, err, false)
+		safeErr, failover := recordAnthropicTransportFailover(c, account, upstreamReq, err, false, s.accountRepo)
 		if failover {
 			return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
 		}

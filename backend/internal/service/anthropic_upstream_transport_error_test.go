@@ -86,7 +86,7 @@ func TestHandleAnthropicUpstreamTransportError_ConnectPhase_FailsOverNoBody(t *t
 			account := &Account{ID: 4627, Name: "flaky", Platform: PlatformAnthropic}
 			c, rec := newAnthropicTransportErrTestContext()
 
-			retErr := handleAnthropicUpstreamTransportError(c, account, anthropicTestUpstreamReq(t), e, false)
+			retErr := handleAnthropicUpstreamTransportError(c, account, anthropicTestUpstreamReq(t), e, false, nil)
 
 			var fo *UpstreamFailoverError
 			require.True(t, errors.As(retErr, &fo), "connect-phase error must return *UpstreamFailoverError")
@@ -103,7 +103,7 @@ func TestHandleAnthropicUpstreamTransportError_ReadTimeout_Writes502NoFailover(t
 	account := &Account{ID: 99, Name: "slow", Platform: PlatformAnthropic}
 	c, rec := newAnthropicTransportErrTestContext()
 
-	retErr := handleAnthropicUpstreamTransportError(c, account, anthropicTestUpstreamReq(t), context.DeadlineExceeded, false)
+	retErr := handleAnthropicUpstreamTransportError(c, account, anthropicTestUpstreamReq(t), context.DeadlineExceeded, false, nil)
 
 	var fo *UpstreamFailoverError
 	require.False(t, errors.As(retErr, &fo), "read-side deadline must NOT fail over")
@@ -134,7 +134,7 @@ func TestHandleAnthropicUpstreamTransportError_BudgetExhausted_Writes502(t *test
 	c.Set(anthropicTransportFailoverBudgetKey, time.Now().Add(-2*upstreamFailoverBudget))
 
 	connectErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("i/o timeout")}
-	retErr := handleAnthropicUpstreamTransportError(c, account, anthropicTestUpstreamReq(t), connectErr, false)
+	retErr := handleAnthropicUpstreamTransportError(c, account, anthropicTestUpstreamReq(t), connectErr, false, nil)
 
 	var fo *UpstreamFailoverError
 	require.False(t, errors.As(retErr, &fo), "budget-exhausted must NOT fail over even for connect-phase error")

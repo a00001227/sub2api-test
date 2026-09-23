@@ -823,6 +823,44 @@ func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg str
 	return nil
 }
 
+// PauseForEgressFailure 硬暂停:代理出口持久性故障(凭据失效/端点死)时把账号设为不可调度,
+// 原因写入 error_message(状态保持 active,不走 SetError 以免被各条"错误自愈"路径自动放开),
+// 并回流 Portal "paused" —— Portal 只有 paused 状态带「恢复」按钮,恢复即 SetScheduling(true)。
+func (r *accountRepository) PauseForEgressFailure(ctx context.Context, id int64, reason string) error {
+	_, err := r.client.Account.Update().
+		Where(dbaccount.IDEQ(id)).
+		SetSchedulable(false).
+		SetErrorMessage(reason).
+		Save(ctx)
+	if err != nil {
+		return err
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue egress pause failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.emitProviderStatusReflow(ctx, id, "paused")
+	return nil
+}
+
+// ResumeFromEgressPause 恢复 PauseForEgressFailure 的账号:重新可调度并清掉本机制写的原因。
+// 只清 error_message,不动 status(仍是 active)。
+func (r *accountRepository) ResumeFromEgressPause(ctx context.Context, id int64) error {
+	_, err := r.client.Account.Update().
+		Where(dbaccount.IDEQ(id)).
+		SetSchedulable(true).
+		SetErrorMessage("").
+		Save(ctx)
+	if err != nil {
+		return err
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue egress resume failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 // emitProviderStatusReflow mirrors a status transition that ALREADY happened on
 // this account back to the Provider Portal (cell #87). It is invoked only from
 // the existing SetError/ClearError chokepoints and merely reflects the

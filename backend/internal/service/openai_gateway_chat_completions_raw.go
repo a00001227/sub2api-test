@@ -171,21 +171,10 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		setOpsUpstreamError(c, 0, safeErr, "")
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: 0,
-			Kind:               "request_error",
-			Message:            safeErr,
-		})
-		// 传输失败(无 HTTP 响应)也要把分类/摘要经脱敏头带回中央,否则中央 ops 只剩一句
-		// 笼统的 "Upstream request failed",看不到账号和真因(/v1/responses 路径早已如此做)。
-		SetEdgeUpstreamCauseHeader(c, c.Writer.Written(), 0, safeErr)
-		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
-		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		// 与 /v1/responses 同一套传输错误处理:记 ops、持久性代理故障硬暂停/临时下线、
+		// 返回 UpstreamFailoverError 交由 handler 换号;耗尽后由 handler 写错误并带回脱敏头。
+		// 此前这里直接写 502 不换号也不下线,坏代理上的号会被反复调度。
+		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

@@ -81,6 +81,15 @@ func (s *ProviderAccountSchedulingService) SetScheduling(
 		return &ProviderAccountSchedulingResult{Status: "unchanged"}, nil
 	}
 
+	// Portal「恢复」一个因代理出口故障被硬暂停的号:顺带清掉本机制写的 error_message。
+	if enabled && acc != nil && IsEgressPauseReason(acc.ErrorMessage) {
+		if pr, ok := s.repo.(egressPauseRepo); ok {
+			if err := pr.ResumeFromEgressPause(ctx, id); err != nil {
+				return nil, err
+			}
+			return &ProviderAccountSchedulingResult{Status: "updated"}, nil
+		}
+	}
 	if err := s.repo.SetSchedulable(ctx, id, enabled); err != nil {
 		return nil, err
 	}

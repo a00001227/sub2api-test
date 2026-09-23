@@ -39,7 +39,7 @@ func TestHeaderTimeout_FailoverTwiceThenGiveUp(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
 
 	for i := 1; i <= 2; i++ {
-		err := handleAnthropicUpstreamTransportError(c, acct, req, errAwaitHeaders, false)
+		err := handleAnthropicUpstreamTransportError(c, acct, req, errAwaitHeaders, false, nil)
 		var fe *UpstreamFailoverError
 		require.True(t, errors.As(err, &fe), "attempt %d should fail over", i)
 		require.Equal(t, http.StatusBadGateway, fe.StatusCode)
@@ -53,7 +53,7 @@ func TestHeaderTimeout_FailoverTwiceThenGiveUp(t *testing.T) {
 	c2, _ := gin.CreateTestContext(rec)
 	c2.Request = c.Request
 	c2.Set(anthropicHeaderTimeoutAttemptsKey, anthropicHeaderTimeoutMaxAttempts)
-	err := handleAnthropicUpstreamTransportError(c2, acct, req, errAwaitHeaders, false)
+	err := handleAnthropicUpstreamTransportError(c2, acct, req, errAwaitHeaders, false, nil)
 	var fe *UpstreamFailoverError
 	require.False(t, errors.As(err, &fe))
 	require.Equal(t, http.StatusBadGateway, rec.Code)
@@ -67,7 +67,7 @@ func TestHeaderTimeout_ClientGone_NoFailover(t *testing.T) {
 	c.Request = c.Request.WithContext(ctx)
 	acct := &Account{ID: 20, Platform: PlatformAnthropic}
 	req, _ := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
-	err := handleAnthropicUpstreamTransportError(c, acct, req, errAwaitHeaders, false)
+	err := handleAnthropicUpstreamTransportError(c, acct, req, errAwaitHeaders, false, nil)
 	var fe *UpstreamFailoverError
 	require.False(t, errors.As(err, &fe))
 }

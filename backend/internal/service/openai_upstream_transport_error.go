@@ -145,7 +145,12 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	)
 
 	if class.Persistent {
-		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
+		// 硬暂停优先(凭据失效一击即停;连接级故障 10 分钟内 2 次即停),未达门槛再退回临时下线。
+		if !pauseAccountForEgressFailure(ctx, s.accountRepo, account, err, safeErr) {
+			s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
+		} else {
+			s.BlockAccountScheduling(account, time.Now().Add(openAITransportErrorTempUnschedDuration), "egress_paused")
+		}
 	}
 
 	return &UpstreamFailoverError{

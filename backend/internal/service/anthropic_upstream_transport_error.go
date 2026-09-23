@@ -187,8 +187,8 @@ func upstreamFailoverWithinBudget(c *gin.Context) bool {
 //  3. 否则（读侧超时 / 客户端断开 / 预算耗尽）保持原行为：直接写 502，本函数拥有响应。
 //
 // passthrough 为透传分支的 Ops 事件打标（对齐原三处站点：透传分支置 true，其余 false）。
-func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, upstreamReq *http.Request, err error, passthrough bool) error {
-	safeErr, failover := recordAnthropicTransportFailover(c, account, upstreamReq, err, passthrough)
+func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, upstreamReq *http.Request, err error, passthrough bool, repo AccountRepository) error {
+	safeErr, failover := recordAnthropicTransportFailover(c, account, upstreamReq, err, passthrough, repo)
 	if failover {
 		// 不写响应：由 handler 换号，或换号耗尽后写协议正确的错误。
 		fe := &UpstreamFailoverError{
@@ -220,7 +220,7 @@ func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, ups
 //
 // 抽出此函数是为了让 CC(/v1/chat/completions) 与 Responses(/v1/responses) 两条转发路径复用
 // 与主 /v1/messages 路径完全一致的分类与 Ops 记录，只在最终兜底 502 的响应格式上各自处理。
-func recordAnthropicTransportFailover(c *gin.Context, account *Account, upstreamReq *http.Request, err error, passthrough bool) (safeErr string, failover bool) {
+func recordAnthropicTransportFailover(c *gin.Context, account *Account, upstreamReq *http.Request, err error, passthrough bool, repo AccountRepository) (safeErr string, failover bool) {
 	safeErr = sanitizeUpstreamErrorMessage(err.Error())
 	setOpsUpstreamError(c, 0, safeErr, "")
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -233,6 +233,10 @@ func recordAnthropicTransportFailover(c *gin.Context, account *Account, upstream
 		Kind:               "request_error",
 		Message:            safeErr,
 	})
+	// 代理出口持久性故障(凭据失效/端点死)→ 硬暂停该号(Portal 恢复),本次请求仍按下面规则转移。
+	if repo != nil && c != nil && c.Request != nil {
+		pauseAccountForEgressFailure(c.Request.Context(), repo, account, err, safeErr)
+	}
 	if isResponseHeaderTimeout(err) {
 		// 响应头超时不受连接级预算约束(预算是为 Cloudflare 100s 设计的,中央心跳已解除),
 		// 但受次数与客户端在线约束。

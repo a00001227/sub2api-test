@@ -5430,7 +5430,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				_ = resp.Body.Close()
 			}
 			// 连接建立阶段失败换号（受 CF 100s 会话窗约束）；否则本函数写 502。
-			return nil, handleAnthropicUpstreamTransportError(c, account, upstreamReq, err, false)
+			return nil, handleAnthropicUpstreamTransportError(c, account, upstreamReq, err, false, s.accountRepo)
 		}
 
 		// 优先检测thinking block签名错误（400）并重试一次
@@ -6039,7 +6039,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				_ = resp.Body.Close()
 			}
 			// 连接建立阶段失败换号（受 CF 100s 会话窗约束）；否则本函数写 502。透传分支打标。
-			return nil, handleAnthropicUpstreamTransportError(c, account, upstreamReq, err, true)
+			return nil, handleAnthropicUpstreamTransportError(c, account, upstreamReq, err, true, s.accountRepo)
 		}
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
@@ -6874,7 +6874,7 @@ func (s *GatewayService) executeBedrockUpstream(
 				_ = resp.Body.Close()
 			}
 			// 连接建立阶段失败换号（受 CF 100s 会话窗约束）；否则本函数写 502。
-			return nil, handleAnthropicUpstreamTransportError(c, account, upstreamReq, err, false)
+			return nil, handleAnthropicUpstreamTransportError(c, account, upstreamReq, err, false, s.accountRepo)
 		}
 
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
