@@ -227,7 +227,12 @@ func (s *ProviderAccountMetricsService) Metrics(
 	if acc == nil {
 		return nil, ErrProviderAccountNotFound
 	}
+	return s.MetricsForAccount(ctx, acc), nil
+}
 
+// MetricsForAccount 用已加载的账号对象算指标(账号池快照批量走这里,免去按 ref 定位)。
+func (s *ProviderAccountMetricsService) MetricsForAccount(ctx context.Context, acc *Account) *ProviderAccountMetrics {
+	id := acc.ID
 	out := &ProviderAccountMetrics{
 		Status:         acc.Status,
 		Concurrency:    acc.EffectiveLoadFactor(),
@@ -334,7 +339,7 @@ func (s *ProviderAccountMetricsService) Metrics(
 		out.Pacing = status
 	}
 
-	return out, nil
+	return out
 }
 
 // computePacingScore 合成 0-100 评分（纯展示，不参与调度）：

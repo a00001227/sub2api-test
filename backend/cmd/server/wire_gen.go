@@ -364,7 +364,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db, configConfig)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop, enforcementService, proxyLivenessService)
+	cellPoolSnapshotService := service.ProvideCellPoolSnapshotService(configConfig, accountRepository, opsRepository, providerAccountMetricsService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop, cellPoolSnapshotService, enforcementService, proxyLivenessService)
 	// 切片 4.2：in-flight tracker 包裹业务 handler（Server.Close 后据此确认 Handler 真正退出）。
 	riskV2InflightTracker := &inflightTracker{}
 	httpServer.Handler = riskV2InflightTracker.Middleware(httpServer.Handler)
@@ -438,6 +439,7 @@ func provideCleanup(
 	riskV2Dispatcher *service.RiskV2Dispatcher,
 	riskV2ScoringWorker *service.RiskV2ScoringWorker,
 	riskV2HealthLoop *service.RiskV2HealthReportLoop,
+	cellPoolSnapshot *service.CellPoolSnapshotService,
 	enforcementService *service.EnforcementService,
 	proxyLivenessService *service.ProxyLivenessService,
 ) func() {
@@ -457,8 +459,9 @@ func provideCleanup(
 		// 全部 nil-safe（disabled/DEGRADED → nil）。
 		riskV2ScoringWorker.Stop()     // *RiskV2ScoringWorker.Stop 为 nil-safe
 		_ = riskV2Dispatcher.Stop(ctx) // graceful drain
-		riskV2HealthLoop.Stop()        // 最后 flush + Deregister（nil-safe）
-		enforcementService.Stop()      // 停执行层刷新 goroutine（nil-safe）
+		riskV2HealthLoop.Stop()
+		cellPoolSnapshot.Stop()   // 最后 flush + Deregister（nil-safe）
+		enforcementService.Stop() // 停执行层刷新 goroutine（nil-safe）
 		log.Printf("[Cleanup] RiskV2 runtime stopped (worker→dispatcher→health)")
 
 		parallelSteps := []cleanupStep{

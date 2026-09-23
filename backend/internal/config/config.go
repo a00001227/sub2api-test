@@ -513,6 +513,10 @@ type CellRegistryConfig struct {
 	Region          string `mapstructure:"region" yaml:"region"`                     // 本 cell 的地区码,如 sgp
 	Node            string `mapstructure:"node" yaml:"node"`                         // 所属主机标注(可选)
 	IntervalSeconds int    `mapstructure:"interval_seconds" yaml:"interval_seconds"` // 心跳间隔,默认 30s
+	// PoolSnapshotIntervalSeconds:账号池快照推送间隔秒(cell → Portal,供账号池实况看板),
+	// 默认 15,0 = 关闭。env: CELL_POOL_SNAPSHOT_INTERVAL_SECONDS。推送地址由 URL 派生
+	// (…/internal/cells/register → …/internal/cells/pool-snapshot)。
+	PoolSnapshotIntervalSeconds int `mapstructure:"pool_snapshot_interval_seconds" yaml:"pool_snapshot_interval_seconds"`
 }
 
 type LogConfig struct {
@@ -2065,6 +2069,13 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.ProviderConnect.WebhookSecret = v
 	}
 	// CELL_* 环境变量兜底(边缘 cell 自注册/心跳)。同样是启动即读,与 EDGE_MODE 一致。
+	if v := strings.TrimSpace(os.Getenv("CELL_POOL_SNAPSHOT_INTERVAL_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.CellRegistry.PoolSnapshotIntervalSeconds = n
+		}
+	} else if cfg.CellRegistry.PoolSnapshotIntervalSeconds == 0 {
+		cfg.CellRegistry.PoolSnapshotIntervalSeconds = 15
+	}
 	if v := strings.TrimSpace(os.Getenv("CELL_REGISTRY_URL")); v != "" {
 		cfg.CellRegistry.URL = v
 	}

@@ -665,6 +665,33 @@ func (r *accountRepository) ListByGroup(ctx context.Context, groupID int64) ([]s
 	return accounts, nil
 }
 
+// ListProviderLinked 列出本 cell 上所有 Portal 归属的账号(external_provider_account_id 非空),
+// 不分状态 —— 账号池快照要连 error/暂停的号一起报给 Portal。
+func (r *accountRepository) ListProviderLinked(ctx context.Context) ([]service.ProviderLinkedAccount, error) {
+	rows, err := r.client.Account.Query().
+		Where(dbaccount.ExternalProviderAccountIDNotNil()).
+		Order(dbent.Asc(dbaccount.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	accounts, err := r.accountsToService(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	refByID := make(map[int64]string, len(rows))
+	for _, row := range rows {
+		if row.ExternalProviderAccountID != nil {
+			refByID[row.ID] = *row.ExternalProviderAccountID
+		}
+	}
+	out := make([]service.ProviderLinkedAccount, 0, len(accounts))
+	for i := range accounts {
+		out = append(out, service.ProviderLinkedAccount{ExternalRef: refByID[accounts[i].ID], Account: accounts[i]})
+	}
+	return out, nil
+}
+
 func (r *accountRepository) ListActive(ctx context.Context) ([]service.Account, error) {
 	accounts, err := r.client.Account.Query().
 		Where(dbaccount.StatusEQ(service.StatusActive)).

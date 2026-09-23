@@ -1213,3 +1213,47 @@ func opsNullInt16(v *int16) any {
 	}
 	return sql.NullInt64{Int64: int64(*v), Valid: true}
 }
+
+// CountErrorsByAccountSince 按账号聚合 since 之后的错误行:次数、最近一次的时间/状态码/文案。
+// 供账号池快照(cell → Portal)使用;只看 account_id 非空的行。
+func (r *opsRepository) CountErrorsByAccountSince(ctx context.Context, since time.Time) (map[int64]service.AccountErrorActivity, error) {
+	const q = `
+SELECT agg.account_id, agg.cnt, last.created_at, COALESCE(last.status_code, 0), COALESCE(last.error_message, '')
+FROM (
+  SELECT account_id, COUNT(*) AS cnt
+  FROM ops_error_logs
+  WHERE account_id IS NOT NULL AND created_at >= $1
+  GROUP BY account_id
+) agg
+JOIN LATERAL (
+  SELECT created_at, status_code, error_message
+  FROM ops_error_logs e
+  WHERE e.account_id = agg.account_id AND e.created_at >= $1
+  ORDER BY e.created_at DESC
+  LIMIT 1
+) last ON true`
+	rows, err := r.db.QueryContext(ctx, q, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]service.AccountErrorActivity)
+	for rows.Next() {
+		var (
+			id     int64
+			cnt    int64
+			lastAt time.Time
+			code   int
+			msg    string
+		)
+		if err := rows.Scan(&id, &cnt, &lastAt, &code, &msg); err != nil {
+			return nil, err
+		}
+		if len([]rune(msg)) > 200 {
+			msg = string([]rune(msg)[:200])
+		}
+		out[id] = service.AccountErrorActivity{Count: cnt, LastAt: lastAt.UTC().Format(time.RFC3339), LastStatusCode: code, LastMessage: msg}
+	}
+	return out, rows.Err()
+}
+
