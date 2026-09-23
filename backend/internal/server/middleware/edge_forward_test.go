@@ -235,7 +235,7 @@ func TestEdgeForward_DoesNotLeakConsumerKey(t *testing.T) {
 func newEdgeForwardEngineWithResolver(resolver cellResolver, groupSlug, key string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, nil, key, func() float64 { return 0 }, nil, nil, nil, nil, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, nil, key, func() float64 { return 0 }, nil, nil, nil, nil, nil, edgeEarlyPing{})
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			if groupSlug != "" {
@@ -254,7 +254,7 @@ func newEdgeForwardEngineWithResolver(resolver cellResolver, groupSlug, key stri
 func newEdgeForwardEngineWithLanes(resolver cellResolver, groupSlug, key string, groupLanes map[string]string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{groupSlug: {}}, groupLanes, key, func() float64 { return 0 }, nil, nil, nil, nil, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{groupSlug: {}}, groupLanes, key, func() float64 { return 0 }, nil, nil, nil, nil, nil, edgeEarlyPing{})
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: groupSlug}})
@@ -271,7 +271,7 @@ func newEdgeForwardEngineWithLanes(resolver cellResolver, groupSlug, key string,
 func newEdgeForwardEngineWithGroupLane(resolver cellResolver, groupSlug, groupLane, key string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{groupSlug: {}}, nil, key, func() float64 { return 0 }, nil, nil, nil, nil, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{groupSlug: {}}, nil, key, func() float64 { return 0 }, nil, nil, nil, nil, nil, edgeEarlyPing{})
 	e.POST("/v1/messages",
 		func(c *gin.Context) {
 			c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Slug: groupSlug, Lane: groupLane}})
@@ -541,7 +541,7 @@ func TestEdgeForward_ModelWhitelist(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, nil, "k", func() float64 { return 0 }, nil, allow, nil, nil, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}}, nil, "k", func() float64 { return 0 }, nil, allow, nil, nil, nil, edgeEarlyPing{})
 	var capturedCtx *gin.Context
 	e.POST("/v1/messages",
 		func(c *gin.Context) {

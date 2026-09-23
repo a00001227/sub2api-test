@@ -31,7 +31,7 @@ func TestStreamCellResponse_StripsUsageSentinel(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	env, _ := streamCellResponse(c, resp)
+	env, _ := streamCellResponse(c, resp, false)
 
 	out := w.Body.String()
 	if !strings.Contains(out, "message_start") || !strings.Contains(out, "message_stop") {
@@ -62,7 +62,7 @@ func TestStreamCellResponse_NonStreamHeader(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	env, _ := streamCellResponse(c, resp)
+	env, _ := streamCellResponse(c, resp, false)
 
 	if w.Header().Get("X-Sub2api-Usage") != "" {
 		t.Error("usage header must not be forwarded to client")

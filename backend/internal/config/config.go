@@ -497,6 +497,13 @@ type EdgeForwardConfig struct {
 	// ModelWhitelist:开启后,转发前校验请求 model 是否在"价格展示(pricing_models)启用模型"集合内,
 	// 不在则直接 403,不转发 cell。默认 false(不校验,行为不变)。env: EDGE_FORWARD_MODEL_WHITELIST。
 	ModelWhitelist bool `mapstructure:"model_whitelist" yaml:"model_whitelist"`
+	// EarlyPingAfterSeconds:流式请求转发给 cell 后,等了这么多秒还没拿到 cell 响应头,
+	// 中央先向客户端回 200 + SSE 头并开始发心跳,防止 Cloudflare 100s 源站超时(524)。
+	// 心跳一旦开始,本次请求不再跨 cell 转移;cell 随后回的错误改写成 event: error 帧。
+	// 0=关闭(旧行为)。默认 20。env: EDGE_FORWARD_EARLY_PING_AFTER_SECONDS。
+	EarlyPingAfterSeconds int `mapstructure:"early_ping_after_seconds" yaml:"early_ping_after_seconds"`
+	// EarlyPingIntervalSeconds:心跳开始后的发送间隔秒,默认 15。env: EDGE_FORWARD_EARLY_PING_INTERVAL_SECONDS。
+	EarlyPingIntervalSeconds int `mapstructure:"early_ping_interval_seconds" yaml:"early_ping_interval_seconds"`
 }
 
 // CellRegistryConfig：边缘 cell 自注册/心跳到 Portal。
@@ -1989,6 +1996,22 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("EDGE_FORWARD_MODEL_WHITELIST"))); v == "1" || v == "true" || v == "on" {
 		cfg.EdgeForward.ModelWhitelist = true
+	}
+	// 早期心跳:未配置(<0 视为未配置)时默认 20s/15s;显式 0 = 关闭。
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_EARLY_PING_AFTER_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.EdgeForward.EarlyPingAfterSeconds = n
+		}
+	} else if cfg.EdgeForward.EarlyPingAfterSeconds == 0 {
+		cfg.EdgeForward.EarlyPingAfterSeconds = 20
+	}
+	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_EARLY_PING_INTERVAL_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.EdgeForward.EarlyPingIntervalSeconds = n
+		}
+	}
+	if cfg.EdgeForward.EarlyPingIntervalSeconds <= 0 {
+		cfg.EdgeForward.EarlyPingIntervalSeconds = 15
 	}
 	if v := strings.TrimSpace(os.Getenv("EDGE_FORWARD_CELL_URL")); v != "" {
 		cfg.EdgeForward.CellURL = v

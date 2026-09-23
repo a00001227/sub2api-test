@@ -24,7 +24,7 @@ func TestEdgeForward_ModelPlatformMismatchRejectedAtCentral(t *testing.T) {
 	resolver := &staticResolver{target: mustURL(t, cell.URL)}
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}, "gpt": {}}, nil, "k", func() float64 { return 0 }, nil, nil, nil, nil, nil)
+	h := newEdgeForwardHandler(resolver, map[string]struct{}{"claude": {}, "gpt": {}}, nil, "k", func() float64 { return 0 }, nil, nil, nil, nil, nil, edgeEarlyPing{})
 
 	var capturedCtx *gin.Context
 	var group *service.Group

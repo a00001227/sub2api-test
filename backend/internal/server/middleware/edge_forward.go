@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -141,7 +142,7 @@ func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelA
 		slog.Info("edge_forward: 组→工作道路由启用", "group_lanes", groupLanes)
 	}
 
-	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture, acquireUserSlot, checkRPM)
+	return newEdgeForwardHandler(resolver, groupSet, groupLanes, strings.TrimSpace(cfg.Key), rand.Float64, biller, checker, capture, acquireUserSlot, checkRPM, edgeEarlyPing{after: time.Duration(cfg.EarlyPingAfterSeconds) * time.Second, interval: time.Duration(cfg.EarlyPingIntervalSeconds) * time.Second})
 }
 
 // edgeCellDialTimeout 是 central→cell 转发的连接建立(dial)超时。内部机房跳,健康 cell
@@ -175,7 +176,15 @@ func newEdgeCellTransport() *http.Transport {
 
 // newEdgeForwardHandler 构造转发处理函数(组命中→加权随机选序→WS/失败转移流式回传)。
 // 与配置解析分离,便于用注入的 resolver + 确定性 rng 测试选路/失败转移。
-func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc, checkRPM EdgeRPMCheckFunc) gin.HandlerFunc {
+// edgeEarlyPing:流式请求等 cell 响应头超过 after 仍无结果时,中央先回 200+SSE 头并每
+// interval 发一个 SSE 注释帧(": \n\n",任何 SSE 客户端都会忽略)保活,避免 Cloudflare 100s
+// 源站超时(524)。after<=0 关闭。
+type edgeEarlyPing struct {
+	after    time.Duration
+	interval time.Duration
+}
+
+func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, groupLanes map[string]string, forwardKey string, rng func() float64, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc, checkRPM EdgeRPMCheckFunc, earlyPing edgeEarlyPing) gin.HandlerFunc {
 	// 流式:不设 Client.Timeout(否则会截断长 SSE);客户端断开由请求 Context 取消传导。
 	// 但把 central→cell 的 dial(连接建立)超时从 DefaultTransport 的 30s 收紧到
 	// edgeCellDialTimeout:cell 池每 15s 才从 Portal 刷新一次 routable,存在「cell 刚死、
@@ -319,8 +328,8 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 转发结束(defer 释放),客户端断开由 wrapReleaseOnDone 兜底。放在白名单校验之后、
 		// 选号/转发之前:被白名单/无可路由 cell 拒掉的请求不占槽。acquire 失败(队列满/超时)
 		// 时回调已按客户端协议写好错误响应,这里直接收尾。
+		isStream := gjson.GetBytes(body, "stream").Bool()
 		if acquireUserSlot != nil {
-			isStream := gjson.GetBytes(body, "stream").Bool()
 			release, ok := acquireUserSlot(c, isStream)
 			if !ok {
 				c.Abort()
@@ -354,6 +363,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 全候选耗尽时一并打出 —— 用来区分「好 cell 压根没进候选」(控制面/心跳排除,
 		// 此处根本不会出现该 host)与「进了候选但回没号」(cell 侧选号问题)。
 		outcomes := make([]string, 0, len(order))
+		earlyStarted := false
 		for i, target := range order {
 			outURL := *target
 			outURL.Path = c.Request.URL.Path
@@ -381,7 +391,10 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				}
 			}
 
-			resp, err := client.Do(outReq)
+			// 早期心跳:等 cell 响应头期间若超过阈值,先给客户端回 SSE 头 + 心跳(防 524)。
+			// earlyStarted=true 之后本次请求已对客户端"承诺"了 200 流,不能再转移候选,
+			// 后续任何失败都改写成 event: error 帧收尾。
+			resp, err := doCellRequestWithEarlyPing(c, client, outReq, earlyPing, isStream, &earlyStarted)
 			if err != nil {
 				// 客户端已断开(用户按 ESC / 新一轮 / 客户端超时重试)→ 请求 Context 被取消,
 				// client.Do 对每个候选都会瞬间返回 context canceled。这不是 cell 的问题:
@@ -391,6 +404,13 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				if c.Request.Context().Err() != nil || errors.Is(err, context.Canceled) {
 					slog.Info("edge_forward: 客户端取消请求,停止转发",
 						"cell", target.Host, "idx", i)
+					c.Abort()
+					return
+				}
+				if earlyStarted {
+					slog.Warn("edge_forward: 心跳已开始后转发到 cell 失败,以 SSE 错误帧收尾",
+						"cell", target.Host, "idx", i, "err", err)
+					writeSSETerminalErrorMessage(c, "edge cell unreachable")
 					c.Abort()
 					return
 				}
@@ -410,12 +430,19 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			if resp.StatusCode == http.StatusServiceUnavailable {
 				peek, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 				_ = resp.Body.Close()
-				if isCellNoAvailableAccounts(peek) {
+				if isCellNoAvailableAccounts(peek) && !earlyStarted {
 					lastErr = errCellNoAvailableAccounts
 					outcomes = append(outcomes, target.Host+"=no_accounts")
 					slog.Warn("edge_forward: cell 无可用账号(选号前失败),尝试下一候选",
 						"cell", target.Host, "idx", i)
 					continue
+				}
+				if earlyStarted {
+					// 心跳已开始:不能再转移,把 503 body 改写成 SSE 错误帧。
+					recordEdgeSideChannelHeaders(c, resp.Header)
+					writeSSETerminalErrorBody(c, peek)
+					c.Abort()
+					return
 				}
 				// 其它 503(cell/上游真实错误)→ 原样回传已缓冲的响应,不转移。
 				relayBufferedResponse(c, resp, peek)
@@ -436,7 +463,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			if stickyKey != "" {
 				affinity.put(stickyKey, target)
 			}
-			env, interrupted := streamCellResponse(c, resp)
+			env, interrupted := streamCellResponse(c, resp, earlyStarted)
 			if interrupted && stickyKey != "" {
 				// 中央↔cell 流在中途断掉(cell 重启/网络抖动/GOAWAY):streamCellResponse
 				// 已补发一帧 event: error 终止帧,这里再驱逐会话亲和,下一轮同会话重试就
@@ -552,27 +579,48 @@ func relayBufferedResponse(c *gin.Context, resp *http.Response, body []byte) {
 //
 // 返回 (捕获到的 envelope, interrupted)。interrupted=true 表示 SSE 流被异常截断
 // (中央↔cell 中途断),此时已向客户端补发一帧终止错误,上层应据此驱逐会话亲和。
-func streamCellResponse(c *gin.Context, resp *http.Response) (*service.EdgeUsageEnvelope, bool) {
+//
+// headersSent=true 表示早期心跳已向客户端写出 200+SSE 头:此时不再拷贝 cell 响应头/状态码,
+// cell 回的非 2xx 改写成一帧 event: error 收尾;2xx SSE 正文照常逐行透传。
+func streamCellResponse(c *gin.Context, resp *http.Response, headersSent bool) (*service.EdgeUsageEnvelope, bool) {
 	defer resp.Body.Close()
-	h := c.Writer.Header()
-	for k, vv := range resp.Header {
-		if isHopByHopHeader(k) || strings.EqualFold(k, service.EdgeUsageHeader) {
-			continue // 用量头不透传给消费者客户端
-		}
-		if strings.EqualFold(k, service.EdgeUpstreamCauseHeader) {
-			recordEdgeUpstreamCause(c, resp.Header.Get(k))
-			continue // 错误分类边信道:写入中央 ops,不透传给客户端
-		}
-		if strings.EqualFold(k, service.EdgeUpstreamDetailHeader) {
-			recordEdgeUpstreamDetail(c, resp.Header.Get(k))
-			continue // 上游摘要边信道:写入中央 ops,不透传给客户端
-		}
-		for _, v := range vv {
-			h.Add(k, v)
-		}
-	}
-	c.Writer.WriteHeader(resp.StatusCode)
 	flusher, _ := c.Writer.(http.Flusher)
+	if headersSent {
+		recordEdgeSideChannelHeaders(c, resp.Header)
+		ct := strings.ToLower(resp.Header.Get("Content-Type"))
+		if resp.StatusCode >= http.StatusBadRequest || !strings.Contains(ct, "text/event-stream") {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			if resp.StatusCode < http.StatusBadRequest {
+				// 心跳已按 SSE 承诺,cell 却回了非 SSE 的 2xx(理论上不会:早期心跳只对
+				// stream:true 请求开启)。无法把 JSON 塞进 SSE 流,按错误终止。
+				slog.Warn("edge_forward: 心跳已开始后 cell 回非 SSE 响应,按错误终止", "status", resp.StatusCode, "content_type", ct)
+				writeSSETerminalErrorMessage(c, "edge cell returned non-stream response")
+				return nil, false
+			}
+			slog.Warn("edge_forward: 心跳已开始后 cell 回上游错误,改写为 SSE 错误帧", "status", resp.StatusCode)
+			writeSSETerminalErrorBody(c, body)
+			return nil, false
+		}
+	} else {
+		h := c.Writer.Header()
+		for k, vv := range resp.Header {
+			if isHopByHopHeader(k) || strings.EqualFold(k, service.EdgeUsageHeader) {
+				continue // 用量头不透传给消费者客户端
+			}
+			if strings.EqualFold(k, service.EdgeUpstreamCauseHeader) {
+				recordEdgeUpstreamCause(c, resp.Header.Get(k))
+				continue // 错误分类边信道:写入中央 ops,不透传给客户端
+			}
+			if strings.EqualFold(k, service.EdgeUpstreamDetailHeader) {
+				recordEdgeUpstreamDetail(c, resp.Header.Get(k))
+				continue // 上游摘要边信道:写入中央 ops,不透传给客户端
+			}
+			for _, v := range vv {
+				h.Add(k, v)
+			}
+		}
+		c.Writer.WriteHeader(resp.StatusCode)
+	}
 
 	var captured *service.EdgeUsageEnvelope
 	// 非流式:用量在响应头(cell 后续会加;body 原样拷)。
@@ -670,6 +718,138 @@ func writeSSETerminalError(c *gin.Context, flusher http.Flusher) {
 	}
 	if flusher != nil {
 		flusher.Flush()
+	}
+}
+
+// recordEdgeSideChannelHeaders 只把 cell 的两条脱敏边信道头写进中央 ops 上下文,不向
+// 客户端拷贝任何头(早期心跳已写出响应头之后用)。
+func recordEdgeSideChannelHeaders(c *gin.Context, hdr http.Header) {
+	if v := hdr.Get(service.EdgeUpstreamCauseHeader); v != "" {
+		recordEdgeUpstreamCause(c, v)
+	}
+	if v := hdr.Get(service.EdgeUpstreamDetailHeader); v != "" {
+		recordEdgeUpstreamDetail(c, v)
+	}
+}
+
+// writeSSETerminalErrorMessage 以给定文案写一帧 event: error 收尾(心跳已开始后用)。
+func writeSSETerminalErrorMessage(c *gin.Context, msg string) {
+	payload, _ := json.Marshal(map[string]any{
+		"type":  "error",
+		"error": map[string]string{"type": "upstream_error", "message": msg},
+	})
+	writeSSEErrorFrame(c, payload)
+}
+
+// writeSSETerminalErrorBody 把 cell 回的错误 JSON body 原样(压成单行)作为 event: error
+// 的 data 收尾;body 不是合法 JSON 时退化为 upstream_error + 截断文案。cell 的错误体本就是
+// 客户端协议的错误对象(Anthropic {"type":"error","error":{…}} / OpenAI {"error":{…}}),
+// 放进 event: error 后 Claude Code / codex 都按流内错误处理。
+func writeSSETerminalErrorBody(c *gin.Context, body []byte) {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, bytes.TrimSpace(body)); err != nil || compact.Len() == 0 {
+		msg := strings.TrimSpace(string(body))
+		if len(msg) > 300 {
+			msg = msg[:300]
+		}
+		if msg == "" {
+			msg = "upstream request failed"
+		}
+		writeSSETerminalErrorMessage(c, msg)
+		return
+	}
+	writeSSEErrorFrame(c, compact.Bytes())
+}
+
+func writeSSEErrorFrame(c *gin.Context, data []byte) {
+	frame := "event: error\ndata: " + string(data) + "\n\n"
+	if _, err := c.Writer.Write([]byte(frame)); err != nil {
+		return
+	}
+	if f, ok := c.Writer.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// doCellRequestWithEarlyPing 执行 client.Do,同时在流式请求等 cell 响应头超过 ep.after
+// 时先给客户端写 200 + SSE 头并按 ep.interval 发注释帧心跳,直到 cell 回头。
+// *started 置 true 表示已向客户端写出响应头(调用方据此禁止转移、改用 SSE 错误帧收尾)。
+// 心跳写失败(客户端已断)→ 取消对 cell 的请求并返回 context.Canceled。
+func doCellRequestWithEarlyPing(c *gin.Context, client *http.Client, req *http.Request, ep edgeEarlyPing, isStream bool, started *bool) (*http.Response, error) {
+	if !isStream || ep.after <= 0 {
+		return client.Do(req)
+	}
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		resp, err := client.Do(req)
+		done <- result{resp, err}
+	}()
+
+	firstTimer := time.NewTimer(ep.after)
+	defer firstTimer.Stop()
+	var ticker *time.Ticker
+	var tickC <-chan time.Time
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
+	interval := ep.interval
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	writePing := func() bool {
+		if _, err := c.Writer.Write([]byte(": ping\n\n")); err != nil {
+			return false
+		}
+		if f, ok := c.Writer.(http.Flusher); ok {
+			f.Flush()
+		}
+		return true
+	}
+	for {
+		select {
+		case r := <-done:
+			// 心跳期间 cell 回来了:cancel 留给调用方 resp.Body 关闭后再无意义,但绝不能
+			// 在这里 cancel(会截断正在透传的 body),交给 req.Context 的父 ctx 自然收尾。
+			_ = cancel
+			return r.resp, r.err
+		case <-firstTimer.C:
+			h := c.Writer.Header()
+			h.Set("Content-Type", "text/event-stream")
+			h.Set("Cache-Control", "no-cache")
+			h.Set("Connection", "keep-alive")
+			h.Set("X-Accel-Buffering", "no")
+			c.Writer.WriteHeader(http.StatusOK)
+			*started = true
+			slog.Info("edge_forward: 等 cell 响应超过阈值,提前回 SSE 头并开始心跳",
+				"cell", req.URL.Host, "path", c.Request.URL.Path, "after", ep.after.String())
+			if !writePing() {
+				cancel()
+				r := <-done
+				if r.resp != nil {
+					_ = r.resp.Body.Close()
+				}
+				return nil, context.Canceled
+			}
+			ticker = time.NewTicker(interval)
+			tickC = ticker.C
+		case <-tickC:
+			if !writePing() {
+				cancel()
+				r := <-done
+				if r.resp != nil {
+					_ = r.resp.Body.Close()
+				}
+				return nil, context.Canceled
+			}
+		}
 	}
 }
 
