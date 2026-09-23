@@ -46,8 +46,10 @@ func ContentModeration(svc *service.ContentModerationService) gin.HandlerFunc {
 		}
 
 		apiKey, _ := GetAPIKeyFromContext(c)
+		SetRequestPhase(c, "content_moderation.read_body")
 		body := readAndRestoreModerationBody(c)
 		input := buildModerationInput(c, apiKey, protocol, body)
+		SetRequestPhase(c, "content_moderation.check")
 
 		decision, err := svc.Check(c.Request.Context(), input)
 		if err != nil || decision == nil {

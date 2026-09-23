@@ -45,6 +45,7 @@ func Enforcement(svc *service.EnforcementService) gin.HandlerFunc {
 		}
 
 		// 模型级：仅当配置了受限模型时才读 body 取模型名。
+		SetRequestPhase(c, "enforcement.peek_model")
 		if svc.HasModelRules() {
 			if model := peekModel(c); model != "" {
 				if action, ok := svc.ModelAction(model); ok {
@@ -65,6 +66,7 @@ func Enforcement(svc *service.EnforcementService) gin.HandlerFunc {
 		}
 
 		// 用户级兜底限速。
+		SetRequestPhase(c, "enforcement.throttle_check")
 		if throttled, retryAfter := svc.Throttled(c.Request.Context(), userID); throttled {
 			abortThrottled(c, retryAfter)
 			return

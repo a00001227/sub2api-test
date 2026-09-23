@@ -74,7 +74,7 @@ type EdgeRPMCheckFunc func(c *gin.Context) bool
 // 用手写流式代理而非 httputil.ReverseProxy:后者会触碰 gin 的 CloseNotify(在某些
 // ResponseWriter / h2c 下会 panic),且手写更利于逐块 flush SSE。
 func EdgeForward(cfg config.EdgeForwardConfig, biller EdgeConsumerBiller, modelAllowed ModelAllowFunc, capture EvidenceCaptureFunc, acquireUserSlot EdgeUserSlotFunc, checkRPM EdgeRPMCheckFunc) gin.HandlerFunc {
-	noop := func(c *gin.Context) { c.Next() }
+	noop := func(c *gin.Context) { SetRequestPhase(c, "local_handler"); c.Next() }
 	if !cfg.Enabled || len(cfg.Groups) == 0 {
 		return noop
 	}
@@ -202,6 +202,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		if !ok || apiKey == nil || apiKey.Group == nil {
 			slog.Debug("edge_forward: 跳过(无 apiKey/分组)", "path", c.Request.URL.Path,
 				"has_apikey", ok && apiKey != nil, "group_nil", apiKey == nil || apiKey.Group == nil)
+			SetRequestPhase(c, "local_handler")
 			c.Next()
 			return
 		}
@@ -214,6 +215,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 					}
 					return gs
 				}())
+			SetRequestPhase(c, "local_handler")
 			c.Next()
 			return
 		}
@@ -222,6 +224,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 列模型菜单归中央(受分组「自定义 /v1/models 列表」等展示配置控制),与调用/调度无关。
 		if c.Request.Method == http.MethodGet {
 			if p := c.Request.URL.Path; strings.HasSuffix(p, "/models") || strings.HasSuffix(p, "/usage") {
+				SetRequestPhase(c, "local_handler")
 				c.Next()
 				return
 			}
@@ -276,6 +279,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 
 		// 缓冲请求体以支持失败转移(同一请求重放给下一候选)。上游 bodyLimit 已封顶,
 		// 内存可控;响应仍是流式,不缓冲。
+		SetRequestPhase(c, "edge_forward.read_body")
 		var body []byte
 		if c.Request.Body != nil {
 			b, rerr := io.ReadAll(c.Request.Body)
@@ -286,6 +290,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			}
 			body = b
 		}
+		SetRequestPhase(c, "edge_forward.policy_checks")
 
 		// 疑似蒸馏取证：命中捕获名单则记一条请求原文(内部零开销闸门 + 异步脱敏存储)。
 		// 放在此处 → 覆盖成功/失败/白名单拒绝所有情况;仅取证,绝不影响转发。
@@ -336,6 +341,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 选号/转发之前:被白名单/无可路由 cell 拒掉的请求不占槽。acquire 失败(队列满/超时)
 		// 时回调已按客户端协议写好错误响应,这里直接收尾。
 		isStream := gjson.GetBytes(body, "stream").Bool()
+		SetRequestPhase(c, "edge_forward.user_slot")
 		if acquireUserSlot != nil {
 			release, ok := acquireUserSlot(c, isStream)
 			if !ok {
@@ -350,6 +356,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 消费者 RPM 限流(中央职责,与并发同因):handler 里的 CheckBillingEligibility 被
 		// c.Abort() 短路,cell 侧对转发流量免检,这里补上 RPM 级联(override → group → user/平台)。
 		// 放在持槽之后,与本地 handler「先占槽、再校验」的顺序一致;超限时回调已写好 429。
+		SetRequestPhase(c, "edge_forward.rpm")
 		if checkRPM != nil && !checkRPM(c) {
 			c.Abort()
 			return
@@ -401,6 +408,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			// 早期心跳:等 cell 响应头期间若超过阈值,先给客户端回 SSE 头 + 心跳(防 524)。
 			// earlyStarted=true 之后本次请求已对客户端"承诺"了 200 流,不能再转移候选,
 			// 后续任何失败都改写成 event: error 帧收尾。
+			SetRequestPhase(c, "edge_forward.cell_wait_headers "+target.Host)
 			resp, err := doCellRequestWithEarlyPing(c, client, outReq, earlyPing, isStream, &earlyStarted)
 			if err != nil {
 				// 客户端已断开(用户按 ESC / 新一轮 / 客户端超时重试)→ 请求 Context 被取消,
@@ -474,6 +482,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			if earlyPing.after <= 0 {
 				idlePing = 0 // 早期心跳整体关闭时,透传阶段心跳一并关闭(同一开关)
 			}
+			SetRequestPhase(c, "edge_forward.cell_stream "+target.Host)
 			env, interrupted := streamCellResponse(c, resp, earlyStarted, idlePing)
 			if interrupted && stickyKey != "" {
 				// 中央↔cell 流在中途断掉(cell 重启/网络抖动/GOAWAY):streamCellResponse

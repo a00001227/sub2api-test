@@ -34,6 +34,7 @@ func PromptAuditCapture(svc *service.PromptAuditService) gin.HandlerFunc {
 		}
 
 		apiKey, _ := GetAPIKeyFromContext(c)
+		SetRequestPhase(c, "prompt_audit.read_body")
 		body := readAndRestoreModerationBody(c)
 		if len(body) == 0 {
 			c.Next()
@@ -60,6 +61,7 @@ func PromptAuditCapture(svc *service.PromptAuditService) gin.HandlerFunc {
 			input.Model,
 			bodyCopy,
 		)
+		SetRequestPhase(c, "prompt_audit.capture")
 		svc.Capture(c.Request.Context(), task)
 		c.Next()
 	}

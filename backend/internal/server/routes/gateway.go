@@ -24,13 +24,17 @@ func RegisterGatewayRoutes(
 	cfg *config.Config,
 ) {
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
+	// 请求阶段探针:紧跟 bodyLimit(包住 MaxBytesReader 计数请求体),超 60s 未完成打告警
+	// (当前阶段+时间线+请求体读取进度)。正常快请求零日志。各中间件用 Phase() 打阶段。
+	phaseProbe := middleware.RequestPhaseProbe(60 * time.Second)
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
 	endpointNorm := handler.InboundEndpointMiddleware()
+	apiKeyAuthPhased := middleware.Phase("api_key_auth", gin.HandlerFunc(apiKeyAuth))
 
 	// 未分组 Key 拦截中间件（按协议格式区分错误响应）
-	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
-	requireGroupGoogle := middleware.RequireGroupAssignment(settingService, middleware.GoogleErrorWriter)
+	requireGroupAnthropic := middleware.Phase("require_group", middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter))
+	requireGroupGoogle := middleware.Phase("require_group", middleware.RequireGroupAssignment(settingService, middleware.GoogleErrorWriter))
 
 	// 蒸馏执行层限速中间件：挂在鉴权/分组之后、转发之前 → 本地与转发两条路径统一覆盖。
 	// 默认关（Active()=false）→ 一次原子读即放行、零开销。未接线时为放行 no-op。
@@ -38,6 +42,7 @@ func RegisterGatewayRoutes(
 	if h.Admin != nil && h.Admin.Enforcement != nil {
 		enforcement = h.Admin.Enforcement.Middleware()
 	}
+	enforcement = middleware.Phase("enforcement", enforcement)
 
 	// 中央“执行→转发”中间件建一次,复用到 /v1 组 + 无前缀别名 + codexDirect（默认关 = no-op）。
 	// #86b/#86a-2:转发成功后用 cell 带回的权威用量给消费者计费(占位号,不重复发 provider
@@ -58,7 +63,7 @@ func RegisterGatewayRoutes(
 		}
 		return h.Gateway.CheckForwardRPM(c)
 	}
-	edgeForward := middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time) {
+	edgeForward := middleware.Phase("edge_forward", middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time) {
 		if env.IsOpenAI() {
 			h.OpenAIGateway.RecordForwardedConsumerUsage(c, env)
 		} else {
@@ -70,26 +75,27 @@ func RegisterGatewayRoutes(
 	}, h.PricingDisplay.IsModelEnabled, func(c *gin.Context, userID, apiKeyID int64, reqBody []byte) {
 		// 疑似蒸馏取证：命中捕获名单才记原文(内部零开销闸门)；与转发/计费解耦。
 		h.Admin.EvidenceCapture.Capture(c, userID, apiKeyID, reqBody)
-	}, edgeUserSlot, edgeRPMCheck)
+	}, edgeUserSlot, edgeRPMCheck))
 
 	// 前置内容审计中间件：挂在 enforcement 之后、edgeForward 之前 → 转发路径也覆盖
 	// （原本审核只在网关 handler 内，EdgeForward 命中转发时短路 handler，cell 流量绕过审核）。
 	// 未启用时零开销放行；cell 回源可信流量跳过（中央已审）。
-	contentModeration := middleware.ContentModeration(h.Gateway.ContentModerationService())
+	contentModeration := middleware.Phase("content_moderation", middleware.ContentModeration(h.Gateway.ContentModerationService()))
 
 	// 提示词审计捕获中间件：与内容审核解耦、best-effort 留存原文。**必须排在 contentModeration
 	// 之前**——内容审核命中会 c.Abort() 短路后续中间件，若审计在其后，被拦截的请求就永远留不下原文；
 	// 放在前面则全量留存（含被拦截请求），提示词审计再读时按 request_id 关联风控日志得出「结果」。
 	// 未启用时零开销放行。
-	promptAudit := middleware.PromptAuditCapture(h.Admin.PromptAudit.Service())
+	promptAudit := middleware.Phase("prompt_audit", middleware.PromptAuditCapture(h.Admin.PromptAudit.Service()))
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)
+	gateway.Use(phaseProbe)
 	gateway.Use(clientRequestID)
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
-	gateway.Use(gin.HandlerFunc(apiKeyAuth))
+	gateway.Use(apiKeyAuthPhased)
 	gateway.Use(requireGroupAnthropic)
 	// 蒸馏执行层限速（默认关 = no-op），必须在转发之前。
 	gateway.Use(enforcement)
@@ -215,25 +221,25 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.Responses(c)
 	}
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, h.OpenAIGateway.ResponsesWebSocket)
+	r.POST("/responses", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
+	r.POST("/responses/*subpath", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
+	r.GET("/responses", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, h.OpenAIGateway.ResponsesWebSocket)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward)
+	codexDirect.Use(bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward)
 	{
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
 		codexDirect.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
+	r.POST("/chat/completions", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
 	})
-	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
+	r.POST("/embeddings", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -246,7 +252,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Embeddings(c)
 	})
-	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
+	r.POST("/images/generations", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -259,7 +265,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Images(c)
 	})
-	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
+	r.POST("/images/edits", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformOpenAI {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
