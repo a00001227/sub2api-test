@@ -1286,6 +1286,15 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	}
 	errorOwner = classifyOpsErrorOwner(phase, message)
 	errorSource = classifyOpsErrorSource(phase, message)
+	// 499 = 客户端在响应前自己断开(用户按 ESC / 发新消息 / 客户端超时重发),中央并发排队
+	// 阶段(concurrency_error_response.go)直接产出,不经 cell、没有 client_canceled slug,
+	// 上面的 slug 直判盖不住 → 曾被记成 platform 侧错误计入 SLA(3 天 128 条全中)。
+	// 一律归客户端侧并排除出 SLA/健康分,错误列表仍可见。
+	if status == statusClientClosedRequest {
+		isBusinessLimited = true
+		errorOwner = "client"
+		errorSource = "client_request"
+	}
 	return phase, isBusinessLimited, errorOwner, errorSource
 }
 
