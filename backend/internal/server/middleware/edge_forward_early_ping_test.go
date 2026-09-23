@@ -154,3 +154,64 @@ func TestEdgeForward_EarlyPing_FastCellNoPing(t *testing.T) {
 		t.Fatalf("cell 在阈值内回了,不应有心跳帧; got %q", string(all))
 	}
 }
+
+// 透传阶段心跳:cell 已回头(SSE)但中途停顿超过间隔 → 中央补 ": ping",之后正文照常。
+func TestEdgeForward_IdlePing_MidStreamStall(t *testing.T) {
+	cell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: message_start\ndata: {}\n\n"))
+		if fl != nil {
+			fl.Flush()
+		}
+		time.Sleep(1700 * time.Millisecond) // 超过 1s 空闲阈值
+		_, _ = w.Write([]byte("event: message_stop\ndata: {}\n\n"))
+	}))
+	defer cell.Close()
+	central := newEarlyPingCentral(t, cell.URL, 1)
+
+	req, _ := http.NewRequest(http.MethodPost, central.URL+"/v1/messages", strings.NewReader(`{"stream":true}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("请求中央失败: %v", err)
+	}
+	defer resp.Body.Close()
+	all, _ := io.ReadAll(resp.Body)
+	out := string(all)
+	startIdx := strings.Index(out, "event: message_start")
+	pingIdx := strings.Index(out, ": ping\n\n")
+	stopIdx := strings.Index(out, "event: message_stop")
+	if startIdx < 0 || pingIdx < 0 || stopIdx < 0 || !(startIdx < pingIdx && pingIdx < stopIdx) {
+		t.Fatalf("应在停顿期间插入心跳且不打乱顺序; got %q", out)
+	}
+	if strings.Contains(out, "event: error") {
+		t.Fatalf("正常收尾不应合成错误帧; got %q", out)
+	}
+}
+
+// 非 SSE 响应(JSON)即使 cell 慢也绝不插心跳字节,否则会破坏 JSON。
+func TestEdgeForward_IdlePing_NeverTouchesJSON(t *testing.T) {
+	cell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		time.Sleep(1700 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message"}`))
+	}))
+	defer cell.Close()
+	central := newEarlyPingCentral(t, cell.URL, 1)
+
+	req, _ := http.NewRequest(http.MethodPost, central.URL+"/v1/messages", strings.NewReader(`{"stream":true}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("请求中央失败: %v", err)
+	}
+	defer resp.Body.Close()
+	all, _ := io.ReadAll(resp.Body)
+	if string(all) != `{"id":"msg_1","type":"message"}` {
+		t.Fatalf("JSON 体必须原样,不能有心跳字节; got %q", string(all))
+	}
+}

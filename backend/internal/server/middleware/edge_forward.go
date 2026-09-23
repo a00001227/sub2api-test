@@ -463,7 +463,11 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			if stickyKey != "" {
 				affinity.put(stickyKey, target)
 			}
-			env, interrupted := streamCellResponse(c, resp, earlyStarted)
+			idlePing := earlyPing.interval
+			if earlyPing.after <= 0 {
+				idlePing = 0 // 早期心跳整体关闭时,透传阶段心跳一并关闭(同一开关)
+			}
+			env, interrupted := streamCellResponse(c, resp, earlyStarted, idlePing)
 			if interrupted && stickyKey != "" {
 				// 中央↔cell 流在中途断掉(cell 重启/网络抖动/GOAWAY):streamCellResponse
 				// 已补发一帧 event: error 终止帧,这里再驱逐会话亲和,下一轮同会话重试就
@@ -582,7 +586,12 @@ func relayBufferedResponse(c *gin.Context, resp *http.Response, body []byte) {
 //
 // headersSent=true 表示早期心跳已向客户端写出 200+SSE 头:此时不再拷贝 cell 响应头/状态码,
 // cell 回的非 2xx 改写成一帧 event: error 收尾;2xx SSE 正文照常逐行透传。
-func streamCellResponse(c *gin.Context, resp *http.Response, headersSent bool) (*service.EdgeUsageEnvelope, bool) {
+//
+// idlePing>0 时,SSE 透传阶段只要 cell 连续 idlePing 没有字节过来,就给客户端补一个 SSE 注释帧
+// (": ping")保活 —— 覆盖"cell 已回头(如账号排队时先发了心跳)、随后等上游首字节几十秒到
+// 几分钟"的空窗,否则 Cloudflare 的 Proxy Read Timeout(两次字节间隔上限)照样 524。
+// 只对 text/event-stream 生效,JSON 响应绝不插字节。
+func streamCellResponse(c *gin.Context, resp *http.Response, headersSent bool, idlePing time.Duration) (*service.EdgeUsageEnvelope, bool) {
 	defer resp.Body.Close()
 	flusher, _ := c.Writer.(http.Flusher)
 	if headersSent {
@@ -666,8 +675,48 @@ func streamCellResponse(c *gin.Context, resp *http.Response, headersSent bool) (
 	inSentinel := false
 	sawTerminal := false
 	clientGone := false
+
+	// 读 cell 的 goroutine:逐行送进 channel;函数返回时 defer 关闭 resp.Body 会让它以错误退出。
+	type cellLine struct {
+		line string
+		err  error
+	}
+	lines := make(chan cellLine, 64)
+	go func() {
+		for {
+			line, rerr := reader.ReadString('\n')
+			lines <- cellLine{line: line, err: rerr}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	var idleC <-chan time.Time
+	var idleTicker *time.Ticker
+	if idlePing > 0 {
+		idleTicker = time.NewTicker(idlePing)
+		defer idleTicker.Stop()
+		idleC = idleTicker.C
+	}
 	for {
-		line, rerr := reader.ReadString('\n')
+		var line string
+		var rerr error
+		select {
+		case cl := <-lines:
+			line, rerr = cl.line, cl.err
+			if idleTicker != nil {
+				idleTicker.Reset(idlePing) // 有字节就重新计时
+			}
+		case <-idleC:
+			// cell 空闲超过 idlePing:补心跳。写失败 = 客户端断开。
+			if _, werr := c.Writer.Write([]byte(": ping\n\n")); werr != nil {
+				return captured, false
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			continue
+		}
 		if len(line) > 0 {
 			trimmed := strings.TrimRight(line, "\r\n")
 			switch {

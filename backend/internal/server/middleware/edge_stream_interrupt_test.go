@@ -34,7 +34,7 @@ func TestStreamCellResponse_TruncatedEmitsTerminalError(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	_, interrupted := streamCellResponse(c, sseResp(body), false)
+	_, interrupted := streamCellResponse(c, sseResp(body), false, 0)
 
 	if !interrupted {
 		t.Fatal("截断流必须回报 interrupted=true(供上层驱逐会话亲和)")
@@ -67,7 +67,7 @@ func TestStreamCellResponse_NormalNoInjectedError(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	env, interrupted := streamCellResponse(c, sseResp(body), false)
+	env, interrupted := streamCellResponse(c, sseResp(body), false, 0)
 
 	if interrupted {
 		t.Fatal("正常收尾不得回报 interrupted")
@@ -94,7 +94,7 @@ func TestStreamCellResponse_CellErrorNotDoubleEmitted(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	_, interrupted := streamCellResponse(c, sseResp(body), false)
+	_, interrupted := streamCellResponse(c, sseResp(body), false, 0)
 
 	if interrupted {
 		t.Fatal("cell 已自发 error 终止,中央不应再判为截断/驱逐亲和")
