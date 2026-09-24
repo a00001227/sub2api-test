@@ -8342,22 +8342,26 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
 		errMsg = "Upstream access forbidden, please contact administrator"
+	// 429/529/5xx/未知状态码:兜底文案后拼上(脱敏、截断的)上游真实原因,用户与运维面板直接可见,
+	// 不必翻服务器日志(与 OpenAI 路径 mapUpstreamError 同口径);401/403 仍不下发细节。
 	case 429:
 		statusCode = http.StatusTooManyRequests
 		errType = "rate_limit_error"
-		errMsg = "Upstream rate limit exceeded, please retry later"
+		errMsg = WithUpstreamReason("Upstream rate limit exceeded, please retry later", 0, upstreamMsg)
 	case 529:
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"
-		errMsg = "Upstream service overloaded, please retry later"
+		errMsg = WithUpstreamReason("Upstream service overloaded, please retry later", 0, upstreamMsg)
 	case 500, 502, 503, 504:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
-		errMsg = "Upstream service temporarily unavailable"
+		errMsg = WithUpstreamReason("Upstream service temporarily unavailable", resp.StatusCode, upstreamMsg)
 	default:
+		// 未知状态码(404/409/422/520-528 等):必须带上真实状态码,否则一句 "Upstream request failed"
+		// 什么都看不出。
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
-		errMsg = "Upstream request failed"
+		errMsg = WithUpstreamReason("Upstream request failed", resp.StatusCode, upstreamMsg)
 	}
 
 	// 返回自定义错误响应

@@ -203,12 +203,12 @@ func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, ups
 		return fe
 	}
 
-	// 读侧超时 / 客户端断开 / 预算耗尽：保持原行为，直接写 502。
+	// 读侧超时 / 客户端断开 / 预算耗尽：直接写 502,文案带上(脱敏的)传输层原因。
 	c.JSON(http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    "upstream_error",
-			"message": "Upstream request failed",
+			"message": WithUpstreamReason("Upstream request failed", 0, safeErr),
 		},
 	})
 	return fmt.Errorf("upstream request failed: %s", safeErr)

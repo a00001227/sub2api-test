@@ -59,7 +59,8 @@ func TestGatewayHandleErrorResponse_NoRuleKeepsDefault(t *testing.T) {
 	errField, ok := payload["error"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "upstream_error", errField["type"])
-	assert.Equal(t, "Upstream request failed", errField["message"])
+	// 未知状态码不再只回一句兜底:带上真实状态码与(脱敏)原因,用户与运维面板直接可见。
+	assert.Equal(t, "Upstream request failed (upstream 422) — Invalid schema for field messages", errField["message"])
 }
 
 func TestOpenAIHandleErrorResponse_NoRuleKeepsDefault(t *testing.T) {

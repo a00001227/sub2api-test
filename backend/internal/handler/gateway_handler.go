@@ -487,7 +487,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					// (proxy_down)区分,让中央 ops 显形真因而非笼统 502。仅在响应尚未写出
 					// (headers 未 flush)时能加头,已写出则由后续 forward_failed 日志兜底。
 					service.SetEdgeUpstreamCauseHeader(c, streamStarted, 0, err.Error())
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureForwardErrorResponseWithReason(c, streamStarted, err.Error())
 				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -919,7 +919,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					// (proxy_down)区分,让中央 ops 显形真因而非笼统 502。仅在响应尚未写出
 					// (headers 未 flush)时能加头,已写出则由后续 forward_failed 日志兜底。
 					service.SetEdgeUpstreamCauseHeader(c, streamStarted, 0, err.Error())
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureForwardErrorResponseWithReason(c, streamStarted, err.Error())
 				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -1671,8 +1671,8 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 	// edge:把被压平的真实原因经脱敏头带回中央(中央 EdgeForward 会剥掉不下发客户端)
 	service.SetEdgeUpstreamCauseHeader(c, streamStarted, statusCode, upstreamMsg)
 
-	// 使用默认的错误映射
-	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	// 使用默认的错误映射(带上脱敏的上游真实原因)
+	status, errType, errMsg := h.mapUpstreamError(statusCode, upstreamMsg)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
 
@@ -1682,13 +1682,15 @@ func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCod
 		edgeHandBackNoAvailable(c, statusCode, "", func(st int, et, m string) { h.handleStreamingAwareError(c, st, et, m, false) })
 		return
 	}
-	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	status, errType, errMsg := h.mapUpstreamError(statusCode, "")
 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
 	service.SetEdgeUpstreamCauseHeader(c, streamStarted, statusCode, "")
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
 
-func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
+// mapUpstreamError 把上游状态码(+可选真实文案)映射成回客户端的错误。429/529/5xx/未知状态码把
+// (脱敏、截断的)上游原因拼在兜底文案后,用户与运维面板直接可见;401/403 不下发细节。
+func (h *GatewayHandler) mapUpstreamError(statusCode int, upstreamMsg string) (int, string, string) {
 	switch statusCode {
 	case 401:
 		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"
@@ -1699,13 +1701,13 @@ func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) 
 		// → 同一超大请求无限重投(413 风暴)。与 handleErrorResponse 的 413 处理一致。
 		return http.StatusRequestEntityTooLarge, "invalid_request_error", "Request exceeds the maximum size"
 	case 429:
-		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
+		return http.StatusTooManyRequests, "rate_limit_error", service.WithUpstreamReason("Upstream rate limit exceeded, please retry later", 0, upstreamMsg)
 	case 529:
-		return http.StatusServiceUnavailable, "overloaded_error", "Upstream service overloaded, please retry later"
+		return http.StatusServiceUnavailable, "overloaded_error", service.WithUpstreamReason("Upstream service overloaded, please retry later", 0, upstreamMsg)
 	case 500, 502, 503, 504:
-		return http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable"
+		return http.StatusBadGateway, "upstream_error", service.WithUpstreamReason("Upstream service temporarily unavailable", statusCode, upstreamMsg)
 	default:
-		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
+		return http.StatusBadGateway, "upstream_error", service.WithUpstreamReason("Upstream request failed", statusCode, upstreamMsg)
 	}
 }
 
@@ -1745,6 +1747,12 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 // 让 handleStreamingAwareError 通过 SSE 发协议合规的终止事件，
 // 否则下游收到的就是 silent EOF。
 func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarted bool) bool {
+	return h.ensureForwardErrorResponseWithReason(c, streamStarted, "")
+}
+
+// ensureForwardErrorResponseWithReason 同上,兜底文案后拼上(脱敏的)传输层真实原因
+// (如 "timeout awaiting response headers" / "connection reset"),用户与运维面板直接可见。
+func (h *GatewayHandler) ensureForwardErrorResponseWithReason(c *gin.Context, streamStarted bool, reason string) bool {
 	if c == nil || c.Writer == nil {
 		return false
 	}
@@ -1754,7 +1762,7 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 	if c.Writer.Written() {
 		streamStarted = true
 	}
-	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
+	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.WithUpstreamReason("Upstream request failed", 0, reason), streamStarted)
 	return true
 }
 
