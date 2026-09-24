@@ -50,7 +50,7 @@ func TestIsConnectPhaseTransportError_Classification(t *testing.T) {
 		{"dns not found", &net.DNSError{Err: "no such host", Name: "bad.proxy", IsNotFound: true}, true},
 		{"connection refused (string)", errors.New(`dial tcp 1.2.3.4:443: connect: connection refused`), true},
 		{"no route to host (string)", errors.New(`dial tcp 1.2.3.4:443: connect: no route to host`), true},
-		{"tls handshake timeout", errors.New(`net/http: TLS handshake timeout`), true},  // 握手阶段(HTTP 请求未发出)→ 换号安全
+		{"tls handshake timeout", errors.New(`net/http: TLS handshake timeout`), true}, // 握手阶段(HTTP 请求未发出)→ 换号安全
 		{"tls: handshake failure", errors.New(`remote error: tls: handshake failure`), true},
 		// 响应头之前连接被掐（死号被上游边缘 RST / 代理断连）→ 换号安全。
 		// 本分类器只在 DoWithTLS 返回 err（尚无响应头）时被调用，故这些 EOF 必在响应头之前。

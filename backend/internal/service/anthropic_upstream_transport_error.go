@@ -203,7 +203,22 @@ func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, ups
 		return fe
 	}
 
-	// 读侧超时 / 客户端断开 / 预算耗尽：直接写 502,文案带上(脱敏的)传输层原因。
+	// 客户端已断开(请求 ctx 已取消 → 上游 Post 报 context canceled):不是上游/账号的错,
+	// 也没有人会收到这个响应。记 499(ops 口径=客户端侧、排除 SLA),别再写成红色 502
+	// "Upstream request failed — … context canceled" 吓人。
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonClientCanceled)
+		c.JSON(statusClientClosedRequest, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    "api_error",
+				"message": "Client closed request before upstream responded",
+			},
+		})
+		return fmt.Errorf("client canceled request: %s", safeErr)
+	}
+
+	// 读侧超时 / 预算耗尽：直接写 502,文案带上(脱敏的)传输层原因。
 	c.JSON(http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{

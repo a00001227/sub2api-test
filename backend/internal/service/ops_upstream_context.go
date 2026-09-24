@@ -59,6 +59,8 @@ const (
 	OpsClientBusinessLimitedReasonClientUploadAborted = "client_upload_aborted"
 	// 请求体超过 bodyLimit:回 413,客户端上下文过大,非中转故障。
 	OpsClientBusinessLimitedReasonRequestTooLarge = "request_too_large"
+	// 客户端在上游响应前主动断开(ESC / 重发):上游 Post 报 context canceled,记 499,非中转故障。
+	OpsClientBusinessLimitedReasonClientCanceled = "client_canceled"
 )
 
 // SanitizeUpstreamErrorMessage 是 sanitizeUpstreamErrorMessage 的导出包装,供 handler 层
@@ -291,3 +293,6 @@ func safeUpstreamURL(rawURL string) string {
 	}
 	return rawURL
 }
+
+// statusClientClosedRequest 499:客户端在响应前自己断开(nginx 口径),ops 分类为客户端侧。
+const statusClientClosedRequest = 499
