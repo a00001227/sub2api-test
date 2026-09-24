@@ -3176,6 +3176,11 @@ func (s *GatewayService) IncrementAccountRPM(ctx context.Context, accountID int6
 // 成功/失败均记一次 total，成功额外记 success。O(1) Redis 写，失败开放、
 // 绝不影响请求主流程。仅对 provider pacing 账号有意义，但对所有账号无害。
 func (s *GatewayService) RecordAccountOutcome(ctx context.Context, accountID int64, success bool) {
+	// 近期故障 EWMA 只在这里吸收「成功」样本;失败样本由 HandleUpstreamError / 传输层失败
+	// 按账号级错误精确上报(这里的 err!=nil 混有 400/客户端断开,不能当故障)。
+	if success {
+		accountRecentFailures.Report(accountID, false)
+	}
 	if s.rpmCache == nil {
 		return
 	}
@@ -3435,11 +3440,16 @@ func weightedShuffleByPacing(group []accountWithLoad) {
 		item accountWithLoad
 		key  float64
 	}
-	keyed0Weight := group[0].account.PacingSelectionWeight()
+	// 权重 = 配额降权(PacingSelectionWeight) × 近期故障降权(accountRecentFailures):刚报过
+	// 429/529/5xx/传输错的号少选、不排除,随成功/时间自动回升。
+	selectionWeight := func(a *Account) float64 {
+		return a.PacingSelectionWeight() * accountRecentFailures.SelectionWeight(a.ID)
+	}
+	keyed0Weight := selectionWeight(group[0].account)
 	allEqual := true
 	pairs := make([]keyed, len(group))
 	for idx := range group {
-		w := group[idx].account.PacingSelectionWeight()
+		w := selectionWeight(group[idx].account)
 		if w != keyed0Weight {
 			allEqual = false
 		}

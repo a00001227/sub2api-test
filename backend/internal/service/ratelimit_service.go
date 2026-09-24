@@ -182,6 +182,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return false
 	}
 
+	// 近期故障统计(调度降权 + 面板评分):只记账号级错误,400/413 等请求侧问题不算。
+	if isAccountLevelUpstreamStatus(statusCode) {
+		accountRecentFailures.Report(account.ID, true)
+	}
+
 	// apikey 类型账号：检查自定义错误码配置
 	// 如果启用且错误码不在列表中，则不处理（不停止调度、不标记限流/过载）
 	if !account.ShouldHandleErrorCode(statusCode) {

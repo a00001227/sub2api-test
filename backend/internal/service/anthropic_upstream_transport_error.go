@@ -222,6 +222,10 @@ func handleAnthropicUpstreamTransportError(c *gin.Context, account *Account, ups
 // 与主 /v1/messages 路径完全一致的分类与 Ops 记录，只在最终兜底 502 的响应格式上各自处理。
 func recordAnthropicTransportFailover(c *gin.Context, account *Account, upstreamReq *http.Request, err error, passthrough bool, repo AccountRepository) (safeErr string, failover bool) {
 	safeErr = sanitizeUpstreamErrorMessage(err.Error())
+	// 传输层失败计入该号的近期故障(调度降权);客户端中途断开(ctx 已取消)不算账号的锅。
+	if c == nil || c.Request == nil || c.Request.Context().Err() == nil {
+		accountRecentFailures.Report(account.ID, true)
+	}
 	setOpsUpstreamError(c, 0, safeErr, "")
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:           account.Platform,

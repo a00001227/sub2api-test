@@ -66,15 +66,16 @@ type UsageWindow struct {
 // ProviderAccountMetrics 是返回给 Portal 的脱敏运行指标。
 type ProviderAccountMetrics struct {
 	Status              string       `json:"status"`
-	Concurrency         int          `json:"concurrency"`            // 并发上限（兼容旧字段）
-	ConcurrencyMax      int          `json:"concurrency_max"`        // 并发上限
-	ConcurrencyUsed     int          `json:"concurrency_used"`       // 当前并发占用（DeRouter 的 0/2 左值）
-	RPMLimit            int          `json:"rpm_limit"`              // 每分钟调度上限（DeRouter 的 0/20 右值；0 = 未设）
-	RPMUsed             int          `json:"rpm_used"`               // 当前分钟已用（左值）
-	RPHLimit            int          `json:"rph_limit"`              // 每小时调度上限（DeRouter 的 0/298 右值；0 = 未设）
-	RPHUsed             int          `json:"rph_used"`               // 过去 1 小时请求数（DeRouter 每小时左值）
-	ModelCount          int          `json:"model_count"`            // 支持的模型数（0 = 通配/全部或未知）
-	SuccessRate         *float64     `json:"success_rate,omitempty"` // 存活期累计成功率 0-1（nil = 暂无样本）
+	Concurrency         int          `json:"concurrency"`                 // 并发上限（兼容旧字段）
+	ConcurrencyMax      int          `json:"concurrency_max"`             // 并发上限
+	ConcurrencyUsed     int          `json:"concurrency_used"`            // 当前并发占用（DeRouter 的 0/2 左值）
+	RPMLimit            int          `json:"rpm_limit"`                   // 每分钟调度上限（DeRouter 的 0/20 右值；0 = 未设）
+	RPMUsed             int          `json:"rpm_used"`                    // 当前分钟已用（左值）
+	RPHLimit            int          `json:"rph_limit"`                   // 每小时调度上限（DeRouter 的 0/298 右值；0 = 未设）
+	RPHUsed             int          `json:"rph_used"`                    // 过去 1 小时请求数（DeRouter 每小时左值）
+	ModelCount          int          `json:"model_count"`                 // 支持的模型数（0 = 通配/全部或未知）
+	SuccessRate         *float64     `json:"success_rate,omitempty"`      // 存活期累计成功率 0-1（nil = 暂无样本）
+	RecentErrorRate     *float64     `json:"recent_error_rate,omitempty"` // 近期故障率 0-1(进程内 EWMA,5min 半衰;nil = 近期无故障)
 	SubscriptionTier    string       `json:"subscription_tier,omitempty"`
 	SubscriptionTierRaw string       `json:"subscription_tier_raw,omitempty"` // 上游原始订阅名（如 "max 20x"），展示用
 	CreatedAt           string       `json:"created_at,omitempty"`            // 账号接入时间 RFC3339（前端算"托管时长"）
@@ -275,6 +276,10 @@ func (s *ProviderAccountMetricsService) MetricsForAccount(ctx context.Context, a
 			out.SuccessRate = &rate
 		}
 	}
+	// 近期故障率(与调度降权同源):有样本才带,面板评分的成功率项优先用它。
+	if r, ok := accountRecentFailures.ErrorRate(id); ok {
+		out.RecentErrorRate = &r
+	}
 	// Session occupancy (Phase 21H tier-capacity): max from extra, used from
 	// the session-limit cache. Best-effort; 0/0 = limit not enabled.
 	out.SessionsMax = acc.GetMaxSessions()
@@ -372,9 +377,13 @@ func computePacingScore(m *ProviderAccountMetrics) *PacingScore {
 	if m.SevenDay != nil {
 		sevenDay = 1 - m.SevenDay.Utilization/100.0
 	}
-	// 成功率：用存活期累计真实成功率（此前写死 1.0，忽略了已算出的 SuccessRate，
-	// 成功率项永远满分 —— 已修）。
+	// 成功率：默认用存活期累计真实成功率;近期有故障样本时改用 1-近期故障率 ——
+	// 让面板评分与调度降权(accountRecentFailures)同源:刚报过 429/529/5xx 的号分数立刻
+	// 掉下来,随成功/时间自动回升;存活期累计对近期错误几乎无反应。
 	success := *m.SuccessRate
+	if m.RecentErrorRate != nil {
+		success = 1 - *m.RecentErrorRate
+	}
 	rate := 1.0
 	if m.RPMLimit > 0 {
 		rate = 1 - float64(m.RPMUsed)/float64(m.RPMLimit)
