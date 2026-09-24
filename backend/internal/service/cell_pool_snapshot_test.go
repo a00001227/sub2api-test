@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -49,4 +50,30 @@ func TestCellPoolSnapshotService_SnapshotURLAndStartGuard(t *testing.T) {
 	svc.Stop()
 	var nilSvc *CellPoolSnapshotService
 	nilSvc.Stop()
+}
+
+type fakePoolSnapshotLister struct{ accounts []ProviderLinkedAccount }
+
+func (f *fakePoolSnapshotLister) ListProviderLinked(context.Context) ([]ProviderLinkedAccount, error) {
+	return f.accounts, nil
+}
+
+func TestPoolSnapshotSkipAccount_DisabledIsSoftDeleted(t *testing.T) {
+	require.True(t, poolSnapshotSkipAccount(&Account{Status: StatusDisabled}))
+	require.False(t, poolSnapshotSkipAccount(&Account{Status: StatusActive}))
+	require.False(t, poolSnapshotSkipAccount(&Account{Status: StatusError}))
+	require.False(t, poolSnapshotSkipAccount(nil))
+}
+
+// Portal 软删 → cell deactivate 置 disabled 的号不再进快照(否则监控面板反复出现孤儿)。
+func TestCellPoolSnapshotService_BuildSkipsDisabled(t *testing.T) {
+	cfg := &config.Config{}
+	svc := NewCellPoolSnapshotService(cfg, nil, nil, nil)
+	svc.lister = &fakePoolSnapshotLister{accounts: []ProviderLinkedAccount{
+		{ExternalRef: "pa_removed", Account: Account{ID: 1, Status: StatusDisabled, Platform: "anthropic"}},
+		{ExternalRef: "", Account: Account{ID: 2, Status: StatusActive}},
+	}}
+	snap, err := svc.Build(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, snap.Accounts)
 }

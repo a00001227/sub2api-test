@@ -121,6 +121,12 @@ func (s *CellPoolSnapshotService) Build(ctx context.Context) (*CellPoolSnapshot,
 		if ref == "" {
 			continue
 		}
+		// Portal 软删(removed)→ cell deactivate 置 disabled:这是 cell 侧的软删除态,不再上报,
+		// 否则 Portal 已删的号会在「平台监控」里当孤儿反复出现。硬删路径漏通知的历史孤儿由
+		// Portal 侧 orphan 清理调 deactivate 收敛到同一状态。
+		if poolSnapshotSkipAccount(acc) {
+			continue
+		}
 		m := s.metrics.MetricsForAccount(ctx, acc)
 		item := PoolAccountSnapshot{
 			ExternalRef:  ref,
@@ -273,4 +279,9 @@ func ProvideCellPoolSnapshotService(cfg *config.Config, accountRepo AccountRepos
 	svc := NewCellPoolSnapshotService(cfg, accountRepo, opsRepo, metrics)
 	svc.Start(context.Background())
 	return svc
+}
+
+// poolSnapshotSkipAccount 报告某账号是否不进快照:disabled = Portal 软删后 cell 侧的终态。
+func poolSnapshotSkipAccount(acc *Account) bool {
+	return acc != nil && acc.Status == StatusDisabled
 }
