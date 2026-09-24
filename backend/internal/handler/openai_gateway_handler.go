@@ -1914,6 +1914,13 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage(), streamStarted)
 		return
 	}
+	// 边缘 cell:本地换号耗尽且未写字节 → 改回 503 no_accounts 交还中央换 cell(上游 429 必换号)。
+	if edgeShouldHandBack(c, statusCode, streamStarted) {
+		edgeHandBackNoAvailable(c, statusCode, service.ExtractUpstreamErrorMessage(responseBody), func(st int, et, m string) {
+			h.handleStreamingAwareError(c, st, et, m, false)
+		})
+		return
+	}
 
 	// 先检查透传规则
 	if h.errorPassthroughService != nil && len(responseBody) > 0 {
@@ -1952,6 +1959,10 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况
 func (h *OpenAIGatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool) {
+	if edgeShouldHandBack(c, statusCode, streamStarted) {
+		edgeHandBackNoAvailable(c, statusCode, "", func(st int, et, m string) { h.handleStreamingAwareError(c, st, et, m, false) })
+		return
+	}
 	status, errType, errMsg := h.mapUpstreamError(statusCode, "")
 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
 	service.SetEdgeUpstreamCauseHeader(c, streamStarted, statusCode, "")
