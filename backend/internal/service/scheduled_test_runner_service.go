@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -122,6 +123,13 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
 	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
 	if err != nil {
+		if errors.Is(err, ErrScheduledTestAccountDisabled) {
+			// disabled 号(Portal 软删/孤儿清理后的终态)不探活、不记结果,只推进下次时间,免得每分钟重复命中。
+			if nextRun, nerr := computeNextRun(plan.CronExpression, time.Now()); nerr == nil {
+				_ = s.planRepo.UpdateAfterRun(ctx, plan.ID, time.Now(), nextRun)
+			}
+			return
+		}
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)
 		return
 	}

@@ -43,6 +43,7 @@ const (
 
 // cellSelfHealSkipStatuses:这些状态不主动探活 —— 要么是被人为关停/移除,要么还没上线。
 var cellSelfHealSkipStatuses = map[string]bool{
+	"disabled":   true, // Portal 软删/孤儿清理后的 cell 侧终态:探活只会把它翻回 error
 	"paused":     true,
 	"removed":    true,
 	"draft":      true,

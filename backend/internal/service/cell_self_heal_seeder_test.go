@@ -41,6 +41,7 @@ func TestCellSelfHealSeeder_SeedsInServiceAccountsOnce(t *testing.T) {
 		{ID: 4, Status: "paused"},     // skipped
 		{ID: 5, Status: "removed"},    // skipped
 		{ID: 6, Status: "onboarding"}, // skipped
+		{ID: 7, Status: "disabled"},   // skipped:Portal 软删后的终态,不建探活计划
 	}}
 	plans := &stubSeedPlanService{}
 	seeder := NewCellSelfHealSeeder(lister, plans)
@@ -68,7 +69,7 @@ func TestCellSelfHealSeeder_SeedsInServiceAccountsOnce(t *testing.T) {
 			t.Errorf("expected account=%d to be seeded", id)
 		}
 	}
-	for _, id := range []int64{4, 5, 6} {
+	for _, id := range []int64{4, 5, 6, 7} {
 		if seededFor[id] {
 			t.Errorf("account=%d has a skip status and must NOT be seeded", id)
 		}

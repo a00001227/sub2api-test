@@ -1763,8 +1763,18 @@ func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) er
 
 // RunTestBackground executes an account test in-memory (no real HTTP client),
 // capturing SSE output via httptest.NewRecorder, then parses the result.
+// ErrScheduledTestAccountDisabled:定时探活遇到 disabled 号时的哨兵错误 —— 调用方(runner)据此静默跳过。
+// 背景:Portal 软删/孤儿清理会把 cell 上的号置 disabled(终态);若探活仍去打上游,401 会经 SetError
+// 把它翻回 error,于是「清理完隔一会又冒出来」。手动「测试连接」路径不受此限(只拦定时后台探活)。
+var ErrScheduledTestAccountDisabled = errors.New("scheduled test skipped: account disabled")
+
 func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
 	startedAt := time.Now()
+	if s.accountRepo != nil {
+		if acc, err := s.accountRepo.GetByID(ctx, accountID); err == nil && acc != nil && acc.Status == StatusDisabled {
+			return nil, ErrScheduledTestAccountDisabled
+		}
+	}
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
