@@ -26,7 +26,7 @@ func TestWriteOpenAINonStreamingProtocolError_OverloadedMapsTo503(t *testing.T) 
 	c, rec := newProtocolErrorTestCtx(t)
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}}
 
-	err := s.writeOpenAINonStreamingProtocolError(resp, c, "Our servers are currently overloaded. Please try again later.")
+	err := s.writeOpenAINonStreamingProtocolError(resp, c, nil, "Our servers are currently overloaded. Please try again later.")
 	require.Error(t, err)
 
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
@@ -46,7 +46,7 @@ func TestWriteOpenAINonStreamingProtocolError_OtherStays502Unclassified(t *testi
 	c, rec := newProtocolErrorTestCtx(t)
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}}
 
-	err := s.writeOpenAINonStreamingProtocolError(resp, c, "No tool call found for function call output with call_id abc")
+	err := s.writeOpenAINonStreamingProtocolError(resp, c, nil, "No tool call found for function call output with call_id abc")
 	require.Error(t, err)
 
 	require.Equal(t, http.StatusBadGateway, rec.Code)
@@ -64,7 +64,7 @@ func TestWriteOpenAINonStreamingProtocolError_OpenAIInternalErrorClassifiedOther
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}}
 
 	msg := "An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID ee4640ef-a3a0-4cac-b873-17ba4149ef3b in your message."
-	err := s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+	err := s.writeOpenAINonStreamingProtocolError(resp, c, nil, msg)
 	require.Error(t, err)
 
 	require.Equal(t, http.StatusBadGateway, rec.Code)

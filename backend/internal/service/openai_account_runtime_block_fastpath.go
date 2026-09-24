@@ -51,7 +51,8 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if len(requestedModel) > 0 && s.rateLimitService.HandleUpstreamModelNotFound(stateCtx, account, requestedModel[0], statusCode, responseBody) {
 		return true
 	}
-	shouldDisable := s.rateLimitService.HandleUpstreamError(stateCtx, account, statusCode, headers, responseBody)
+	// 5xx 且文案为过载 → 按 529 处置(命中「529 | overloaded」规则 / 过载冷却),与 Claude 对齐。
+	shouldDisable := s.rateLimitService.HandleUpstreamError(stateCtx, account, openAIEffectiveUpstreamStatus(statusCode, responseBody), headers, responseBody)
 	if shouldDisable {
 		s.BlockAccountScheduling(account, time.Time{}, "upstream_disable")
 	}
