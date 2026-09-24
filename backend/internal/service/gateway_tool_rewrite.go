@@ -271,18 +271,56 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 		return body
 	}
 
+	// Anthropic 规则:ttl=1h 的断点不能排在 ttl=5m 的断点之后(处理顺序 tools → system →
+	// messages)。tools 是最前面的断点,若客户在 system/messages 用了 1h,这里再补 5m 就必然
+	// 400("a ttl='1h' cache_control block must not come after a ttl='5m' cache_control block")
+	// —— 是我们的注入把客户合法的请求打坏。跟随客户用 1h(1h 在前永远合法);没人用 1h 才用默认 5m。
+	ttl := cacheTTLForToolsBreakpoint(body)
+
 	if existingCC.Exists() {
-		if next, err := sjson.SetBytes(body, fmt.Sprintf("tools.%d.cache_control.ttl", lastIdx), claude.DefaultCacheControlTTL); err == nil {
+		if next, err := sjson.SetBytes(body, fmt.Sprintf("tools.%d.cache_control.ttl", lastIdx), ttl); err == nil {
 			body = next
 		}
 		return body
 	}
 
-	raw := fmt.Sprintf(`{"type":"ephemeral","ttl":%q}`, claude.DefaultCacheControlTTL)
+	raw := fmt.Sprintf(`{"type":"ephemeral","ttl":%q}`, ttl)
 	if next, err := sjson.SetRawBytes(body, fmt.Sprintf("tools.%d.cache_control", lastIdx), []byte(raw)); err == nil {
 		body = next
 	}
 	return body
+}
+
+// cacheTTLForToolsBreakpoint 决定注入到 tools[-1] 的 ttl:system / messages 里任何一个
+// cache_control 用了 1h → "1h";否则默认(5m)。
+func cacheTTLForToolsBreakpoint(body []byte) string {
+	const oneHour = "1h"
+	found := false
+	visit := func(block gjson.Result) bool {
+		if block.Get("cache_control.ttl").String() == oneHour {
+			found = true
+			return false
+		}
+		return true
+	}
+	if sys := gjson.GetBytes(body, "system"); sys.IsArray() {
+		sys.ForEach(func(_, block gjson.Result) bool { return visit(block) })
+	}
+	if found {
+		return oneHour
+	}
+	if msgs := gjson.GetBytes(body, "messages"); msgs.IsArray() {
+		msgs.ForEach(func(_, msg gjson.Result) bool {
+			if content := msg.Get("content"); content.IsArray() {
+				content.ForEach(func(_, block gjson.Result) bool { return visit(block) })
+			}
+			return !found
+		})
+	}
+	if found {
+		return oneHour
+	}
+	return claude.DefaultCacheControlTTL
 }
 
 // restoreToolNamesInBytes 对 bytes chunk 做逆向还原：假名 → 真名。

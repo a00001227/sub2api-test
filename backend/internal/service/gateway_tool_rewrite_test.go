@@ -266,3 +266,21 @@ func TestBuildDynamicToolMap_FakeNameShape(t *testing.T) {
 		require.True(t, strings.Contains(fake, head), "fake %q should contain head3 %q of %q", fake, head, name)
 	}
 }
+
+// 客户在 messages/system 用 1h 断点、tools 没打断点:我们补的 tools 断点必须跟着用 1h,
+// 否则 5m 排在 1h 前面,Anthropic 400 "1h block must not come after a 5m block"。
+func TestApplyToolsLastCacheBreakpoint_FollowsClientOneHourTTL(t *testing.T) {
+	body := []byte(`{"tools":[{"name":"a","input_schema":{}}],"messages":[{"role":"user","content":[{"type":"text","text":"x","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+	out := applyToolsLastCacheBreakpoint(body)
+	require.Equal(t, "1h", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
+
+	// tools[-1] 有 cache_control 但没 ttl:同样跟随 1h(system 里的 1h)。
+	body = []byte(`{"tools":[{"name":"a","input_schema":{},"cache_control":{"type":"ephemeral"}}],"system":[{"type":"text","text":"s","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"hi"}]}`)
+	out = applyToolsLastCacheBreakpoint(body)
+	require.Equal(t, "1h", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
+
+	// 客户只用 5m / 没写 ttl:维持默认 5m。
+	body = []byte(`{"tools":[{"name":"a","input_schema":{}}],"messages":[{"role":"user","content":[{"type":"text","text":"x","cache_control":{"type":"ephemeral","ttl":"5m"}}]}]}`)
+	out = applyToolsLastCacheBreakpoint(body)
+	require.Equal(t, "5m", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
+}
