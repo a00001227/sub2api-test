@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"bytes"
-	"io"
 	"net/http"
 	"strings"
 
@@ -47,7 +45,10 @@ func ContentModeration(svc *service.ContentModerationService) gin.HandlerFunc {
 
 		apiKey, _ := GetAPIKeyFromContext(c)
 		SetRequestPhase(c, "content_moderation.read_body")
-		body := readAndRestoreModerationBody(c)
+		body, ok := readRequestBodyOrAbort(c)
+		if !ok {
+			return
+		}
 		input := buildModerationInput(c, apiKey, protocol, body)
 		SetRequestPhase(c, "content_moderation.check")
 
@@ -70,21 +71,6 @@ func ContentModeration(svc *service.ContentModerationService) gin.HandlerFunc {
 		c.Set(ContentModerationDoneContextKey, true)
 		c.Next()
 	}
-}
-
-// readAndRestoreModerationBody 读取整个请求体并原样还原（供 edgeForward/handler 复用）。
-// bodyLimit 已在更上游封顶，此处全量读取安全；读后用内存 reader 还原，不截断。
-func readAndRestoreModerationBody(c *gin.Context) []byte {
-	if c.Request == nil || c.Request.Body == nil {
-		return nil
-	}
-	buf, err := io.ReadAll(c.Request.Body)
-	_ = c.Request.Body.Close()
-	c.Request.Body = io.NopCloser(bytes.NewReader(buf))
-	if err != nil {
-		return nil
-	}
-	return buf
 }
 
 // moderationProtocolForPath 按请求路径映射审核协议;无可审文本的端点返回空（跳过）。

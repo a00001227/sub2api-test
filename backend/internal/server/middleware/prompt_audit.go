@@ -35,7 +35,10 @@ func PromptAuditCapture(svc *service.PromptAuditService) gin.HandlerFunc {
 
 		apiKey, _ := GetAPIKeyFromContext(c)
 		SetRequestPhase(c, "prompt_audit.read_body")
-		body := readAndRestoreModerationBody(c)
+		body, ok := readRequestBodyOrAbort(c)
+		if !ok {
+			return
+		}
 		if len(body) == 0 {
 			c.Next()
 			return

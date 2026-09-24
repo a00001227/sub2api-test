@@ -55,6 +55,10 @@ const (
 	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
 	// 内容审核主动拦截(违规词等):中转的策略行为,非系统故障 → 排除出 SLA/健康分。
 	OpsClientBusinessLimitedReasonContentPolicy = "content_policy_violation"
+	// 客户端请求体上传中途断开(unexpected EOF / reset):中央读不完整,回 400,非中转故障。
+	OpsClientBusinessLimitedReasonClientUploadAborted = "client_upload_aborted"
+	// 请求体超过 bodyLimit:回 413,客户端上下文过大,非中转故障。
+	OpsClientBusinessLimitedReasonRequestTooLarge = "request_too_large"
 )
 
 // SanitizeUpstreamErrorMessage 是 sanitizeUpstreamErrorMessage 的导出包装,供 handler 层

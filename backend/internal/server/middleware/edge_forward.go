@@ -285,7 +285,8 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			b, rerr := io.ReadAll(c.Request.Body)
 			_ = c.Request.Body.Close()
 			if rerr != nil {
-				writeEdgeError(c)
+				// 客户端上传中途断开 / 超限:回明确的 400/413,不再伪装成 502 "edge cell unreachable"。
+				abortRequestBodyReadError(c, rerr, len(b))
 				return
 			}
 			body = b
