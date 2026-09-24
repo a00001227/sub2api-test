@@ -1223,18 +1223,42 @@ func sanitizeSystemText(text string) string {
 	return text
 }
 
-func marshalAnthropicSystemTextBlock(text string, includeCacheControl bool) ([]byte, error) {
+// marshalAnthropicSystemTextBlock 构造 system 文本块;cacheTTL 非空时带 cache_control
+// (ttl 由调用方按 injectedCacheTTL 决定,不再写死 5m)。
+func marshalAnthropicSystemTextBlock(text string, cacheTTL string) ([]byte, error) {
 	block := anthropicSystemTextBlockPayload{
 		Type: "text",
 		Text: text,
 	}
-	if includeCacheControl {
+	if cacheTTL != "" {
 		block.CacheControl = &anthropicCacheControlPayload{
 			Type: "ephemeral",
-			TTL:  claude.DefaultCacheControlTTL,
+			TTL:  cacheTTL,
 		}
 	}
 	return json.Marshal(block)
+}
+
+// alignInjectedCacheControlTTL 把我们注入的 cache_control(配置里 true → 默认 5m,或 JSON 写的
+// 5m/缺省)的 ttl 对齐到 injectedCacheTTL:客户用 1h 时升成 1h,否则原样。客户没用 1h 时不动。
+func alignInjectedCacheControlTTL(cacheControl any, ttl string) any {
+	if cacheControl == nil || ttl != "1h" {
+		return cacheControl
+	}
+	switch cc := cacheControl.(type) {
+	case map[string]string:
+		if cc["type"] == "ephemeral" {
+			cc["ttl"] = ttl
+		}
+		return cc
+	case map[string]any:
+		if t, _ := cc["type"].(string); t == "ephemeral" {
+			cc["ttl"] = ttl
+		}
+		return cc
+	default:
+		return cacheControl
+	}
 }
 
 func marshalAnthropicSystemTextBlockWithCacheControl(text string, cacheControl any) ([]byte, error) {
@@ -4532,7 +4556,7 @@ func hasClaudeCodePrefix(text string) bool {
 // 处理 null、字符串、数组三种格式
 func injectClaudeCodePrompt(body []byte, system any) []byte {
 	system = normalizeSystemParam(system)
-	claudeCodeBlock, err := marshalAnthropicSystemTextBlock(claudeCodeSystemPrompt, true)
+	claudeCodeBlock, err := marshalAnthropicSystemTextBlock(claudeCodeSystemPrompt, injectedCacheTTL(body))
 	if err != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build Claude Code prompt block: %v", err)
 		return body
@@ -4558,7 +4582,7 @@ func injectClaudeCodePrompt(body []byte, system any) []byte {
 			if !strings.HasPrefix(v, claudeCodePrefix) {
 				merged = claudeCodePrefix + "\n\n" + v
 			}
-			nextBlock, buildErr := marshalAnthropicSystemTextBlock(merged, false)
+			nextBlock, buildErr := marshalAnthropicSystemTextBlock(merged, "")
 			if buildErr != nil {
 				logger.LegacyPrintf("service.gateway", "Warning: failed to build prefixed Claude Code system block: %v", buildErr)
 				return body
@@ -4780,6 +4804,8 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 		if err != nil {
 			return nil, fmt.Errorf("system block %d cache_control: %w", i, err)
 		}
+		// 我们注入的 system 块排在客户 messages 之前:客户用 1h 时必须也用 1h,否则 400。
+		cacheControl = alignInjectedCacheControlTTL(cacheControl, injectedCacheTTL(body))
 		raw, err := marshalAnthropicSystemTextBlockWithCacheControl(text, cacheControl)
 		if err != nil {
 			return nil, err
@@ -5430,6 +5456,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			return nil, err
 		}
+		// 留一份最终出线请求体的引用,供 400(如缓存 ttl 顺序错)诊断谁写了哪个 cache_control。
+		setAnthropicWireBody(c, wireBody)
 		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
 		lastWireBody = wireBody
 
@@ -8319,6 +8347,14 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 
 	switch resp.StatusCode {
 	case 400:
+		// 缓存 ttl 顺序错("1h must not come after 5m"):把出线请求体里全部 cache_control 的
+		// ttl 布局打出来,一眼看出 5m 是客户端写的还是我们注入的(tools[-1] 断点 / 1h 注入)。
+		if isCacheTTLOrderingError(upstreamMsg) {
+			slog.Warn("anthropic_cache_ttl_ordering_400",
+				"account_id", account.ID,
+				"layout", cacheControlTTLLayout(anthropicWireBodyFrom(c)),
+				"upstream_message", truncateString(upstreamMsg, 300))
+		}
 		c.Data(http.StatusBadRequest, "application/json", body)
 		summary := upstreamMsg
 		if summary == "" {

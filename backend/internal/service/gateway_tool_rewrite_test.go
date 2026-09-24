@@ -284,3 +284,25 @@ func TestApplyToolsLastCacheBreakpoint_FollowsClientOneHourTTL(t *testing.T) {
 	out = applyToolsLastCacheBreakpoint(body)
 	require.Equal(t, "5m", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
 }
+
+// 伪装注入的 Claude Code system 提示块 + 后台配置的 system 提示块:客户 messages 用 1h 时,
+// 我们注入的 cache_control 也必须是 1h(它们排在客户 messages 之前),否则 Anthropic 400。
+func TestInjectedSystemBlocks_FollowClientOneHourTTL(t *testing.T) {
+	body := []byte(`{"model":"claude-x","system":"You are helpful.","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+
+	out := injectClaudeCodePrompt(body, "You are helpful.")
+	require.Equal(t, "1h", gjson.GetBytes(out, "system.0.cache_control.ttl").String(), "伪装提示块跟随客户 1h")
+
+	blocks, err := buildClaudeOAuthSystemPromptBlocksJSON(body, "expansion text", "")
+	require.NoError(t, err)
+	for i, raw := range blocks {
+		if cc := gjson.GetBytes(raw, "cache_control"); cc.Exists() {
+			require.Equal(t, "1h", cc.Get("ttl").String(), "配置块 %d 跟随客户 1h", i)
+		}
+	}
+
+	// 客户没用 1h:维持默认 5m。
+	body5m := []byte(`{"model":"claude-x","system":"You are helpful.","messages":[{"role":"user","content":"hi"}]}`)
+	out = injectClaudeCodePrompt(body5m, "You are helpful.")
+	require.Equal(t, "5m", gjson.GetBytes(out, "system.0.cache_control.ttl").String())
+}

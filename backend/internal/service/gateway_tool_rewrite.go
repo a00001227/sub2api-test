@@ -275,7 +275,7 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 	// messages)。tools 是最前面的断点,若客户在 system/messages 用了 1h,这里再补 5m 就必然
 	// 400("a ttl='1h' cache_control block must not come after a ttl='5m' cache_control block")
 	// —— 是我们的注入把客户合法的请求打坏。跟随客户用 1h(1h 在前永远合法);没人用 1h 才用默认 5m。
-	ttl := cacheTTLForToolsBreakpoint(body)
+	ttl := injectedCacheTTL(body)
 
 	if existingCC.Exists() {
 		if next, err := sjson.SetBytes(body, fmt.Sprintf("tools.%d.cache_control.ttl", lastIdx), ttl); err == nil {
@@ -291,9 +291,11 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 	return body
 }
 
-// cacheTTLForToolsBreakpoint 决定注入到 tools[-1] 的 ttl:system / messages 里任何一个
-// cache_control 用了 1h → "1h";否则默认(5m)。
-func cacheTTLForToolsBreakpoint(body []byte) string {
+// injectedCacheTTL 决定「我们自己注入的」缓存断点(tools[-1] / 伪装 system 提示块 / 配置的
+// system 提示块)该用的 ttl:客户在 system / messages 里任何一个 cache_control 用了 1h → "1h";
+// 否则默认(5m)。Anthropic 规则:1h 断点不能排在 5m 断点之后(tools → system → messages),
+// 我们注入的块都排在客户的 messages 之前,跟随客户用 1h 永远合法;写死 5m 则客户一用 1h 就 400。
+func injectedCacheTTL(body []byte) string {
 	const oneHour = "1h"
 	found := false
 	visit := func(block gjson.Result) bool {
