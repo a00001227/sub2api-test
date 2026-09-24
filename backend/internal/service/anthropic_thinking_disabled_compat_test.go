@@ -52,3 +52,30 @@ func TestThinkingDisabledUnsupportedMemo(t *testing.T) {
 	markThinkingDisabledUnsupported("")
 	require.False(t, modelRejectsThinkingDisabled(""))
 }
+
+// thinking disabled → adaptive 时,强制工具 tool_choice(any/tool)必须同步降成 auto,否则第二次
+// 请求撞 "tool_choice: type tool and any are not supported for this model"。
+func TestRewriteThinkingDisabledToAdaptive_DowngradesForcedToolChoice(t *testing.T) {
+	body := []byte(`{"model":"m","thinking":{"type":"disabled"},"tool_choice":{"type":"tool","name":"get_weather","disable_parallel_tool_use":true},"messages":[]}`)
+	out, changed := RewriteThinkingDisabledToAdaptive(body)
+	require.True(t, changed)
+	require.Equal(t, "adaptive", gjson.GetBytes(out, "thinking.type").String())
+	require.Equal(t, "auto", gjson.GetBytes(out, "tool_choice.type").String())
+	require.False(t, gjson.GetBytes(out, "tool_choice.name").Exists(), "auto 不带 name")
+	require.True(t, gjson.GetBytes(out, "tool_choice.disable_parallel_tool_use").Bool(), "其它字段保留")
+
+	body = []byte(`{"model":"m","thinking":{"type":"disabled"},"tool_choice":{"type":"any"}}`)
+	out, _ = RewriteThinkingDisabledToAdaptive(body)
+	require.Equal(t, "auto", gjson.GetBytes(out, "tool_choice.type").String())
+
+	// tool_choice auto / 缺省:不动。
+	body = []byte(`{"model":"m","thinking":{"type":"disabled"},"tool_choice":{"type":"auto"}}`)
+	out, _ = RewriteThinkingDisabledToAdaptive(body)
+	require.Equal(t, "auto", gjson.GetBytes(out, "tool_choice.type").String())
+
+	// 客户自己就开着 thinking + 强制工具:不是我们改写的,不兜底。
+	body = []byte(`{"model":"m","thinking":{"type":"enabled","budget_tokens":1024},"tool_choice":{"type":"any"}}`)
+	out, changed = RewriteThinkingDisabledToAdaptive(body)
+	require.False(t, changed)
+	require.Equal(t, "any", gjson.GetBytes(out, "tool_choice.type").String())
+}

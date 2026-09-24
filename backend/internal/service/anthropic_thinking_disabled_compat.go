@@ -68,5 +68,33 @@ func RewriteThinkingDisabledToAdaptive(body []byte) ([]byte, bool) {
 			modified = withEffort
 		}
 	}
+	// 客户「关 thinking + 强制调用工具(tool_choice any/tool)」在旧模型合法;我们把 thinking 改成
+	// adaptive 后,Anthropic 又规定开着 thinking 不允许强制工具 → 第二次请求 400
+	// ("tool_choice: type \"tool\" and \"any\" are not supported for this model")。既然 thinking
+	// 已被我们改写,tool_choice 必须一起降成 auto,这是该模型上唯一可行的组合(代价:模型不一定调
+	// 那个工具)。客户自己就开着 thinking 还强制工具的,不在此处兜底,原样透传 400。
+	modified = downgradeForcedToolChoiceToAuto(modified)
 	return modified, true
+}
+
+// downgradeForcedToolChoiceToAuto 把 tool_choice.type any/tool 改成 auto,保留
+// disable_parallel_tool_use;auto/none/缺省原样。
+func downgradeForcedToolChoiceToAuto(body []byte) []byte {
+	tc := gjson.GetBytes(body, "tool_choice")
+	if !tc.Exists() {
+		return body
+	}
+	switch strings.ToLower(strings.TrimSpace(tc.Get("type").String())) {
+	case "any", "tool":
+	default:
+		return body
+	}
+	next, err := sjson.SetBytes(body, "tool_choice.type", "auto")
+	if err != nil {
+		return body
+	}
+	if next2, err := sjson.DeleteBytes(next, "tool_choice.name"); err == nil {
+		next = next2
+	}
+	return next
 }
