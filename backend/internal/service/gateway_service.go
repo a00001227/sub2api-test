@@ -4552,6 +4552,38 @@ func hasClaudeCodePrefix(text string) bool {
 	return false
 }
 
+// claudeCodeBannerSentences 是会被从客户 system 里剔除的 Claude Code 身份句(整句,含句号)。
+// 长的(Agent SDK 版)排前面:标准版无句号形式是它的前缀,先匹配长句才不会截半句。
+// 只剔身份句本身,不碰 Explore/Compact 这类带实质内容的前缀提示词(它们是真指令,要保留)。
+var claudeCodeBannerSentences = []string{
+	"You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.",
+	claudeCodeSystemPrompt,
+}
+
+// stripClaudeCodeBanner 去掉一段 system 文本开头的 Claude Code 身份句,返回其余内容
+// (已 TrimSpace)。整段就是身份句 → 返回空;不以身份句开头 → 原文 TrimSpace 返回。
+// 身份句后必须是文本结尾或空白,避免把 "…for Claude.Something" 这类误当身份句截断。
+func stripClaudeCodeBanner(text string) string {
+	trimmed := strings.TrimSpace(text)
+	for _, banner := range claudeCodeBannerSentences {
+		if !strings.HasPrefix(trimmed, banner) {
+			continue
+		}
+		rest := trimmed[len(banner):]
+		if rest == "" {
+			return ""
+		}
+		if r := rest[0]; r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return strings.TrimSpace(rest)
+		}
+	}
+	// 无句号的标准身份句(部分客户端省略句号):整段相等才剔。
+	if trimmed == strings.TrimSuffix(claudeCodeSystemPrompt, ".") {
+		return ""
+	}
+	return trimmed
+}
+
 // injectClaudeCodePrompt 在 system 开头注入 Claude Code 提示词
 // 处理 null、字符串、数组三种格式
 func injectClaudeCodePrompt(body []byte, system any) []byte {
@@ -4842,17 +4874,33 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	system = normalizeSystemParam(system)
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
 
-	// 1. 提取原始 system prompt 文本
+	// 1. 提取原始 system prompt 文本 + 客户打在 system 上的 cache_control。
+	//    逐块剔除 Claude Code 身份句(客户端/中转常把 "You are Claude Code, ..." 放在
+	//    system[0] 再接自己的指令):只剔那一句,其余块原样保留。以前是拼接后整段判
+	//    "以身份句开头就不挪",导致 system[0] 是身份句时客户后面所有指令全部丢失。
+	//    cache_control 取客户最后一个带断点的 system 块,下面挪进 messages 时打在
+	//    注入的 "[System Instructions]" 块上,让断点仍落在客户指令末尾(否则客户 system
+	//    上的缓存断点随重写一起消失,长 system 每轮全价)。
 	var originalSystemText string
+	var carriedCacheControl json.RawMessage
 	switch v := system.(type) {
 	case string:
-		originalSystemText = strings.TrimSpace(v)
+		originalSystemText = stripClaudeCodeBanner(v)
 	case []any:
 		var parts []string
 		for _, item := range v {
-			if m, ok := item.(map[string]any); ok {
-				if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
-					parts = append(parts, text)
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := m["text"].(string); ok {
+				if stripped := stripClaudeCodeBanner(text); stripped != "" {
+					parts = append(parts, stripped)
+				}
+			}
+			if cc, ok := m["cache_control"]; ok && cc != nil {
+				if raw, err := json.Marshal(cc); err == nil {
+					carriedCacheControl = raw
 				}
 			}
 		}
@@ -4888,13 +4936,14 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 
 	// 3. 将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头
 	//    模型仍通过 messages 接收完整指令，保留客户端功能
-	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
-	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
+	if originalSystemText != "" {
+		instrBlock := map[string]any{"type": "text", "text": "[System Instructions]\n" + originalSystemText}
+		if len(carriedCacheControl) > 0 {
+			instrBlock["cache_control"] = carriedCacheControl
+		}
 		instrMsg, err1 := json.Marshal(map[string]any{
-			"role": "user",
-			"content": []map[string]any{
-				{"type": "text", "text": "[System Instructions]\n" + originalSystemText},
-			},
+			"role":    "user",
+			"content": []map[string]any{instrBlock},
 		})
 		ackMsg, err2 := json.Marshal(map[string]any{
 			"role": "assistant",

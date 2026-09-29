@@ -507,3 +507,71 @@ func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *t
 	require.Equal(t, "tail", arr[2].Get("text").String())
 	require.Equal(t, "1h", arr[2].Get("cache_control.ttl").String())
 }
+
+// 客户 system[0] 是 Claude Code 身份句、后面跟自己的指令(中转/Claude Code 形态):
+// 只剔身份句,其余指令必须挪进 messages;system 上的 cache_control 要跟到注入块上。
+func TestRewriteSystemForNonClaudeCode_KeepsInstructionsAfterBanner(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"what is the mascot?"}]}`
+	system := []any{
+		map[string]any{"type": "text", "text": claudeCodeSystemPrompt},
+		map[string]any{"type": "text", "text": "Handbook: Our team mascot is a parrot named Pineapple.",
+			"cache_control": map[string]any{"type": "ephemeral", "ttl": "1h"}},
+		map[string]any{"type": "text", "text": "Always answer in one word."},
+	}
+
+	result := rewriteSystemForNonClaudeCode([]byte(body), system)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(result, &parsed))
+	messages, ok := parsed["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 3, "instruction + ack + original")
+
+	firstMsg := messages[0].(map[string]any)
+	require.Equal(t, "user", firstMsg["role"])
+	firstBlock := firstMsg["content"].([]any)[0].(map[string]any)
+	require.Equal(t, "[System Instructions]\nHandbook: Our team mascot is a parrot named Pineapple.\n\nAlways answer in one word.", firstBlock["text"])
+	cc, ok := firstBlock["cache_control"].(map[string]any)
+	require.True(t, ok, "客户 system 上的 cache_control 应跟到注入的指令块上")
+	require.Equal(t, "ephemeral", cc["type"])
+	require.Equal(t, "1h", cc["ttl"])
+
+	// 身份句不得重复出现在注入的指令里
+	require.NotContains(t, firstBlock["text"], claudeCodeSystemPrompt)
+}
+
+func TestRewriteSystemForNonClaudeCode_NoCacheControlWhenClientHadNone(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`
+	system := []any{
+		map[string]any{"type": "text", "text": "Be terse."},
+	}
+	result := rewriteSystemForNonClaudeCode([]byte(body), system)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(result, &parsed))
+	firstBlock := parsed["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	_, has := firstBlock["cache_control"]
+	require.False(t, has)
+}
+
+func TestStripClaudeCodeBanner(t *testing.T) {
+	sdk := "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK."
+	cases := []struct {
+		name, in, want string
+	}{
+		{"exact banner", claudeCodeSystemPrompt, ""},
+		{"banner with whitespace", "  " + claudeCodeSystemPrompt + "\n", ""},
+		{"banner without period", "You are Claude Code, Anthropic's official CLI for Claude", ""},
+		{"sdk banner", sdk, ""},
+		{"banner then instructions", claudeCodeSystemPrompt + "\n\nDo X.", "Do X."},
+		{"sdk banner then instructions", sdk + " Do Y.", "Do Y."},
+		{"no banner", "You are a helpful assistant.", "You are a helpful assistant."},
+		{"banner glued to text is not a banner", claudeCodeSystemPrompt + "Extra", claudeCodeSystemPrompt + "Extra"},
+		// Compact / Explore 这类带实质内容的 CC 前缀提示词是真指令,必须保留
+		{"compact prompt kept", "You are a helpful AI assistant tasked with summarizing conversations. Summarize now.", "You are a helpful AI assistant tasked with summarizing conversations. Summarize now."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, stripClaudeCodeBanner(tc.in))
+		})
+	}
+}

@@ -94,6 +94,13 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 			needWrite = true
 		}
 
+		// 版本下限:缓存里(或刚合并进来的客户端)的 claude-cli 版本低于当前伪装版本 → 抬平。
+		if floored, bumped := floorClaudeCLIVersion(cached.UserAgent); bumped {
+			logger.LegacyPrintf("service.identity", "Floored fingerprint UA for account %d: %s -> %s", accountID, cached.UserAgent, floored)
+			cached.UserAgent = floored
+			needWrite = true
+		}
+
 		if needWrite {
 			cached.UpdatedAt = time.Now().Unix()
 			if err := s.cache.SetFingerprint(ctx, accountID, cached); err != nil {
@@ -105,6 +112,9 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 
 	// 缓存不存在或解析失败，创建新指纹
 	fp := s.createFingerprintFromHeaders(headers)
+	if floored, bumped := floorClaudeCLIVersion(fp.UserAgent); bumped {
+		fp.UserAgent = floored
+	}
 
 	// 生成随机ClientID
 	fp.ClientID = generateClientID()
@@ -405,6 +415,27 @@ func extractProduct(ua string) string {
 		return strings.ToLower(ua[:idx])
 	}
 	return ""
+}
+
+// claudeCLIUAVersionRe 匹配 UA 里的 "claude-cli/X.Y.Z"(产品名大小写不敏感),分组 1 是产品名+斜杠。
+var claudeCLIUAVersionRe = regexp.MustCompile(`(?i)(claude-cli/)\d+\.\d+\.\d+`)
+
+// floorClaudeCLIVersion 把 claude-cli 指纹 UA 的版本抬到不低于 claude.CLICurrentVersion。
+//
+// 背景:指纹按号缓存 7 天(每日续期),UA 只在客户端带来更新版本时才升级;代码里的
+// CLICurrentVersion 提版(如 2.1.278→2.1.280)碰不到已缓存的旧指纹,上游按 UA 版本拒新模型
+// ("Claude Code 2.1.278 does not support this model; version 2.1.280 or newer is required")。
+// 指纹是我们对上游的统一身份(metadata.user_id 的版本段、billing header 的 cc_version 都从
+// fp.UserAgent 派生),抬版本不会制造字段间不一致。非 claude-cli 产品名或版本已 ≥ 当前值不动。
+func floorClaudeCLIVersion(ua string) (string, bool) {
+	if !isNewerVersion(defaultFingerprint.UserAgent, ua) {
+		return ua, false
+	}
+	floored := claudeCLIUAVersionRe.ReplaceAllString(ua, "${1}"+claude.CLICurrentVersion)
+	if floored == ua {
+		return ua, false
+	}
+	return floored, true
 }
 
 // isNewerVersion 比较版本号，判断newUA是否比cachedUA更新
