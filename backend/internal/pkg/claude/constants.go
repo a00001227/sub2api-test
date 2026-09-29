@@ -1,6 +1,13 @@
 // Package claude provides constants and helpers for Claude API integration.
 package claude
 
+import (
+	"regexp"
+	"strconv"
+	"strings"
+	"sync/atomic"
+)
+
 // Claude Code 客户端相关常量
 
 // Beta header 常量
@@ -67,6 +74,64 @@ const DefaultCacheControlTTL = "5m"
 // 必须与 DefaultHeaders["User-Agent"] 中的版本号严格一致；不一致会被 Anthropic 判第三方。
 const CLICurrentVersion = "2.1.280"
 
+// currentCLIVersion 运行时生效的伪装版本(空 = 用常量)。由 ClaudeCLIVersionUpdater 从 npm
+// 拉到最新发布版后写入,所有取版本的地方都走 CurrentCLIVersion(),常量只剩兜底/下限作用。
+var currentCLIVersion atomic.Value
+
+var cliSemverRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// CurrentCLIVersion 返回当前对外伪装的 Claude Code CLI 版本:运行时版本优先,否则常量。
+func CurrentCLIVersion() string {
+	if v, _ := currentCLIVersion.Load().(string); v != "" {
+		return v
+	}
+	return CLICurrentVersion
+}
+
+// SetCurrentCLIVersion 设置运行时伪装版本。只接受三段 semver 且不低于常量 CLICurrentVersion
+// (常量是下限:npm 拉回来的值再低也不会把版本往回拨;流量里伪造的高版本不走这里)。
+// 返回是否已采纳。
+func SetCurrentCLIVersion(v string) bool {
+	v = strings.TrimSpace(v)
+	if !cliSemverRe.MatchString(v) {
+		return false
+	}
+	if CompareCLIVersions(v, CLICurrentVersion) < 0 {
+		return false
+	}
+	currentCLIVersion.Store(v)
+	return true
+}
+
+// ResetCurrentCLIVersionForTest 清掉运行时版本(仅测试用)。
+func ResetCurrentCLIVersionForTest() { currentCLIVersion.Store("") }
+
+// CompareCLIVersions 比较两个三段 semver:a<b 返回 -1,相等 0,a>b 返回 1。非法段按 0 处理。
+func CompareCLIVersions(a, b string) int {
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < 3; i++ {
+		var x, y int
+		if i < len(pa) {
+			x, _ = strconv.Atoi(pa[i])
+		}
+		if i < len(pb) {
+			y, _ = strconv.Atoi(pb[i])
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+// DefaultUserAgent 当前伪装版本对应的 Claude Code CLI User-Agent。
+func DefaultUserAgent() string {
+	return "claude-cli/" + CurrentCLIVersion() + " (external, cli)"
+}
+
 // FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
 // 用于 OAuth 账号伪装成 Claude Code 时使用。
 // 顺序与真实 CLI 抓包一致。
@@ -88,12 +153,21 @@ func FullClaudeCodeMimicryBetas() []string {
 	}
 }
 
-// DefaultHeaders 是 Claude Code 客户端默认请求头。
-var DefaultHeaders = map[string]string{
+// DefaultHeaders 返回 Claude Code 客户端默认请求头(每次新 map;User-Agent 跟随运行时版本)。
+func DefaultHeaders() map[string]string {
+	out := make(map[string]string, len(defaultStaticHeaders)+1)
+	for k, v := range defaultStaticHeaders {
+		out[k] = v
+	}
+	out["User-Agent"] = DefaultUserAgent()
+	return out
+}
+
+// defaultStaticHeaders 是除 User-Agent 外的固定默认头。
+var defaultStaticHeaders = map[string]string{
 	// Keep these in sync with recent Claude CLI traffic to reduce the chance
 	// that Claude Code-scoped OAuth credentials are rejected as "non-CLI" usage.
 	// 版本参考：对齐 Parrot (src/transform/cc_mimicry.py:49) 的 CLI_USER_AGENT。
-	"User-Agent":                                "claude-cli/" + CLICurrentVersion + " (external, cli)",
 	"X-Stainless-Lang":                          "js",
 	"X-Stainless-Package-Version":               "0.94.0",
 	"X-Stainless-OS":                            "Linux",

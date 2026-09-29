@@ -1253,6 +1253,9 @@ type GatewayConfig struct {
 	// Scheduling: 账号调度相关配置
 	Scheduling GatewaySchedulingConfig `mapstructure:"scheduling"`
 
+	// ClaudeCLIVersion: 伪装 Claude Code CLI 版本自动跟随 npm 最新发布版
+	ClaudeCLIVersion ClaudeCLIVersionConfig `mapstructure:"claude_cli_version"`
+
 	// TLSFingerprint: TLS指纹伪装配置
 	TLSFingerprint TLSFingerprintConfig `mapstructure:"tls_fingerprint"`
 
@@ -1511,6 +1514,14 @@ type TLSProfileConfig struct {
 	// 空则使用内置默认顺序 [0,11,10,35,16,22,23,13,43,45,51]
 	// GREASE值(如0x0a0a)会自动插入GREASE扩展
 	Extensions []uint16 `mapstructure:"extensions"`
+}
+
+// ClaudeCLIVersionConfig 伪装 CLI 版本自动更新:定期从 npm registry 拉
+// @anthropic-ai/claude-code 的最新版本,作为指纹/billing 版本的运行时值(不低于代码常量)。
+type ClaudeCLIVersionConfig struct {
+	AutoUpdate      bool          `mapstructure:"auto_update"`
+	SourceURL       string        `mapstructure:"source_url"`
+	RefreshInterval time.Duration `mapstructure:"refresh_interval"`
 }
 
 // GatewaySchedulingConfig accounts scheduling configuration.
@@ -2649,6 +2660,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.claude_cli_version.auto_update", true)
+	viper.SetDefault("gateway.claude_cli_version.source_url", "https://registry.npmjs.org/@anthropic-ai/claude-code/latest")
+	viper.SetDefault("gateway.claude_cli_version.refresh_interval", time.Hour)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -3480,6 +3494,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ModelsListCacheTTLSeconds < 10 || c.Gateway.ModelsListCacheTTLSeconds > 30 {
 		return fmt.Errorf("gateway.models_list_cache_ttl_seconds must be between 10-30")
+	}
+	if c.Gateway.ClaudeCLIVersion.AutoUpdate {
+		if strings.TrimSpace(c.Gateway.ClaudeCLIVersion.SourceURL) == "" {
+			return fmt.Errorf("gateway.claude_cli_version.source_url must be set when auto_update is enabled")
+		}
+		if c.Gateway.ClaudeCLIVersion.RefreshInterval < time.Minute {
+			return fmt.Errorf("gateway.claude_cli_version.refresh_interval must be at least 1m")
+		}
 	}
 	if c.Gateway.Scheduling.StickySessionMaxWaiting <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_max_waiting must be positive")

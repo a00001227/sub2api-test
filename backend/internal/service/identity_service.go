@@ -27,7 +27,7 @@ var (
 
 // 默认指纹值（当客户端未提供时使用）
 var defaultFingerprint = Fingerprint{
-	UserAgent:               "claude-cli/" + claude.CLICurrentVersion + " (external, cli)",
+	// UserAgent 不在此固定:跟随运行时版本,统一走 claude.DefaultUserAgent()。
 	StainlessLang:           "js",
 	StainlessPackageVersion: "0.94.0",
 	StainlessOS:             "Linux",
@@ -136,7 +136,7 @@ func (s *IdentityService) createFingerprintFromHeaders(headers http.Header) *Fin
 	if ua := headers.Get("User-Agent"); ua != "" {
 		fp.UserAgent = ua
 	} else {
-		fp.UserAgent = defaultFingerprint.UserAgent
+		fp.UserAgent = claude.DefaultUserAgent()
 	}
 
 	// 获取x-stainless-*头，如果没有则使用默认值
@@ -419,7 +419,7 @@ func extractProduct(ua string) string {
 // claudeCLIUAVersionRe 匹配 UA 里的 "claude-cli/X.Y.Z"(产品名大小写不敏感),分组 1 是产品名+斜杠。
 var claudeCLIUAVersionRe = regexp.MustCompile(`(?i)(claude-cli/)\d+\.\d+\.\d+`)
 
-// floorClaudeCLIVersion 把 claude-cli 指纹 UA 的版本抬到不低于 claude.CLICurrentVersion。
+// floorClaudeCLIVersion 把 claude-cli 指纹 UA 的版本抬到不低于 claude.CurrentCLIVersion()。
 //
 // 背景:指纹按号缓存 7 天(每日续期),UA 只在客户端带来更新版本时才升级;代码里的
 // CLICurrentVersion 提版(如 2.1.278→2.1.280)碰不到已缓存的旧指纹,上游按 UA 版本拒新模型
@@ -427,10 +427,10 @@ var claudeCLIUAVersionRe = regexp.MustCompile(`(?i)(claude-cli/)\d+\.\d+\.\d+`)
 // 指纹是我们对上游的统一身份(metadata.user_id 的版本段、billing header 的 cc_version 都从
 // fp.UserAgent 派生),抬版本不会制造字段间不一致。非 claude-cli 产品名或版本已 ≥ 当前值不动。
 func floorClaudeCLIVersion(ua string) (string, bool) {
-	if !isNewerVersion(defaultFingerprint.UserAgent, ua) {
+	if !isNewerVersion(claude.DefaultUserAgent(), ua) {
 		return ua, false
 	}
-	floored := claudeCLIUAVersionRe.ReplaceAllString(ua, "${1}"+claude.CLICurrentVersion)
+	floored := claudeCLIUAVersionRe.ReplaceAllString(ua, "${1}"+claude.CurrentCLIVersion())
 	if floored == ua {
 		return ua, false
 	}
@@ -444,13 +444,13 @@ func floorClaudeCLIVersion(ua string) (string, bool) {
 //     而且取不出 CLI 版本,客户端自带的 billing cc_version 不会被同步,上游按它判版本
 //     ("Claude Code 2.1.226 does not support this model")。整套换成默认 CC 指纹
 //     (UA + 全部 X-Stainless-*),ClientID 保留。
-//  2. claude-cli 但版本低于 claude.CLICurrentVersion → 抬到当前版本(见 floorClaudeCLIVersion)。
+//  2. claude-cli 但版本低于 claude.CurrentCLIVersion() → 抬到当前版本(见 floorClaudeCLIVersion)。
 func normalizeClaudeCLIFingerprint(fp *Fingerprint) bool {
 	if fp == nil {
 		return false
 	}
 	if extractProduct(fp.UserAgent) != "claude-cli" {
-		fp.UserAgent = defaultFingerprint.UserAgent
+		fp.UserAgent = claude.DefaultUserAgent()
 		fp.StainlessLang = defaultFingerprint.StainlessLang
 		fp.StainlessPackageVersion = defaultFingerprint.StainlessPackageVersion
 		fp.StainlessOS = defaultFingerprint.StainlessOS

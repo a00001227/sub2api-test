@@ -120,6 +120,7 @@ func provideCleanup(
 	riskV2ScoringWorker *service.RiskV2ScoringWorker,
 	riskV2HealthLoop *service.RiskV2HealthReportLoop,
 	cellPoolSnapshot *service.CellPoolSnapshotService, // 边缘 cell 账号池快照推送(非边缘/未配置时为空转)
+	claudeCLIVersionUpdater *service.ClaudeCLIVersionUpdater, // 伪装 CLI 版本跟随 npm 最新版的轮询
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -134,7 +135,8 @@ func provideCleanup(
 		riskV2ScoringWorker.Stop()
 		_ = riskV2Dispatcher.Stop(ctx)
 		riskV2HealthLoop.Stop()
-		cellPoolSnapshot.Stop() // nil-safe
+		cellPoolSnapshot.Stop()        // nil-safe
+		claudeCLIVersionUpdater.Stop() // nil-safe
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{

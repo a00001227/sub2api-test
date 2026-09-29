@@ -8,7 +8,7 @@ import (
 )
 
 func TestFloorClaudeCLIVersion(t *testing.T) {
-	cur := claude.CLICurrentVersion
+	cur := claude.CurrentCLIVersion()
 	cases := []struct {
 		name       string
 		in         string
@@ -33,7 +33,7 @@ func TestFloorClaudeCLIVersion(t *testing.T) {
 }
 
 func TestNormalizeClaudeCLIFingerprint(t *testing.T) {
-	cur := claude.CLICurrentVersion
+	cur := claude.CurrentCLIVersion()
 
 	t.Run("non claude-cli UA replaced wholesale, ClientID kept", func(t *testing.T) {
 		fp := &Fingerprint{
@@ -48,7 +48,7 @@ func TestNormalizeClaudeCLIFingerprint(t *testing.T) {
 		}
 		require.True(t, normalizeClaudeCLIFingerprint(fp))
 		require.Equal(t, "keep-me", fp.ClientID)
-		require.Equal(t, defaultFingerprint.UserAgent, fp.UserAgent)
+		require.Equal(t, claude.DefaultUserAgent(), fp.UserAgent)
 		require.Equal(t, defaultFingerprint.StainlessLang, fp.StainlessLang)
 		require.Equal(t, defaultFingerprint.StainlessPackageVersion, fp.StainlessPackageVersion)
 		require.Equal(t, defaultFingerprint.StainlessOS, fp.StainlessOS)
@@ -61,7 +61,7 @@ func TestNormalizeClaudeCLIFingerprint(t *testing.T) {
 	t.Run("empty UA replaced", func(t *testing.T) {
 		fp := &Fingerprint{ClientID: "c"}
 		require.True(t, normalizeClaudeCLIFingerprint(fp))
-		require.Equal(t, defaultFingerprint.UserAgent, fp.UserAgent)
+		require.Equal(t, claude.DefaultUserAgent(), fp.UserAgent)
 	})
 
 	t.Run("old claude-cli floored, stainless untouched", func(t *testing.T) {

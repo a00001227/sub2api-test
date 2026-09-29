@@ -658,6 +658,7 @@ var ProviderSet = wire.NewSet(
 	NewUsageRecordWorkerPool,
 	ProvideSchedulerSnapshotService,
 	NewIdentityService,
+	ProvideClaudeCLIVersionUpdater,
 	NewCRSSyncService,
 	ProvideUpdateService,
 	ProvideTokenRefreshService,

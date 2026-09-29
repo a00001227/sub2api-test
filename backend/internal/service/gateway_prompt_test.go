@@ -499,7 +499,7 @@ func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *t
 	require.True(t, system.IsArray())
 	arr := system.Array()
 	require.Len(t, arr, 3)
-	require.Contains(t, arr[0].Get("text").String(), "prefix "+claude.CLICurrentVersion+".")
+	require.Contains(t, arr[0].Get("text").String(), "prefix "+claude.CurrentCLIVersion()+".")
 	require.Equal(t, "ephemeral", arr[0].Get("cache_control.type").String())
 	require.Equal(t, claude.DefaultCacheControlTTL, arr[0].Get("cache_control.ttl").String())
 	require.Equal(t, claudeCodeSystemPrompt, arr[1].Get("text").String())

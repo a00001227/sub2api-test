@@ -88,6 +88,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // cellPoolSnapshot (边缘账号池快照推送; nil-safe Stop)
 		nil, // enforcementService
 		nil, // proxyLivenessService
+		nil, // claudeCLIVersionUpdater (nil-safe Stop)
 	)
 
 	require.NotPanics(t, func() {

@@ -365,7 +365,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
 	cellPoolSnapshotService := service.ProvideCellPoolSnapshotService(configConfig, accountRepository, opsRepository, providerAccountMetricsService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop, cellPoolSnapshotService, enforcementService, proxyLivenessService)
+	claudeCLIVersionCache := repository.NewClaudeCLIVersionCache(redisClient)
+	claudeCLIVersionUpdater := service.ProvideClaudeCLIVersionUpdater(configConfig, claudeCLIVersionCache)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, providerUsageOutboxWorker, cellSelfHealSeeder, riskV2Dispatcher, riskV2ScoringWorker, riskV2HealthLoop, cellPoolSnapshotService, enforcementService, proxyLivenessService, claudeCLIVersionUpdater)
 	// 切片 4.2：in-flight tracker 包裹业务 handler（Server.Close 后据此确认 Handler 真正退出）。
 	riskV2InflightTracker := &inflightTracker{}
 	httpServer.Handler = riskV2InflightTracker.Middleware(httpServer.Handler)
@@ -442,6 +444,7 @@ func provideCleanup(
 	cellPoolSnapshot *service.CellPoolSnapshotService,
 	enforcementService *service.EnforcementService,
 	proxyLivenessService *service.ProxyLivenessService,
+	claudeCLIVersionUpdater *service.ClaudeCLIVersionUpdater,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -460,8 +463,9 @@ func provideCleanup(
 		riskV2ScoringWorker.Stop()     // *RiskV2ScoringWorker.Stop 为 nil-safe
 		_ = riskV2Dispatcher.Stop(ctx) // graceful drain
 		riskV2HealthLoop.Stop()
-		cellPoolSnapshot.Stop()   // 最后 flush + Deregister（nil-safe）
-		enforcementService.Stop() // 停执行层刷新 goroutine（nil-safe）
+		cellPoolSnapshot.Stop()        // 最后 flush + Deregister（nil-safe）
+		claudeCLIVersionUpdater.Stop() // 伪装 CLI 版本轮询（nil-safe）
+		enforcementService.Stop()      // 停执行层刷新 goroutine（nil-safe）
 		log.Printf("[Cleanup] RiskV2 runtime stopped (worker→dispatcher→health)")
 
 		parallelSteps := []cleanupStep{
