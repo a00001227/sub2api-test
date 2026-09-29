@@ -659,6 +659,7 @@ var (
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "pending"},
 		{Name: "admin_reply", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "replied_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "reply_read_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 	}
@@ -676,7 +677,7 @@ var (
 			{
 				Name:    "feedback_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{FeedbacksColumns[8]},
+				Columns: []*schema.Column{FeedbacksColumns[9]},
 			},
 			{
 				Name:    "feedback_user_id",

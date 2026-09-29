@@ -151,6 +151,26 @@ func (_u *FeedbackUpdate) ClearRepliedAt() *FeedbackUpdate {
 	return _u
 }
 
+// SetReplyReadAt sets the "reply_read_at" field.
+func (_u *FeedbackUpdate) SetReplyReadAt(v time.Time) *FeedbackUpdate {
+	_u.mutation.SetReplyReadAt(v)
+	return _u
+}
+
+// SetNillableReplyReadAt sets the "reply_read_at" field if the given value is not nil.
+func (_u *FeedbackUpdate) SetNillableReplyReadAt(v *time.Time) *FeedbackUpdate {
+	if v != nil {
+		_u.SetReplyReadAt(*v)
+	}
+	return _u
+}
+
+// ClearReplyReadAt clears the value of the "reply_read_at" field.
+func (_u *FeedbackUpdate) ClearReplyReadAt() *FeedbackUpdate {
+	_u.mutation.ClearReplyReadAt()
+	return _u
+}
+
 // SetUpdatedAt sets the "updated_at" field.
 func (_u *FeedbackUpdate) SetUpdatedAt(v time.Time) *FeedbackUpdate {
 	_u.mutation.SetUpdatedAt(v)
@@ -267,6 +287,12 @@ func (_u *FeedbackUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.RepliedAtCleared() {
 		_spec.ClearField(feedback.FieldRepliedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ReplyReadAt(); ok {
+		_spec.SetField(feedback.FieldReplyReadAt, field.TypeTime, value)
+	}
+	if _u.mutation.ReplyReadAtCleared() {
+		_spec.ClearField(feedback.FieldReplyReadAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(feedback.FieldUpdatedAt, field.TypeTime, value)
@@ -411,6 +437,26 @@ func (_u *FeedbackUpdateOne) SetNillableRepliedAt(v *time.Time) *FeedbackUpdateO
 // ClearRepliedAt clears the value of the "replied_at" field.
 func (_u *FeedbackUpdateOne) ClearRepliedAt() *FeedbackUpdateOne {
 	_u.mutation.ClearRepliedAt()
+	return _u
+}
+
+// SetReplyReadAt sets the "reply_read_at" field.
+func (_u *FeedbackUpdateOne) SetReplyReadAt(v time.Time) *FeedbackUpdateOne {
+	_u.mutation.SetReplyReadAt(v)
+	return _u
+}
+
+// SetNillableReplyReadAt sets the "reply_read_at" field if the given value is not nil.
+func (_u *FeedbackUpdateOne) SetNillableReplyReadAt(v *time.Time) *FeedbackUpdateOne {
+	if v != nil {
+		_u.SetReplyReadAt(*v)
+	}
+	return _u
+}
+
+// ClearReplyReadAt clears the value of the "reply_read_at" field.
+func (_u *FeedbackUpdateOne) ClearReplyReadAt() *FeedbackUpdateOne {
+	_u.mutation.ClearReplyReadAt()
 	return _u
 }
 
@@ -560,6 +606,12 @@ func (_u *FeedbackUpdateOne) sqlSave(ctx context.Context) (_node *Feedback, err 
 	}
 	if _u.mutation.RepliedAtCleared() {
 		_spec.ClearField(feedback.FieldRepliedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ReplyReadAt(); ok {
+		_spec.SetField(feedback.FieldReplyReadAt, field.TypeTime, value)
+	}
+	if _u.mutation.ReplyReadAtCleared() {
+		_spec.ClearField(feedback.FieldReplyReadAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(feedback.FieldUpdatedAt, field.TypeTime, value)

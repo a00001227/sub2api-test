@@ -96,6 +96,20 @@ func (_c *FeedbackCreate) SetNillableRepliedAt(v *time.Time) *FeedbackCreate {
 	return _c
 }
 
+// SetReplyReadAt sets the "reply_read_at" field.
+func (_c *FeedbackCreate) SetReplyReadAt(v time.Time) *FeedbackCreate {
+	_c.mutation.SetReplyReadAt(v)
+	return _c
+}
+
+// SetNillableReplyReadAt sets the "reply_read_at" field if the given value is not nil.
+func (_c *FeedbackCreate) SetNillableReplyReadAt(v *time.Time) *FeedbackCreate {
+	if v != nil {
+		_c.SetReplyReadAt(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *FeedbackCreate) SetCreatedAt(v time.Time) *FeedbackCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -268,6 +282,10 @@ func (_c *FeedbackCreate) createSpec() (*Feedback, *sqlgraph.CreateSpec) {
 		_spec.SetField(feedback.FieldRepliedAt, field.TypeTime, value)
 		_node.RepliedAt = &value
 	}
+	if value, ok := _c.mutation.ReplyReadAt(); ok {
+		_spec.SetField(feedback.FieldReplyReadAt, field.TypeTime, value)
+		_node.ReplyReadAt = &value
+	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(feedback.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
@@ -433,6 +451,24 @@ func (u *FeedbackUpsert) UpdateRepliedAt() *FeedbackUpsert {
 // ClearRepliedAt clears the value of the "replied_at" field.
 func (u *FeedbackUpsert) ClearRepliedAt() *FeedbackUpsert {
 	u.SetNull(feedback.FieldRepliedAt)
+	return u
+}
+
+// SetReplyReadAt sets the "reply_read_at" field.
+func (u *FeedbackUpsert) SetReplyReadAt(v time.Time) *FeedbackUpsert {
+	u.Set(feedback.FieldReplyReadAt, v)
+	return u
+}
+
+// UpdateReplyReadAt sets the "reply_read_at" field to the value that was provided on create.
+func (u *FeedbackUpsert) UpdateReplyReadAt() *FeedbackUpsert {
+	u.SetExcluded(feedback.FieldReplyReadAt)
+	return u
+}
+
+// ClearReplyReadAt clears the value of the "reply_read_at" field.
+func (u *FeedbackUpsert) ClearReplyReadAt() *FeedbackUpsert {
+	u.SetNull(feedback.FieldReplyReadAt)
 	return u
 }
 
@@ -616,6 +652,27 @@ func (u *FeedbackUpsertOne) UpdateRepliedAt() *FeedbackUpsertOne {
 func (u *FeedbackUpsertOne) ClearRepliedAt() *FeedbackUpsertOne {
 	return u.Update(func(s *FeedbackUpsert) {
 		s.ClearRepliedAt()
+	})
+}
+
+// SetReplyReadAt sets the "reply_read_at" field.
+func (u *FeedbackUpsertOne) SetReplyReadAt(v time.Time) *FeedbackUpsertOne {
+	return u.Update(func(s *FeedbackUpsert) {
+		s.SetReplyReadAt(v)
+	})
+}
+
+// UpdateReplyReadAt sets the "reply_read_at" field to the value that was provided on create.
+func (u *FeedbackUpsertOne) UpdateReplyReadAt() *FeedbackUpsertOne {
+	return u.Update(func(s *FeedbackUpsert) {
+		s.UpdateReplyReadAt()
+	})
+}
+
+// ClearReplyReadAt clears the value of the "reply_read_at" field.
+func (u *FeedbackUpsertOne) ClearReplyReadAt() *FeedbackUpsertOne {
+	return u.Update(func(s *FeedbackUpsert) {
+		s.ClearReplyReadAt()
 	})
 }
 
@@ -967,6 +1024,27 @@ func (u *FeedbackUpsertBulk) UpdateRepliedAt() *FeedbackUpsertBulk {
 func (u *FeedbackUpsertBulk) ClearRepliedAt() *FeedbackUpsertBulk {
 	return u.Update(func(s *FeedbackUpsert) {
 		s.ClearRepliedAt()
+	})
+}
+
+// SetReplyReadAt sets the "reply_read_at" field.
+func (u *FeedbackUpsertBulk) SetReplyReadAt(v time.Time) *FeedbackUpsertBulk {
+	return u.Update(func(s *FeedbackUpsert) {
+		s.SetReplyReadAt(v)
+	})
+}
+
+// UpdateReplyReadAt sets the "reply_read_at" field to the value that was provided on create.
+func (u *FeedbackUpsertBulk) UpdateReplyReadAt() *FeedbackUpsertBulk {
+	return u.Update(func(s *FeedbackUpsert) {
+		s.UpdateReplyReadAt()
+	})
+}
+
+// ClearReplyReadAt clears the value of the "reply_read_at" field.
+func (u *FeedbackUpsertBulk) ClearReplyReadAt() *FeedbackUpsertBulk {
+	return u.Update(func(s *FeedbackUpsert) {
+		s.ClearReplyReadAt()
 	})
 }
 

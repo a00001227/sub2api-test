@@ -15422,6 +15422,7 @@ type FeedbackMutation struct {
 	status        *string
 	admin_reply   *string
 	replied_at    *time.Time
+	reply_read_at *time.Time
 	created_at    *time.Time
 	updated_at    *time.Time
 	clearedFields map[string]struct{}
@@ -15839,6 +15840,55 @@ func (m *FeedbackMutation) ResetRepliedAt() {
 	delete(m.clearedFields, feedback.FieldRepliedAt)
 }
 
+// SetReplyReadAt sets the "reply_read_at" field.
+func (m *FeedbackMutation) SetReplyReadAt(t time.Time) {
+	m.reply_read_at = &t
+}
+
+// ReplyReadAt returns the value of the "reply_read_at" field in the mutation.
+func (m *FeedbackMutation) ReplyReadAt() (r time.Time, exists bool) {
+	v := m.reply_read_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReplyReadAt returns the old "reply_read_at" field's value of the Feedback entity.
+// If the Feedback object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *FeedbackMutation) OldReplyReadAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReplyReadAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReplyReadAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReplyReadAt: %w", err)
+	}
+	return oldValue.ReplyReadAt, nil
+}
+
+// ClearReplyReadAt clears the value of the "reply_read_at" field.
+func (m *FeedbackMutation) ClearReplyReadAt() {
+	m.reply_read_at = nil
+	m.clearedFields[feedback.FieldReplyReadAt] = struct{}{}
+}
+
+// ReplyReadAtCleared returns if the "reply_read_at" field was cleared in this mutation.
+func (m *FeedbackMutation) ReplyReadAtCleared() bool {
+	_, ok := m.clearedFields[feedback.FieldReplyReadAt]
+	return ok
+}
+
+// ResetReplyReadAt resets all changes to the "reply_read_at" field.
+func (m *FeedbackMutation) ResetReplyReadAt() {
+	m.reply_read_at = nil
+	delete(m.clearedFields, feedback.FieldReplyReadAt)
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *FeedbackMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -15945,7 +15995,7 @@ func (m *FeedbackMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *FeedbackMutation) Fields() []string {
-	fields := make([]string, 0, 9)
+	fields := make([]string, 0, 10)
 	if m.user_id != nil {
 		fields = append(fields, feedback.FieldUserID)
 	}
@@ -15966,6 +16016,9 @@ func (m *FeedbackMutation) Fields() []string {
 	}
 	if m.replied_at != nil {
 		fields = append(fields, feedback.FieldRepliedAt)
+	}
+	if m.reply_read_at != nil {
+		fields = append(fields, feedback.FieldReplyReadAt)
 	}
 	if m.created_at != nil {
 		fields = append(fields, feedback.FieldCreatedAt)
@@ -15995,6 +16048,8 @@ func (m *FeedbackMutation) Field(name string) (ent.Value, bool) {
 		return m.AdminReply()
 	case feedback.FieldRepliedAt:
 		return m.RepliedAt()
+	case feedback.FieldReplyReadAt:
+		return m.ReplyReadAt()
 	case feedback.FieldCreatedAt:
 		return m.CreatedAt()
 	case feedback.FieldUpdatedAt:
@@ -16022,6 +16077,8 @@ func (m *FeedbackMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldAdminReply(ctx)
 	case feedback.FieldRepliedAt:
 		return m.OldRepliedAt(ctx)
+	case feedback.FieldReplyReadAt:
+		return m.OldReplyReadAt(ctx)
 	case feedback.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	case feedback.FieldUpdatedAt:
@@ -16083,6 +16140,13 @@ func (m *FeedbackMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRepliedAt(v)
+		return nil
+	case feedback.FieldReplyReadAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReplyReadAt(v)
 		return nil
 	case feedback.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -16152,6 +16216,9 @@ func (m *FeedbackMutation) ClearedFields() []string {
 	if m.FieldCleared(feedback.FieldRepliedAt) {
 		fields = append(fields, feedback.FieldRepliedAt)
 	}
+	if m.FieldCleared(feedback.FieldReplyReadAt) {
+		fields = append(fields, feedback.FieldReplyReadAt)
+	}
 	return fields
 }
 
@@ -16174,6 +16241,9 @@ func (m *FeedbackMutation) ClearField(name string) error {
 		return nil
 	case feedback.FieldRepliedAt:
 		m.ClearRepliedAt()
+		return nil
+	case feedback.FieldReplyReadAt:
+		m.ClearReplyReadAt()
 		return nil
 	}
 	return fmt.Errorf("unknown Feedback nullable field %s", name)
@@ -16203,6 +16273,9 @@ func (m *FeedbackMutation) ResetField(name string) error {
 		return nil
 	case feedback.FieldRepliedAt:
 		m.ResetRepliedAt()
+		return nil
+	case feedback.FieldReplyReadAt:
+		m.ResetReplyReadAt()
 		return nil
 	case feedback.FieldCreatedAt:
 		m.ResetCreatedAt()

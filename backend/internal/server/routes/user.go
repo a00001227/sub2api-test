@@ -78,6 +78,9 @@ func RegisterUserRoutes(
 		{
 			feedback.POST("", h.Feedback.Create)
 			feedback.GET("", h.Feedback.List)
+			// 静态段必须在 /:id 之前注册(Portal 工单角标:未读计数 + 标记已读)。
+			feedback.GET("/unread-count", h.Feedback.UnreadCount)
+			feedback.POST("/read", h.Feedback.MarkRead)
 			feedback.GET("/:id", h.Feedback.GetByID)
 		}
 

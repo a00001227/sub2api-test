@@ -58,6 +58,16 @@ func (s *FeedbackService) GetUserHistory(ctx context.Context, userID int64, limi
 	return s.feedbackRepo.ListByUser(ctx, userID, limit)
 }
 
+// CountUnreadReplies 返回该用户有未读管理员回复的工单数(Portal 全局角标)。
+func (s *FeedbackService) CountUnreadReplies(ctx context.Context, userID int64) (int64, error) {
+	return s.feedbackRepo.CountUnreadReplies(ctx, userID)
+}
+
+// MarkRepliesRead 把该用户所有未读回复标记为已读(用户打开工单页时调用),返回标记条数。
+func (s *FeedbackService) MarkRepliesRead(ctx context.Context, userID int64) (int64, error) {
+	return s.feedbackRepo.MarkRepliesRead(ctx, userID, time.Now())
+}
+
 // GetByID returns a single feedback by id, with submitter user populated.
 func (s *FeedbackService) GetByID(ctx context.Context, id int64) (*Feedback, error) {
 	f, err := s.feedbackRepo.GetByID(ctx, id)

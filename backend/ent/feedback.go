@@ -31,6 +31,8 @@ type Feedback struct {
 	AdminReply *string `json:"admin_reply,omitempty"`
 	// 回复时间
 	RepliedAt *time.Time `json:"replied_at,omitempty"`
+	// 用户查看管理员回复的时间;NULL 或早于 replied_at = 有未读回复
+	ReplyReadAt *time.Time `json:"reply_read_at,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// UpdatedAt holds the value of the "updated_at" field.
@@ -47,7 +49,7 @@ func (*Feedback) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullInt64)
 		case feedback.FieldType, feedback.FieldContent, feedback.FieldRequestID, feedback.FieldStatus, feedback.FieldAdminReply:
 			values[i] = new(sql.NullString)
-		case feedback.FieldRepliedAt, feedback.FieldCreatedAt, feedback.FieldUpdatedAt:
+		case feedback.FieldRepliedAt, feedback.FieldReplyReadAt, feedback.FieldCreatedAt, feedback.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -114,6 +116,13 @@ func (_m *Feedback) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.RepliedAt = new(time.Time)
 				*_m.RepliedAt = value.Time
+			}
+		case feedback.FieldReplyReadAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field reply_read_at", values[i])
+			} else if value.Valid {
+				_m.ReplyReadAt = new(time.Time)
+				*_m.ReplyReadAt = value.Time
 			}
 		case feedback.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -187,6 +196,11 @@ func (_m *Feedback) String() string {
 	builder.WriteString(", ")
 	if v := _m.RepliedAt; v != nil {
 		builder.WriteString("replied_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	if v := _m.ReplyReadAt; v != nil {
+		builder.WriteString("reply_read_at=")
 		builder.WriteString(v.Format(time.ANSIC))
 	}
 	builder.WriteString(", ")

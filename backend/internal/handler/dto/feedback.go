@@ -16,8 +16,10 @@ type Feedback struct {
 	Status     string     `json:"status"`
 	AdminReply *string    `json:"admin_reply,omitempty"`
 	RepliedAt  *time.Time `json:"replied_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// ReplyReadAt 用户查看回复的时间;缺省或早于 replied_at 表示该回复未读。
+	ReplyReadAt *time.Time `json:"reply_read_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 
 	// UserEmail is optionally populated for admin listing.
 	UserEmail string `json:"user_email,omitempty"`
@@ -29,16 +31,17 @@ func FeedbackFromService(f *service.Feedback) *Feedback {
 		return nil
 	}
 	out := &Feedback{
-		ID:         f.ID,
-		UserID:     f.UserID,
-		Type:       f.Type,
-		Content:    f.Content,
-		RequestID:  f.RequestID,
-		Status:     f.Status,
-		AdminReply: f.AdminReply,
-		RepliedAt:  f.RepliedAt,
-		CreatedAt:  f.CreatedAt,
-		UpdatedAt:  f.UpdatedAt,
+		ID:          f.ID,
+		UserID:      f.UserID,
+		Type:        f.Type,
+		Content:     f.Content,
+		RequestID:   f.RequestID,
+		Status:      f.Status,
+		AdminReply:  f.AdminReply,
+		RepliedAt:   f.RepliedAt,
+		ReplyReadAt: f.ReplyReadAt,
+		CreatedAt:   f.CreatedAt,
+		UpdatedAt:   f.UpdatedAt,
 	}
 	if f.User != nil {
 		out.UserEmail = f.User.Email

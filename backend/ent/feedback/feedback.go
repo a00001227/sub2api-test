@@ -27,6 +27,8 @@ const (
 	FieldAdminReply = "admin_reply"
 	// FieldRepliedAt holds the string denoting the replied_at field in the database.
 	FieldRepliedAt = "replied_at"
+	// FieldReplyReadAt holds the string denoting the reply_read_at field in the database.
+	FieldReplyReadAt = "reply_read_at"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// FieldUpdatedAt holds the string denoting the updated_at field in the database.
@@ -45,6 +47,7 @@ var Columns = []string{
 	FieldStatus,
 	FieldAdminReply,
 	FieldRepliedAt,
+	FieldReplyReadAt,
 	FieldCreatedAt,
 	FieldUpdatedAt,
 }
@@ -119,6 +122,11 @@ func ByAdminReply(opts ...sql.OrderTermOption) OrderOption {
 // ByRepliedAt orders the results by the replied_at field.
 func ByRepliedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRepliedAt, opts...).ToFunc()
+}
+
+// ByReplyReadAt orders the results by the reply_read_at field.
+func ByReplyReadAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldReplyReadAt, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

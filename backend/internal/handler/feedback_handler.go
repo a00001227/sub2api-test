@@ -78,6 +78,48 @@ func (h *FeedbackHandler) List(c *gin.Context) {
 	response.Success(c, out)
 }
 
+// FeedbackUnreadCountResponse 未读回复计数响应。
+type FeedbackUnreadCountResponse struct {
+	Count int64 `json:"count"`
+}
+
+// UnreadCount returns how many of the current user's tickets carry an unread admin reply.
+// GET /api/v1/feedback/unread-count
+func (h *FeedbackHandler) UnreadCount(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	n, err := h.feedbackService.CountUnreadReplies(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, FeedbackUnreadCountResponse{Count: n})
+}
+
+// FeedbackMarkReadResponse 标记已读响应:本次标记的条数。
+type FeedbackMarkReadResponse struct {
+	Marked int64 `json:"marked"`
+}
+
+// MarkRead marks every unread admin reply of the current user as read.
+// POST /api/v1/feedback/read
+func (h *FeedbackHandler) MarkRead(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	n, err := h.feedbackService.MarkRepliesRead(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, FeedbackMarkReadResponse{Marked: n})
+}
+
 // GetByID returns a single feedback owned by the current user.
 // GET /api/v1/feedback/:id
 func (h *FeedbackHandler) GetByID(c *gin.Context) {

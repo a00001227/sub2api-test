@@ -89,6 +89,11 @@ func RepliedAt(v time.Time) predicate.Feedback {
 	return predicate.Feedback(sql.FieldEQ(FieldRepliedAt, v))
 }
 
+// ReplyReadAt applies equality check predicate on the "reply_read_at" field. It's identical to ReplyReadAtEQ.
+func ReplyReadAt(v time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldEQ(FieldReplyReadAt, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.Feedback {
 	return predicate.Feedback(sql.FieldEQ(FieldCreatedAt, v))
@@ -532,6 +537,56 @@ func RepliedAtIsNil() predicate.Feedback {
 // RepliedAtNotNil applies the NotNil predicate on the "replied_at" field.
 func RepliedAtNotNil() predicate.Feedback {
 	return predicate.Feedback(sql.FieldNotNull(FieldRepliedAt))
+}
+
+// ReplyReadAtEQ applies the EQ predicate on the "reply_read_at" field.
+func ReplyReadAtEQ(v time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldEQ(FieldReplyReadAt, v))
+}
+
+// ReplyReadAtNEQ applies the NEQ predicate on the "reply_read_at" field.
+func ReplyReadAtNEQ(v time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldNEQ(FieldReplyReadAt, v))
+}
+
+// ReplyReadAtIn applies the In predicate on the "reply_read_at" field.
+func ReplyReadAtIn(vs ...time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldIn(FieldReplyReadAt, vs...))
+}
+
+// ReplyReadAtNotIn applies the NotIn predicate on the "reply_read_at" field.
+func ReplyReadAtNotIn(vs ...time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldNotIn(FieldReplyReadAt, vs...))
+}
+
+// ReplyReadAtGT applies the GT predicate on the "reply_read_at" field.
+func ReplyReadAtGT(v time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldGT(FieldReplyReadAt, v))
+}
+
+// ReplyReadAtGTE applies the GTE predicate on the "reply_read_at" field.
+func ReplyReadAtGTE(v time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldGTE(FieldReplyReadAt, v))
+}
+
+// ReplyReadAtLT applies the LT predicate on the "reply_read_at" field.
+func ReplyReadAtLT(v time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldLT(FieldReplyReadAt, v))
+}
+
+// ReplyReadAtLTE applies the LTE predicate on the "reply_read_at" field.
+func ReplyReadAtLTE(v time.Time) predicate.Feedback {
+	return predicate.Feedback(sql.FieldLTE(FieldReplyReadAt, v))
+}
+
+// ReplyReadAtIsNil applies the IsNil predicate on the "reply_read_at" field.
+func ReplyReadAtIsNil() predicate.Feedback {
+	return predicate.Feedback(sql.FieldIsNull(FieldReplyReadAt))
+}
+
+// ReplyReadAtNotNil applies the NotNil predicate on the "reply_read_at" field.
+func ReplyReadAtNotNil() predicate.Feedback {
+	return predicate.Feedback(sql.FieldNotNull(FieldReplyReadAt))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

@@ -55,6 +55,11 @@ func (Feedback) Fields() []ent.Field {
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}).
 			Comment("回复时间"),
+		field.Time("reply_read_at").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}).
+			Comment("用户查看管理员回复的时间;NULL 或早于 replied_at = 有未读回复"),
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now).

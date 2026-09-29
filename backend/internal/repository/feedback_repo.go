@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/feedback"
@@ -75,6 +76,11 @@ func (r *feedbackRepository) Update(ctx context.Context, f *service.Feedback) er
 	} else {
 		builder.ClearRepliedAt()
 	}
+	if f.ReplyReadAt != nil {
+		builder.SetReplyReadAt(*f.ReplyReadAt)
+	} else {
+		builder.ClearReplyReadAt()
+	}
 
 	updated, err := builder.Save(ctx)
 	if err != nil {
@@ -127,6 +133,45 @@ func (r *feedbackRepository) ListByUser(ctx context.Context, userID int64, limit
 	return feedbackEntitiesToService(items), nil
 }
 
+// unreadReplyPredicate 「有回复且未读」:replied_at 非空 且 (reply_read_at 为空 或 reply_read_at < replied_at)。
+func unreadReplyPredicate(userID int64) []func(*entsql.Selector) {
+	return []func(*entsql.Selector){
+		feedback.UserIDEQ(userID),
+		feedback.RepliedAtNotNil(),
+		func(s *entsql.Selector) {
+			s.Where(entsql.Or(
+				entsql.IsNull(s.C(feedback.FieldReplyReadAt)),
+				entsql.ColumnsLT(s.C(feedback.FieldReplyReadAt), s.C(feedback.FieldRepliedAt)),
+			))
+		},
+	}
+}
+
+func (r *feedbackRepository) CountUnreadReplies(ctx context.Context, userID int64) (int64, error) {
+	q := r.client.Feedback.Query()
+	for _, p := range unreadReplyPredicate(userID) {
+		q = q.Where(p)
+	}
+	n, err := q.Count(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return int64(n), nil
+}
+
+func (r *feedbackRepository) MarkRepliesRead(ctx context.Context, userID int64, at time.Time) (int64, error) {
+	client := clientFromContext(ctx, r.client)
+	u := client.Feedback.Update()
+	for _, p := range unreadReplyPredicate(userID) {
+		u = u.Where(p)
+	}
+	n, err := u.SetReplyReadAt(at).Save(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return int64(n), nil
+}
+
 func feedbackListOrders(params pagination.PaginationParams) []func(*entsql.Selector) {
 	sortOrder := params.NormalizedSortOrder(pagination.SortOrderDesc)
 	// Only created_at sorting is exposed; always tie-break on id for stability.
@@ -147,16 +192,17 @@ func feedbackEntityToService(m *dbent.Feedback) *service.Feedback {
 		return nil
 	}
 	return &service.Feedback{
-		ID:         m.ID,
-		UserID:     m.UserID,
-		Type:       m.Type,
-		Content:    m.Content,
-		RequestID:  m.RequestID,
-		Status:     m.Status,
-		AdminReply: m.AdminReply,
-		RepliedAt:  m.RepliedAt,
-		CreatedAt:  m.CreatedAt,
-		UpdatedAt:  m.UpdatedAt,
+		ID:          m.ID,
+		UserID:      m.UserID,
+		Type:        m.Type,
+		Content:     m.Content,
+		RequestID:   m.RequestID,
+		Status:      m.Status,
+		AdminReply:  m.AdminReply,
+		RepliedAt:   m.RepliedAt,
+		ReplyReadAt: m.ReplyReadAt,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
 	}
 }
 

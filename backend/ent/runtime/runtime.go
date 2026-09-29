@@ -802,11 +802,11 @@ func init() {
 	// feedback.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	feedback.StatusValidator = feedbackDescStatus.Validators[0].(func(string) error)
 	// feedbackDescCreatedAt is the schema descriptor for created_at field.
-	feedbackDescCreatedAt := feedbackFields[7].Descriptor()
+	feedbackDescCreatedAt := feedbackFields[8].Descriptor()
 	// feedback.DefaultCreatedAt holds the default value on creation for the created_at field.
 	feedback.DefaultCreatedAt = feedbackDescCreatedAt.Default.(func() time.Time)
 	// feedbackDescUpdatedAt is the schema descriptor for updated_at field.
-	feedbackDescUpdatedAt := feedbackFields[8].Descriptor()
+	feedbackDescUpdatedAt := feedbackFields[9].Descriptor()
 	// feedback.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	feedback.DefaultUpdatedAt = feedbackDescUpdatedAt.Default.(func() time.Time)
 	// feedback.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
