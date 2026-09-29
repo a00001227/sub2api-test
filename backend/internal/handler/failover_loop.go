@@ -48,6 +48,12 @@ type FailoverState struct {
 	LastFailoverErr       *service.UpstreamFailoverError
 	ForceCacheBilling     bool
 	hasBoundSession       bool
+	// SlotWaitMigrated 本请求是否已因「粘性号并发槽等待失败」改投过一次其它号。只允许一次:
+	// 改投后的号若也满,再等一轮就回 429,避免多号连环等待把总时长拖到 CF 100s 窗口外。
+	SlotWaitMigrated bool
+	// LastSlotWaitErr 改投前那次槽位等待的错误(超时/排队满)。改投后若已无其它可选号,
+	// 选号失败分支用它回原本的 429,而不是把「没号」误报成 failover 耗尽的 502。
+	LastSlotWaitErr error
 }
 
 // NewFailoverState 创建 failover 状态
@@ -126,6 +132,33 @@ func (s *FailoverState) HandleFailoverError(
 	}
 
 	return FailoverContinue
+}
+
+// HandleSlotWaitExhausted 粘性号并发槽等待失败(超时 / 排队已满)时决定是否改投其它号。
+//
+// 背景:调度只在会话首条请求做负载均衡,之后一小时内会话固定粘在同一个号上;号满了
+// 就只在它身上排队,等超时直接 429,旁边再多空闲号也用不上 —— 一个跑长任务的用户会
+// 被一个忙号锁死一小时。改投的代价只是那一次请求在新号上重建缓存(有绑定会话时按
+// failover 同一口径强制缓存计费,用户不多花钱),远好于整条请求失败。
+//
+// 返回 true 表示调用方应把该号加入排除列表后重新选号(本函数已加入);false 表示本请求
+// 已改投过一次,调用方按原逻辑回 429。不计入 SwitchCount:这不是上游失败。
+func (s *FailoverState) HandleSlotWaitExhausted(ctx context.Context, accountID int64, waitErr error) bool {
+	if s.SlotWaitMigrated {
+		return false
+	}
+	s.SlotWaitMigrated = true
+	s.LastSlotWaitErr = waitErr
+	s.FailedAccountIDs[accountID] = struct{}{}
+	if s.hasBoundSession {
+		s.ForceCacheBilling = true
+	}
+	logger.FromContext(ctx).Warn("gateway.account_slot_wait_exhausted_migrate",
+		zap.Int64("account_id", accountID),
+		zap.Bool("has_bound_session", s.hasBoundSession),
+		zap.Error(waitErr),
+	)
+	return true
 }
 
 // HandleSelectionExhausted 处理选号失败（所有候选账号都在排除列表中）时的退避重试决策。

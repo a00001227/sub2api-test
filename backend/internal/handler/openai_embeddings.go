@@ -102,6 +102,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastSlotWaitErr error // 因粘性号槽位等待失败改投过一次后置位
 	switchCount := 0
 	maxAccountSwitches := h.maxAccountSwitches
 	if maxAccountSwitches <= 0 {
@@ -135,6 +136,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			}
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, false)
+			} else if lastSlotWaitErr != nil {
+				// 改投后已无其它可选号:回原本的 429,不是 502。
+				h.handleConcurrencyError(c, lastSlotWaitErr, "account", false)
 			} else {
 				h.errorResponse(c, http.StatusBadGateway, "api_error", "Upstream request failed")
 			}
@@ -148,8 +152,14 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &streamStarted, reqLog)
+		accountReleaseFunc, accountAcquired, slotWaitErr := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &streamStarted, reqLog, lastSlotWaitErr == nil)
 		if !accountAcquired {
+			if slotWaitErr != nil {
+				reqLog.Warn("openai.embeddings.account_slot_wait_exhausted_migrate", zap.Int64("account_id", account.ID), zap.Error(slotWaitErr))
+				lastSlotWaitErr = slotWaitErr
+				failedAccountIDs[account.ID] = struct{}{}
+				continue
+			}
 			return
 		}
 

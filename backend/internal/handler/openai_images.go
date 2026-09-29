@@ -145,6 +145,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastSlotWaitErr error // 因粘性号槽位等待失败改投过一次后置位
 
 	for {
 		reqLog.Debug("openai.images.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
@@ -168,6 +169,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+			} else if lastSlotWaitErr != nil {
+				// 改投后已无其它可选号:回原本的 429,不是 502。
+				h.handleConcurrencyError(c, lastSlotWaitErr, "account", streamStarted)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
 			}
@@ -193,8 +197,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired, slotWaitErr := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog, lastSlotWaitErr == nil)
 		if !acquired {
+			if slotWaitErr != nil {
+				reqLog.Warn("openai.images.account_slot_wait_exhausted_migrate", zap.Int64("account_id", account.ID), zap.Error(slotWaitErr))
+				lastSlotWaitErr = slotWaitErr
+				failedAccountIDs[account.ID] = struct{}{}
+				continue
+			}
 			return
 		}
 

@@ -134,6 +134,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastSlotWaitErr error // 因粘性号槽位等待失败改投过一次后置位
 
 	for {
 		reqLog.Debug("openai_chat_completions.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
@@ -162,6 +163,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			} else {
 				if lastFailoverErr != nil {
 					h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+				} else if lastSlotWaitErr != nil {
+					// 改投后已无其它可选号:回原本的 429,不是 502。
+					h.handleConcurrencyError(c, lastSlotWaitErr, "account", streamStarted)
 				} else {
 					h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
 				}
@@ -179,8 +183,15 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired, slotWaitErr := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog, lastSlotWaitErr == nil)
 		if !acquired {
+			if slotWaitErr != nil {
+				// 粘性号槽位等待失败(超时/排队满)→ 排除它重新选号,改投有空槽的号(仅一次)。
+				reqLog.Warn("openai_chat_completions.account_slot_wait_exhausted_migrate", zap.Int64("account_id", account.ID), zap.Error(slotWaitErr))
+				lastSlotWaitErr = slotWaitErr
+				failedAccountIDs[account.ID] = struct{}{}
+				continue
+			}
 			return
 		}
 

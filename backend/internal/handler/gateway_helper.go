@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -129,6 +130,17 @@ func (e *ConcurrencyError) Error() string {
 
 type WaitQueueFullError struct {
 	SlotType string
+}
+
+// isAccountSlotWaitExhausted 判定「号级并发槽等待失败、可改投其它号」:等待超时或排队已满。
+// Redis 故障等其它错误不算(改投也没意义,按原逻辑回错)。
+func isAccountSlotWaitExhausted(err error) bool {
+	var concurrencyErr *ConcurrencyError
+	if errors.As(err, &concurrencyErr) {
+		return concurrencyErr.IsTimeout
+	}
+	var queueFull *WaitQueueFullError
+	return errors.As(err, &queueFull)
 }
 
 func (e *WaitQueueFullError) Error() string {

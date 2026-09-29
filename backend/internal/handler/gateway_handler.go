@@ -335,6 +335,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 					return
 				}
+				// 因粘性号槽位等待失败改投、却已无其它可选号:回原本的 429,而不是 502。
+				if fs.SlotWaitMigrated && fs.LastFailoverErr == nil && fs.LastSlotWaitErr != nil {
+					reqLog.Warn("gateway.account_slot_wait_migrate_no_alternative", zap.Error(err))
+					h.handleConcurrencyError(c, fs.LastSlotWaitErr, "account", streamStarted)
+					return
+				}
 				action := fs.HandleSelectionExhausted(c.Request.Context())
 				switch action {
 				case FailoverContinue:
@@ -393,6 +399,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
+					// 粘性号排队已满 → 改投其它有空槽的号(仅一次),不再直接 429。
+					if fs.HandleSlotWaitExhausted(c.Request.Context(), account.ID, &WaitQueueFullError{SlotType: "account"}) {
+						continue
+					}
 					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
 					return
 				}
@@ -417,6 +427,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
+					// 粘性号等待超时 → 改投其它有空槽的号(仅一次),不再直接 429。
+					if isAccountSlotWaitExhausted(err) && fs.HandleSlotWaitExhausted(c.Request.Context(), account.ID, err) {
+						continue
+					}
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
@@ -633,6 +647,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 					return
 				}
+				// 因粘性号槽位等待失败改投、却已无其它可选号:回原本的 429,而不是 502。
+				if fs.SlotWaitMigrated && fs.LastFailoverErr == nil && fs.LastSlotWaitErr != nil {
+					reqLog.Warn("gateway.account_slot_wait_migrate_no_alternative", zap.Error(err))
+					h.handleConcurrencyError(c, fs.LastSlotWaitErr, "account", streamStarted)
+					return
+				}
 				action := fs.HandleSelectionExhausted(c.Request.Context())
 				switch action {
 				case FailoverContinue:
@@ -701,6 +721,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
+					// 粘性号排队已满 → 改投其它有空槽的号(仅一次),不再直接 429。
+					if fs.HandleSlotWaitExhausted(c.Request.Context(), account.ID, &WaitQueueFullError{SlotType: "account"}) {
+						continue
+					}
 					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
 					return
 				}
@@ -725,6 +749,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
+					// 粘性号等待超时 → 改投其它有空槽的号(仅一次),不再直接 429。
+					if isAccountSlotWaitExhausted(err) && fs.HandleSlotWaitExhausted(c.Request.Context(), account.ID, err) {
+						continue
+					}
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
