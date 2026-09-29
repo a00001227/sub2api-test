@@ -94,10 +94,9 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 			needWrite = true
 		}
 
-		// 版本下限:缓存里(或刚合并进来的客户端)的 claude-cli 版本低于当前伪装版本 → 抬平。
-		if floored, bumped := floorClaudeCLIVersion(cached.UserAgent); bumped {
-			logger.LegacyPrintf("service.identity", "Floored fingerprint UA for account %d: %s -> %s", accountID, cached.UserAgent, floored)
-			cached.UserAgent = floored
+		// 身份校正:非 claude-cli 指纹整套换默认 CC 指纹;claude-cli 版本低于当前伪装版本 → 抬平。
+		if before := cached.UserAgent; normalizeClaudeCLIFingerprint(cached) {
+			logger.LegacyPrintf("service.identity", "Normalized fingerprint UA for account %d: %s -> %s", accountID, before, cached.UserAgent)
 			needWrite = true
 		}
 
@@ -112,8 +111,8 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 
 	// 缓存不存在或解析失败，创建新指纹
 	fp := s.createFingerprintFromHeaders(headers)
-	if floored, bumped := floorClaudeCLIVersion(fp.UserAgent); bumped {
-		fp.UserAgent = floored
+	if before := fp.UserAgent; normalizeClaudeCLIFingerprint(fp) {
+		logger.LegacyPrintf("service.identity", "Normalized new fingerprint UA for account %d: %s -> %s", accountID, before, fp.UserAgent)
 	}
 
 	// 生成随机ClientID
@@ -436,6 +435,35 @@ func floorClaudeCLIVersion(ua string) (string, bool) {
 		return ua, false
 	}
 	return floored, true
+}
+
+// normalizeClaudeCLIFingerprint 把指纹校正成合法的 Claude Code 身份,返回是否改动:
+//
+//  1. UA 产品名不是 claude-cli(如 Anthropic Go SDK 的 "Anthropic/Go 1.41.0"、python-httpx):
+//     指纹是用某个非 Claude Code 客户端的请求头建的,之后一直顶着这个第三方身份打上游;
+//     而且取不出 CLI 版本,客户端自带的 billing cc_version 不会被同步,上游按它判版本
+//     ("Claude Code 2.1.226 does not support this model")。整套换成默认 CC 指纹
+//     (UA + 全部 X-Stainless-*),ClientID 保留。
+//  2. claude-cli 但版本低于 claude.CLICurrentVersion → 抬到当前版本(见 floorClaudeCLIVersion)。
+func normalizeClaudeCLIFingerprint(fp *Fingerprint) bool {
+	if fp == nil {
+		return false
+	}
+	if extractProduct(fp.UserAgent) != "claude-cli" {
+		fp.UserAgent = defaultFingerprint.UserAgent
+		fp.StainlessLang = defaultFingerprint.StainlessLang
+		fp.StainlessPackageVersion = defaultFingerprint.StainlessPackageVersion
+		fp.StainlessOS = defaultFingerprint.StainlessOS
+		fp.StainlessArch = defaultFingerprint.StainlessArch
+		fp.StainlessRuntime = defaultFingerprint.StainlessRuntime
+		fp.StainlessRuntimeVersion = defaultFingerprint.StainlessRuntimeVersion
+		return true
+	}
+	if floored, bumped := floorClaudeCLIVersion(fp.UserAgent); bumped {
+		fp.UserAgent = floored
+		return true
+	}
+	return false
 }
 
 // isNewerVersion 比较版本号，判断newUA是否比cachedUA更新
