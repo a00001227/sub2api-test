@@ -75,7 +75,8 @@ func TestDeriveUpstreamEndpoint(t *testing.T) {
 		// OpenAI — always /v1/responses.
 		{"openai responses root", EndpointResponses, "/v1/responses", service.PlatformOpenAI, EndpointResponses},
 		{"openai responses compact", EndpointResponses, "/openai/v1/responses/compact", service.PlatformOpenAI, "/v1/responses/compact"},
-		{"openai responses nested", EndpointResponses, "/openai/v1/responses/compact/detail", service.PlatformOpenAI, "/v1/responses/compact/detail"},
+		{"openai responses nested rejected", EndpointResponses, "/openai/v1/responses/compact/detail", service.PlatformOpenAI, EndpointResponses},
+		{"openai responses traversal rejected", EndpointResponses, "/v1/responses/../../organizations", service.PlatformOpenAI, EndpointResponses},
 		{"openai from messages", EndpointMessages, "/v1/messages", service.PlatformOpenAI, EndpointResponses},
 		{"openai from completions", EndpointChatCompletions, "/v1/chat/completions", service.PlatformOpenAI, EndpointResponses},
 		{"openai embeddings", EndpointEmbeddings, "/v1/embeddings", service.PlatformOpenAI, EndpointEmbeddings},
@@ -108,7 +109,9 @@ func TestResponsesSubpathSuffix(t *testing.T) {
 		{"/v1/responses", ""},
 		{"/v1/responses/", ""},
 		{"/v1/responses/compact", "/compact"},
-		{"/openai/v1/responses/compact/detail", "/compact/detail"},
+		{"/openai/v1/responses/compact/detail", ""},
+		{"/v1/responses/../../organizations", ""},
+		{"/v1/responses/resp_123/cancel", ""},
 		{"/v1/messages", ""},
 		{"", ""},
 	}

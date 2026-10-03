@@ -122,6 +122,10 @@ func responsesSubpathSuffix(rawPath string) string {
 	if !strings.HasPrefix(suffix, "/") {
 		return ""
 	}
+	// 只认 /compact:其它子路径不存在于我们的接口定义里,绝不拼到上游(路由层已 404,此处兜底)。
+	if suffix != "/compact" {
+		return ""
+	}
 	return suffix
 }
 

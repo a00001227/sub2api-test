@@ -32,9 +32,10 @@ func TestOpenAIUpstreamEndpoint_ViaGetUpstreamEndpoint(t *testing.T) {
 			want: "/v1/responses/compact",
 		},
 		{
-			name: "responses nested suffix preserved",
+			name: "responses nested suffix rejected",
 			path: "/openai/v1/responses/compact/detail",
-			want: "/v1/responses/compact/detail",
+			// /compact 之外的子路径不存在于接口定义,不拼到上游
+			want: EndpointResponses,
 		},
 		{
 			name: "non responses path uses platform fallback",

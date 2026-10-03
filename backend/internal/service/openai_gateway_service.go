@@ -5856,6 +5856,10 @@ func openAIResponsesRequestPathSuffix(c *gin.Context) string {
 	if suffix == "" || suffix == "/" {
 		return ""
 	}
+	// 只认 /compact:其它子路径不是我们定义的接口,绝不拼到上游 URL(路由层已 404,此处兜底)。
+	if suffix != "/compact" {
+		return ""
+	}
 	if !strings.HasPrefix(suffix, "/") {
 		return ""
 	}

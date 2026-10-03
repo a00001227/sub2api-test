@@ -89,6 +89,8 @@ func RegisterGatewayRoutes(
 	promptAudit := middleware.Phase("prompt_audit", middleware.PromptAuditCapture(h.Admin.PromptAudit.Service()))
 
 	// API网关（Claude API兼容）
+	// /responses 子路径收口:只放行 /compact,其它 404(鉴权之后、转发之前;非通配路由 no-op)。
+	responsesSubpathGuard := middleware.ResponsesSubpathGuard()
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)
 	gateway.Use(phaseProbe)
@@ -97,6 +99,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(apiKeyAuthPhased)
 	gateway.Use(requireGroupAnthropic)
+	gateway.Use(responsesSubpathGuard)
 	// 蒸馏执行层限速（默认关 = no-op），必须在转发之前。
 	gateway.Use(enforcement)
 	// 提示词审计捕获（默认关 = no-op），必须在内容审核之前 → 被拦截的请求也留存原文。
@@ -222,10 +225,10 @@ func RegisterGatewayRoutes(
 		h.Gateway.Responses(c)
 	}
 	r.POST("/responses", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
-	r.POST("/responses/*subpath", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
+	r.POST("/responses/*subpath", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, responsesSubpathGuard, enforcement, promptAudit, contentModeration, edgeForward, responsesHandler)
 	r.GET("/responses", bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward, h.OpenAIGateway.ResponsesWebSocket)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, enforcement, promptAudit, contentModeration, edgeForward)
+	codexDirect.Use(bodyLimit, phaseProbe, clientRequestID, opsErrorLogger, endpointNorm, apiKeyAuthPhased, requireGroupAnthropic, responsesSubpathGuard, enforcement, promptAudit, contentModeration, edgeForward)
 	{
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
