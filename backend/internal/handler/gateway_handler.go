@@ -1625,17 +1625,20 @@ func (h *GatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream bool) (
 	return wrapReleaseOnDone(c.Request.Context(), releaseFunc), true
 }
 
-// CheckForwardRPM 在中央 edge 转发路径上执行消费者 RPM 限流(override → group → user/平台)。
+// CheckForwardEligibility 在中央 edge 转发路径上执行与本地 handler 完全相同的计费资格检查:
+// 余额 / 订阅 / 用户平台配额 / key 自身限额 / RPM(级联)。
 //
-// 与 AcquireForwardUserSlot 同因:EdgeForward 命中即 c.Abort(),handler 里的 CheckBillingEligibility
-// (RPM 在其中)走不到,cell 侧又对转发流量免检——不补上,edge 模式下 RPM 三层全部失效。
-// 只查 RPM,不动余额/订阅/平台额度(职责划分不变)。返回 false 表示已写好 429 + Retry-After。
-func (h *GatewayHandler) CheckForwardRPM(c *gin.Context) bool {
+// 背景:命中转发组的请求在 edgeForward 中间件里就转给 cell,handler 不执行,handler 开头的
+// CheckBillingEligibility 整个被跳过;之前只补了 RPM(CheckForwardRPM),余额等四项一直没补 →
+// 余额为 0 / 负数的转发组用户照样被执行、扣成负数(2026-10-03 yvapyvap173 案例)。
+// 错误到状态码的映射复用 billingErrorDetails,与非转发路径行为一致。
+func (h *GatewayHandler) CheckForwardEligibility(c *gin.Context) bool {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil || apiKey.User == nil || h.billingCacheService == nil {
 		return true
 	}
-	err := h.billingCacheService.CheckRPMEligibility(c.Request.Context(), apiKey.User, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey))
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey))
 	if err == nil {
 		return true
 	}

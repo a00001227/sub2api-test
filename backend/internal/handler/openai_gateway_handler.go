@@ -1110,14 +1110,15 @@ func (h *OpenAIGatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream b
 	return h.acquireResponsesUserSlot(c, slotUserID, slotPlatform, slotMax, isStream, &streamStarted, logger.L())
 }
 
-// CheckForwardRPM 中央 edge 转发路径的消费者 RPM 限流(OpenAI 协议错误写法),语义同
-// GatewayHandler.CheckForwardRPM。
-func (h *OpenAIGatewayHandler) CheckForwardRPM(c *gin.Context) bool {
+// CheckForwardEligibility 中央 edge 转发路径的完整计费资格检查(OpenAI 协议错误写法),
+// 语义同 GatewayHandler.CheckForwardEligibility:余额 / 订阅 / 平台配额 / key 限额 / RPM。
+func (h *OpenAIGatewayHandler) CheckForwardEligibility(c *gin.Context) bool {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil || apiKey.User == nil || h.billingCacheService == nil {
 		return true
 	}
-	err := h.billingCacheService.CheckRPMEligibility(c.Request.Context(), apiKey.User, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey))
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey))
 	if err == nil {
 		return true
 	}

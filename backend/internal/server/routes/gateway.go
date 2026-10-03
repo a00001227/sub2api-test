@@ -55,13 +55,14 @@ func RegisterGatewayRoutes(
 		}
 		return h.Gateway.AcquireForwardUserSlot(c, isStream)
 	}
-	// 消费者 RPM 限流:同上,handler 里的 CheckBillingEligibility 被转发短路,这里在转发前补查
-	// RPM 级联(override → group → user/平台),按分组平台选对协议的 429 写法。
+	// 消费者计费资格:handler 里的 CheckBillingEligibility 被转发短路,这里在转发前补查完整一套
+	// (余额 / 订阅 / 平台配额 / key 限额 / RPM 级联),按分组平台选对协议的错误写法。
+	// 以前只补了 RPM,余额为 0 的转发组用户照样被执行、扣成负数。
 	edgeRPMCheck := func(c *gin.Context) bool {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
-			return h.OpenAIGateway.CheckForwardRPM(c)
+			return h.OpenAIGateway.CheckForwardEligibility(c)
 		}
-		return h.Gateway.CheckForwardRPM(c)
+		return h.Gateway.CheckForwardEligibility(c)
 	}
 	edgeForward := middleware.Phase("edge_forward", middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time) {
 		if env.IsOpenAI() {
