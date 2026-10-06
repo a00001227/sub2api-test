@@ -1110,6 +1110,63 @@
                 {{ t('admin.riskControl.allowedHashesHint') }}
               </p>
             </div>
+
+            <!-- 放行用户白名单:命中的用户完全跳过审计 -->
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <label class="input-label mb-0">{{ t('admin.riskControl.allowedUsers') }}</label>
+                <span class="inline-flex rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300">
+                  {{ t('admin.riskControl.allowedUserCount', { count: configForm.allowed_users.length }) }}
+                </span>
+              </div>
+              <div ref="allowedUserSearchRef" class="relative">
+                <input
+                  v-model="allowedUserKeyword"
+                  type="text"
+                  class="input"
+                  :placeholder="t('admin.riskControl.allowedUsersPlaceholder')"
+                  @input="debounceAllowedUserSearch"
+                  @focus="showAllowedUserDropdown = true"
+                  @keydown.enter.prevent="addAllowedUserByKeyword"
+                />
+                <div
+                  v-if="showAllowedUserDropdown && allowedUserResults.length > 0"
+                  class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                >
+                  <button
+                    v-for="u in allowedUserResults"
+                    :key="u.id"
+                    type="button"
+                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-700"
+                    @click="addAllowedUser(u)"
+                  >
+                    <span>{{ u.email }}</span>
+                    <span class="ml-2 text-xs text-gray-400">#{{ u.id }}</span>
+                  </button>
+                </div>
+              </div>
+              <div v-if="configForm.allowed_users.length > 0" class="mt-2 flex flex-wrap gap-2">
+                <span
+                  v-for="u in configForm.allowed_users"
+                  :key="u.id"
+                  class="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                >
+                  <span class="font-mono">#{{ u.id }}</span>
+                  <span>{{ u.email || t('admin.riskControl.allowedUserUnknownEmail') }}</span>
+                  <button
+                    type="button"
+                    class="ml-1 text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-200"
+                    :aria-label="t('common.delete')"
+                    @click="removeAllowedUser(u.id)"
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.riskControl.allowedUsersHint') }}
+              </p>
+            </div>
           </div>
 
           <div v-else class="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -1358,6 +1415,7 @@ const configForm = reactive({
   thresholds: { ...riskThresholdDefaults } as Record<string, number>,
   blocked_keywords_text: '',
   allowed_input_hashes_text: '',
+  allowed_users: [] as AllowedUserChip[],
   keyword_blocking_mode: 'keyword_and_api' as KeywordBlockingMode,
   model_filter_type: 'all' as ContentModerationModelFilterType,
   model_filter_models: [] as string[],
@@ -1552,6 +1610,91 @@ const blockedKeywordCount = computed(() => blockedKeywordList.value.length)
 const allowedHashList = computed(() => parseAllowedHashes(configForm.allowed_input_hashes_text))
 
 const allowedHashCount = computed(() => allowedHashList.value.length)
+
+// ── 放行用户白名单(用户级,完全跳过审计)────────────────────────────────
+// 存的是用户 ID;展示用邮箱,打开弹窗时按 ID 反查。搜索复用用量页的用户搜索接口。
+interface AllowedUserChip {
+  id: number
+  email: string
+}
+const allowedUserKeyword = ref('')
+const allowedUserResults = ref<Array<{ id: number; email: string }>>([])
+const showAllowedUserDropdown = ref(false)
+const allowedUserSearchRef = ref<HTMLElement | null>(null)
+let allowedUserSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
+const debounceAllowedUserSearch = () => {
+  if (allowedUserSearchTimeout) clearTimeout(allowedUserSearchTimeout)
+  allowedUserSearchTimeout = setTimeout(async () => {
+    const keyword = allowedUserKeyword.value.trim()
+    if (!keyword) {
+      allowedUserResults.value = []
+      return
+    }
+    try {
+      const results = await adminAPI.usage.searchUsers(keyword)
+      const chosen = new Set(configForm.allowed_users.map((u) => u.id))
+      allowedUserResults.value = results.filter((u) => !u.deleted && !chosen.has(u.id)).map((u) => ({ id: u.id, email: u.email }))
+      showAllowedUserDropdown.value = true
+    } catch {
+      allowedUserResults.value = []
+    }
+  }, 300)
+}
+
+const addAllowedUser = (u: { id: number; email: string }) => {
+  if (!configForm.allowed_users.some((x) => x.id === u.id)) {
+    configForm.allowed_users.push({ id: u.id, email: u.email })
+  }
+  allowedUserKeyword.value = ''
+  allowedUserResults.value = []
+  showAllowedUserDropdown.value = false
+}
+
+// 回车:输入的是纯数字就按 UID 直接加(邮箱稍后反查),否则取搜索结果第一条。
+const addAllowedUserByKeyword = async () => {
+  const keyword = allowedUserKeyword.value.trim()
+  if (!keyword) return
+  if (/^\d+$/.test(keyword)) {
+    const id = Number(keyword)
+    let email = ''
+    try {
+      email = (await adminAPI.users.getById(id)).email ?? ''
+    } catch {
+      email = ''
+    }
+    addAllowedUser({ id, email })
+    return
+  }
+  if (allowedUserResults.value.length > 0) addAllowedUser(allowedUserResults.value[0])
+}
+
+const removeAllowedUser = (id: number) => {
+  configForm.allowed_users = configForm.allowed_users.filter((u) => u.id !== id)
+}
+
+const onAllowedUserClickOutside = (e: MouseEvent) => {
+  if (allowedUserSearchRef.value && !allowedUserSearchRef.value.contains(e.target as Node)) {
+    showAllowedUserDropdown.value = false
+  }
+}
+onMounted(() => document.addEventListener('click', onAllowedUserClickOutside))
+onUnmounted(() => document.removeEventListener('click', onAllowedUserClickOutside))
+
+// 打开弹窗时按 ID 批量反查邮箱(白名单最多 1000,实际几十条,逐个查即可;查不到就只显 UID)。
+const hydrateAllowedUsers = async (ids: number[]) => {
+  configForm.allowed_users = ids.map((id) => ({ id, email: '' }))
+  const resolved = await Promise.all(
+    ids.map(async (id) => {
+      try {
+        return { id, email: (await adminAPI.users.getById(id, true)).email ?? '' }
+      } catch {
+        return { id, email: '' }
+      }
+    }),
+  )
+  configForm.allowed_users = resolved
+}
 
 const pendingDeletedApiKeyCount = computed(() => pendingDeleteApiKeyHashes.value.length)
 
@@ -1861,6 +2004,7 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.thresholds = riskThresholdsFromConfig(config.thresholds)
   configForm.blocked_keywords_text = Array.isArray(config.blocked_keywords) ? config.blocked_keywords.join('\n') : ''
   configForm.allowed_input_hashes_text = Array.isArray(config.allowed_input_hashes) ? config.allowed_input_hashes.join('\n') : ''
+  void hydrateAllowedUsers(Array.isArray(config.allowed_user_ids) ? config.allowed_user_ids : [])
   configForm.keyword_blocking_mode = normalizeKeywordBlockingMode(config.keyword_blocking_mode)
   const modelFilter = normalizeModelFilter(config.model_filter)
   configForm.model_filter_type = modelFilter.type
@@ -1981,6 +2125,7 @@ async function saveConfig() {
       thresholds: buildRiskThresholdPayload(),
       blocked_keywords: blockedKeywordList.value,
       allowed_input_hashes: allowedHashList.value,
+      allowed_user_ids: configForm.allowed_users.map((u) => u.id),
       keyword_blocking_mode: configForm.keyword_blocking_mode,
       model_filter: modelFilterPayload,
     }

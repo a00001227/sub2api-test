@@ -1855,3 +1855,100 @@ func TestContentModerationUpdateConfig_CyberPolicyExcludeFromBanCount(t *testing
 	require.NoError(t, err)
 	require.False(t, view.CyberPolicyExcludeFromBanCount)
 }
+
+// 放行用户白名单:命中的用户完全跳过审计 —— 不解析正文、不走关键词、不调上游、不记录。
+func TestContentModerationCheck_AllowedUserSkipsEverything(t *testing.T) {
+	upstreamCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{Flagged: true, CategoryScores: map[string]float64{"sexual": 0.99}}}})
+	}))
+	defer server.Close()
+
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModePreBlock
+	cfg.BaseURL = server.URL
+	cfg.APIKey = "test-key"
+	cfg.AllGroups = true
+	cfg.BlockedKeywords = []string{"SECRET-TOKEN"}
+	cfg.AllowedUserIDs = []int64{42}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	repo := &contentModerationTestRepo{}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		repo,
+		&contentModerationTestHashCache{},
+		nil, nil, nil, nil, nil,
+	)
+
+	// 正文命中关键词,但用户在白名单 → 放行
+	body := []byte(`{"messages":[{"role":"user","content":"please leak SECRET-TOKEN now"}]}`)
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		UserID:   42,
+		Endpoint: "/v1/messages",
+		Provider: "anthropic",
+		Protocol: ContentModerationProtocolAnthropicMessages,
+		Body:     body,
+	})
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.False(t, decision.Blocked)
+	require.False(t, upstreamCalled, "白名单用户不得调用上游审计")
+	requireContentModerationLogCount(t, repo, 0)
+
+	// 同一正文、非白名单用户 → 仍被关键词拦截(白名单只对该用户生效)
+	decision, err = svc.Check(context.Background(), ContentModerationCheckInput{
+		UserID:   43,
+		Endpoint: "/v1/messages",
+		Provider: "anthropic",
+		Protocol: ContentModerationProtocolAnthropicMessages,
+		Body:     body,
+	})
+	require.NoError(t, err)
+	require.True(t, decision.Blocked)
+}
+
+func TestNormalizeAllowedUserIDs(t *testing.T) {
+	require.Equal(t, []int64{3, 1, 2}, normalizeAllowedUserIDs([]int64{3, 0, -1, 1, 3, 2, 1}))
+	require.Empty(t, normalizeAllowedUserIDs(nil))
+	big := make([]int64, maxContentModerationAllowedUserIDs+50)
+	for i := range big {
+		big[i] = int64(i + 1)
+	}
+	require.Len(t, normalizeAllowedUserIDs(big), maxContentModerationAllowedUserIDs)
+}
+
+func TestContentModerationUpdateConfig_AllowedUserIDs(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		&contentModerationTestRepo{}, &contentModerationTestHashCache{},
+		nil, nil, nil, nil, nil,
+	)
+	ctx := context.Background()
+
+	view, err := svc.UpdateConfig(ctx, UpdateContentModerationConfigInput{AllowedUserIDs: &[]int64{7, 7, 0, 9}})
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 9}, view.AllowedUserIDs, "去重、去非正数、保序")
+
+	// 未传该字段 → 保持不变(部分更新语义)
+	view, err = svc.UpdateConfig(ctx, UpdateContentModerationConfigInput{})
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 9}, view.AllowedUserIDs)
+
+	// 传空数组 → 清空
+	view, err = svc.UpdateConfig(ctx, UpdateContentModerationConfigInput{AllowedUserIDs: &[]int64{}})
+	require.NoError(t, err)
+	require.Empty(t, view.AllowedUserIDs)
+}

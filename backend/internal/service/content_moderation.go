@@ -96,8 +96,10 @@ const (
 	maxContentModerationBlockedKeywords          = 10000
 	maxContentModerationBlockedKeywordRunes      = 200
 	maxContentModerationAllowedInputHashes       = 10000
-	maxContentModerationModelFilterModels        = 1000
-	maxContentModerationModelFilterRunes         = 200
+	// maxContentModerationAllowedUserIDs 放行用户白名单上限(用户级,完全跳过审计)。
+	maxContentModerationAllowedUserIDs    = 1000
+	maxContentModerationModelFilterModels = 1000
+	maxContentModerationModelFilterRunes  = 200
 
 	contentModerationCleanupInterval = 24 * time.Hour
 	contentModerationCleanupTimeout  = 30 * time.Minute
@@ -190,35 +192,39 @@ type ContentModerationConfig struct {
 	AliyunEndpoint        string `json:"aliyun_endpoint,omitempty"`
 	AliyunService         string `json:"aliyun_service,omitempty"`
 	// 腾讯云文本审核凭据（provider=tencent 时使用）。
-	TencentSecretID      string                       `json:"tencent_secret_id,omitempty"`
-	TencentSecretKey     string                       `json:"tencent_secret_key,omitempty"`
-	TencentRegion        string                       `json:"tencent_region,omitempty"`
-	TencentBizType       string                       `json:"tencent_biz_type,omitempty"`
-	TimeoutMS            int                          `json:"timeout_ms"`
-	SampleRate           int                          `json:"sample_rate"`
-	AllGroups            bool                         `json:"all_groups"`
-	GroupIDs             []int64                      `json:"group_ids"`
-	RecordNonHits        bool                         `json:"record_non_hits"`
-	Thresholds           map[string]float64           `json:"thresholds"`
-	WorkerCount          int                          `json:"worker_count"`
-	QueueSize            int                          `json:"queue_size"`
-	BlockStatus          int                          `json:"block_status"`
-	BlockMessage         string                       `json:"block_message"`
-	EmailOnHit           bool                         `json:"email_on_hit"`
-	AutoBanEnabled       bool                         `json:"auto_ban_enabled"`
-	BanThreshold         int                          `json:"ban_threshold"`
-	ViolationWindowHours int                          `json:"violation_window_hours"`
-	RetryCount           int                          `json:"retry_count"`
-	HitRetentionDays     int                          `json:"hit_retention_days"`
-	NonHitRetentionDays  int                          `json:"non_hit_retention_days"`
-	PreHashCheckEnabled  bool                         `json:"pre_hash_check_enabled"`
-	BlockedKeywords      []string                     `json:"blocked_keywords"`
+	TencentSecretID      string             `json:"tencent_secret_id,omitempty"`
+	TencentSecretKey     string             `json:"tencent_secret_key,omitempty"`
+	TencentRegion        string             `json:"tencent_region,omitempty"`
+	TencentBizType       string             `json:"tencent_biz_type,omitempty"`
+	TimeoutMS            int                `json:"timeout_ms"`
+	SampleRate           int                `json:"sample_rate"`
+	AllGroups            bool               `json:"all_groups"`
+	GroupIDs             []int64            `json:"group_ids"`
+	RecordNonHits        bool               `json:"record_non_hits"`
+	Thresholds           map[string]float64 `json:"thresholds"`
+	WorkerCount          int                `json:"worker_count"`
+	QueueSize            int                `json:"queue_size"`
+	BlockStatus          int                `json:"block_status"`
+	BlockMessage         string             `json:"block_message"`
+	EmailOnHit           bool               `json:"email_on_hit"`
+	AutoBanEnabled       bool               `json:"auto_ban_enabled"`
+	BanThreshold         int                `json:"ban_threshold"`
+	ViolationWindowHours int                `json:"violation_window_hours"`
+	RetryCount           int                `json:"retry_count"`
+	HitRetentionDays     int                `json:"hit_retention_days"`
+	NonHitRetentionDays  int                `json:"non_hit_retention_days"`
+	PreHashCheckEnabled  bool               `json:"pre_hash_check_enabled"`
+	BlockedKeywords      []string           `json:"blocked_keywords"`
 	// AllowedInputHashes 放行白名单：命中的输入哈希在审核最前端直接放行，不进关键词/预哈希/LLM，
 	// 且不记录（因此永不会被再次收进 flagged_hashes，根治「删哈希→复审→再收录」的打地鼠）。
 	// 口径与 ContentModerationInput.Hash() 一致（sha256 小写 hex）。
-	AllowedInputHashes  []string                     `json:"allowed_input_hashes"`
-	KeywordBlockingMode  string                       `json:"keyword_blocking_mode"`
-	ModelFilter          ContentModerationModelFilter `json:"model_filter"`
+	AllowedInputHashes []string `json:"allowed_input_hashes"`
+	// AllowedUserIDs 放行用户白名单(用户级):命中的用户在分组/模型范围判定之后、抽取文本之前
+	// 直接放行 —— 不解析请求体、不进关键词/预哈希/上游 API、不记录、不进封号计数。语义是
+	// 「信任该用户」,与哈希白名单同口径;仅中央生效(转发给 cell 的请求 cell 不再审)。
+	AllowedUserIDs      []int64                      `json:"allowed_user_ids"`
+	KeywordBlockingMode string                       `json:"keyword_blocking_mode"`
+	ModelFilter         ContentModerationModelFilter `json:"model_filter"`
 	// CyberPolicyExcludeFromBanCount 为 true 时，cyber_policy 命中不参与自动封号计数：
 	// 当次不判定封号，且历史 cyber 行在 CountFlaggedByUserSince 中被排除。
 	// 默认 false（计入，与历史行为一致；旧配置 JSON 无此字段时反序列化为 false）。
@@ -267,6 +273,7 @@ type ContentModerationConfigView struct {
 	PreHashCheckEnabled            bool                            `json:"pre_hash_check_enabled"`
 	BlockedKeywords                []string                        `json:"blocked_keywords"`
 	AllowedInputHashes             []string                        `json:"allowed_input_hashes"`
+	AllowedUserIDs                 []int64                         `json:"allowed_user_ids"`
 	KeywordBlockingMode            string                          `json:"keyword_blocking_mode"`
 	ModelFilter                    ContentModerationModelFilter    `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount bool                            `json:"cyber_policy_exclude_from_ban_count"`
@@ -371,6 +378,7 @@ type UpdateContentModerationConfigInput struct {
 	PreHashCheckEnabled            *bool                         `json:"pre_hash_check_enabled"`
 	BlockedKeywords                *[]string                     `json:"blocked_keywords"`
 	AllowedInputHashes             *[]string                     `json:"allowed_input_hashes"`
+	AllowedUserIDs                 *[]int64                      `json:"allowed_user_ids"`
 	KeywordBlockingMode            *string                       `json:"keyword_blocking_mode"`
 	ModelFilter                    *ContentModerationModelFilter `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount *bool                         `json:"cyber_policy_exclude_from_ban_count"`
@@ -780,6 +788,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.AllowedInputHashes != nil {
 		cfg.AllowedInputHashes = normalizeInputHashes(*input.AllowedInputHashes)
 	}
+	if input.AllowedUserIDs != nil {
+		cfg.AllowedUserIDs = normalizeAllowedUserIDs(*input.AllowedUserIDs)
+	}
 	if input.KeywordBlockingMode != nil {
 		cfg.KeywordBlockingMode = strings.TrimSpace(*input.KeywordBlockingMode)
 	}
@@ -1004,6 +1015,17 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"model", input.Model,
 			"model_filter_type", cfg.ModelFilter.Type,
 			"configured_models", cfg.ModelFilter.Models)
+		return allow, nil
+	}
+	// 放行用户白名单:命中即直接放行(连请求体都不解析),不记录、不进封号计数、不调上游。
+	if input.UserID > 0 && containsInt64(cfg.AllowedUserIDs, input.UserID) {
+		slog.Info("content_moderation.allow_user",
+			"user_id", input.UserID,
+			"api_key_id", input.APIKeyID,
+			"group_id", contentModerationLogGroupID(input.GroupID),
+			"endpoint", input.Endpoint,
+			"protocol", input.Protocol,
+			"model", input.Model)
 		return allow, nil
 	}
 	content := ExtractContentModerationInput(input.Protocol, input.Body)
@@ -2093,6 +2115,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		PreHashCheckEnabled:  false,
 		BlockedKeywords:      []string{},
 		AllowedInputHashes:   []string{},
+		AllowedUserIDs:       []int64{},
 		KeywordBlockingMode:  ContentModerationKeywordModeKeywordAndAPI,
 		ModelFilter: ContentModerationModelFilter{
 			Type:   ContentModerationModelFilterAll,
@@ -2457,6 +2480,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		PreHashCheckEnabled:            cfg.PreHashCheckEnabled,
 		BlockedKeywords:                append([]string(nil), cfg.BlockedKeywords...),
 		AllowedInputHashes:             append([]string(nil), cfg.AllowedInputHashes...),
+		AllowedUserIDs:                 append([]int64(nil), cfg.AllowedUserIDs...),
 		KeywordBlockingMode:            cfg.KeywordBlockingMode,
 		ModelFilter:                    cloneContentModerationModelFilter(cfg.ModelFilter),
 		CyberPolicyExcludeFromBanCount: cfg.CyberPolicyExcludeFromBanCount,
@@ -2815,6 +2839,26 @@ func normalizeInputHashes(in []string) []string {
 }
 
 // containsInputHash 判断哈希是否在放行集内(调用方保证 set 已 normalize 为小写)。
+// normalizeAllowedUserIDs 去掉非正数、去重、保序,封顶 maxContentModerationAllowedUserIDs。
+func normalizeAllowedUserIDs(ids []int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if len(out) >= maxContentModerationAllowedUserIDs {
+			break
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
 func containsInputHash(set []string, hashText string) bool {
 	hashText = strings.ToLower(strings.TrimSpace(hashText))
 	if hashText == "" {

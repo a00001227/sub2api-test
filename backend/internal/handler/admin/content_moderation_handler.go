@@ -20,42 +20,42 @@ func NewContentModerationHandler(svc *service.ContentModerationService) *Content
 }
 
 type contentModerationConfigRequest struct {
-	Enabled              *bool               `json:"enabled"`
-	Mode                 *string             `json:"mode"`
-	Provider             *string             `json:"provider"`
-	BaseURL              *string             `json:"base_url"`
-	Model                *string             `json:"model"`
+	Enabled  *bool   `json:"enabled"`
+	Mode     *string `json:"mode"`
+	Provider *string `json:"provider"`
+	BaseURL  *string `json:"base_url"`
+	Model    *string `json:"model"`
 	// ProxyID 审核请求走的代理（仅作用于 OpenAI 形态审核路径）；<=0 清除，>0 指定，nil 不改。
-	ProxyID              *int64              `json:"proxy_id"`
+	ProxyID *int64 `json:"proxy_id"`
 	// 阿里云 / 腾讯云云审凭据（provider=aliyun/tencent 时使用）。
-	AliyunAccessKeyID     *string `json:"aliyun_access_key_id"`
-	AliyunAccessKeySecret *string `json:"aliyun_access_key_secret"`
-	AliyunRegion          *string `json:"aliyun_region"`
-	AliyunEndpoint        *string `json:"aliyun_endpoint"`
-	AliyunService         *string `json:"aliyun_service"`
-	TencentSecretID       *string `json:"tencent_secret_id"`
-	TencentSecretKey      *string `json:"tencent_secret_key"`
-	TencentRegion         *string `json:"tencent_region"`
-	TencentBizType        *string `json:"tencent_biz_type"`
-	APIKey               *string             `json:"api_key"`
-	APIKeys              *[]string           `json:"api_keys"`
-	APIKeysMode          string              `json:"api_keys_mode"`
-	DeleteAPIKeyHashes   *[]string           `json:"delete_api_key_hashes"`
-	ClearAPIKey          bool                `json:"clear_api_key"`
-	TimeoutMS            *int                `json:"timeout_ms"`
-	SampleRate           *int                `json:"sample_rate"`
-	AllGroups            *bool               `json:"all_groups"`
-	GroupIDs             *[]int64            `json:"group_ids"`
-	RecordNonHits        *bool               `json:"record_non_hits"`
-	Thresholds           *map[string]float64 `json:"thresholds"`
-	WorkerCount          *int                `json:"worker_count"`
-	QueueSize            *int                `json:"queue_size"`
-	BlockStatus          *int                `json:"block_status"`
-	BlockMessage         *string             `json:"block_message"`
-	EmailOnHit           *bool               `json:"email_on_hit"`
-	AutoBanEnabled       *bool               `json:"auto_ban_enabled"`
-	BanThreshold         *int                `json:"ban_threshold"`
-	ViolationWindowHours *int                `json:"violation_window_hours"`
+	AliyunAccessKeyID     *string             `json:"aliyun_access_key_id"`
+	AliyunAccessKeySecret *string             `json:"aliyun_access_key_secret"`
+	AliyunRegion          *string             `json:"aliyun_region"`
+	AliyunEndpoint        *string             `json:"aliyun_endpoint"`
+	AliyunService         *string             `json:"aliyun_service"`
+	TencentSecretID       *string             `json:"tencent_secret_id"`
+	TencentSecretKey      *string             `json:"tencent_secret_key"`
+	TencentRegion         *string             `json:"tencent_region"`
+	TencentBizType        *string             `json:"tencent_biz_type"`
+	APIKey                *string             `json:"api_key"`
+	APIKeys               *[]string           `json:"api_keys"`
+	APIKeysMode           string              `json:"api_keys_mode"`
+	DeleteAPIKeyHashes    *[]string           `json:"delete_api_key_hashes"`
+	ClearAPIKey           bool                `json:"clear_api_key"`
+	TimeoutMS             *int                `json:"timeout_ms"`
+	SampleRate            *int                `json:"sample_rate"`
+	AllGroups             *bool               `json:"all_groups"`
+	GroupIDs              *[]int64            `json:"group_ids"`
+	RecordNonHits         *bool               `json:"record_non_hits"`
+	Thresholds            *map[string]float64 `json:"thresholds"`
+	WorkerCount           *int                `json:"worker_count"`
+	QueueSize             *int                `json:"queue_size"`
+	BlockStatus           *int                `json:"block_status"`
+	BlockMessage          *string             `json:"block_message"`
+	EmailOnHit            *bool               `json:"email_on_hit"`
+	AutoBanEnabled        *bool               `json:"auto_ban_enabled"`
+	BanThreshold          *int                `json:"ban_threshold"`
+	ViolationWindowHours  *int                `json:"violation_window_hours"`
 	// cyber_policy 命中是否排除出自动封号计数；前端 RiskControlView 已发送该字段，
 	// service.UpdateContentModerationConfigInput 已支持，此前 handler 层缺透传导致开关静默失效。
 	CyberPolicyExcludeFromBanCount *bool                                 `json:"cyber_policy_exclude_from_ban_count"`
@@ -65,6 +65,7 @@ type contentModerationConfigRequest struct {
 	PreHashCheckEnabled            *bool                                 `json:"pre_hash_check_enabled"`
 	BlockedKeywords                *[]string                             `json:"blocked_keywords"`
 	AllowedInputHashes             *[]string                             `json:"allowed_input_hashes"`
+	AllowedUserIDs                 *[]int64                              `json:"allowed_user_ids"`
 	KeywordBlockingMode            *string                               `json:"keyword_blocking_mode"`
 	ModelFilter                    *service.ContentModerationModelFilter `json:"model_filter"`
 }
@@ -140,6 +141,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		PreHashCheckEnabled:            req.PreHashCheckEnabled,
 		BlockedKeywords:                req.BlockedKeywords,
 		AllowedInputHashes:             req.AllowedInputHashes,
+		AllowedUserIDs:                 req.AllowedUserIDs,
 		KeywordBlockingMode:            req.KeywordBlockingMode,
 		ModelFilter:                    req.ModelFilter,
 	})
