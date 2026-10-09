@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -388,8 +389,31 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, errMsg)
 	}
 
+	// 测试成功且上游响应头表明当前未被限流 → 清掉残留的限流状态。让「测试连接」成为人工恢复手段:
+	// 冷却中的号不会被调度器派发真实请求,原本没有任何机制再验一次、只能等到期。
+	s.clearStaleRateLimitOnTestSuccess(ctx, account, resp.Header)
+
 	// Process SSE stream
 	return s.processClaudeStream(c, resp.Body)
+}
+
+// clearStaleRateLimitOnTestSuccess 账号仍标记限流、而本次测试 200 且头部说 allowed → 清除限流。
+func (s *AccountTestService) clearStaleRateLimitOnTestSuccess(ctx context.Context, account *Account, headers http.Header) {
+	if s == nil || s.accountRepo == nil || account == nil || !account.IsRateLimited() {
+		return
+	}
+	if !anthropicRateLimitHeadersAllowed(headers) {
+		return
+	}
+	if err := s.accountRepo.ClearRateLimit(ctx, account.ID); err != nil {
+		slog.Warn("account_test_clear_rate_limit_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	slog.Info("account_test_cleared_stale_rate_limit",
+		"account_id", account.ID,
+		"previous_reset_at", account.RateLimitResetAt)
+	account.RateLimitedAt = nil
+	account.RateLimitResetAt = nil
 }
 
 func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string) error {

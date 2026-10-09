@@ -921,6 +921,29 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		}
 	}
 
+	// 2a. Anthropic 请求级 429:上游拒的是这一条请求,不是账号额度 —— 不按账号冷却。
+	if account.Platform == PlatformAnthropic {
+		switch kind := classifyAnthropicRequestLevel429(responseBody); kind {
+		case anthropicRequestLevel429LongContext:
+			slog.Warn("anthropic_429_request_level_skipped",
+				"account_id", account.ID,
+				"kind", kind,
+				"reason", "request-specific rejection; account stays schedulable")
+			return
+		case anthropicRequestLevel429RequestTooLarge:
+			resetAt := time.Now().Add(anthropicRequestLevel429ShortCooldown)
+			s.notifyAccountSchedulingBlocked(account, resetAt, "429")
+			if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+				return
+			}
+			slog.Info("anthropic_429_request_level_short_cooldown",
+				"account_id", account.ID,
+				"kind", kind,
+				"reset_at", resetAt)
+			return
+		}
+	}
 	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
 		s.notifyAccountSchedulingBlocked(account, result.resetAt, "429")
@@ -999,6 +1022,14 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	}
 
 	resetAt := time.Unix(ts, 0)
+	// 汇总头没有窗口语义,可能指向月度额度重置(几十天):封顶,到期自动再探。
+	if capAt := time.Now().Add(maxAggregated429Cooldown); resetAt.After(capAt) {
+		slog.Warn("rate_limit_aggregated_reset_capped",
+			"account_id", account.ID,
+			"upstream_reset_at", resetAt,
+			"capped_reset_at", capAt)
+		resetAt = capAt
+	}
 
 	// 标记限流状态
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429")
@@ -1225,6 +1256,58 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 		"reset_at", limit.resetAt,
 		"reset_in", time.Until(limit.resetAt).Truncate(time.Second))
 	return true
+}
+
+// Anthropic「请求级」429:上游拒绝的是这一条请求,不是账号额度耗尽。
+//
+// 2026-10-09 事故:一两个用户发超 20 万上下文的请求,上游回 429 "Usage credits are required for
+// long context requests"(Max 订阅不含长上下文,要付费用量额度),响应里没有 5h/7d 窗口头、只有一个指向
+// 月度额度重置(11-01 00:00 UTC)的汇总头;兜底分支把它当账号冷却原样入库,一小时内 failover 扫倒
+// 13 个号、每个躺三周,而这些号对正常请求完全可用。
+const (
+	// anthropicRequestLevel429LongContext 长上下文需付费额度:账号不冷却、不换号(换哪个号都一样)。
+	anthropicRequestLevel429LongContext = "long_context_credits_required"
+	// anthropicRequestLevel429RequestTooLarge 单条请求超过窗口剩余额度:只短冷却,允许换号。
+	anthropicRequestLevel429RequestTooLarge = "request_exceeds_remaining"
+	// anthropicRequestLevel429ShortCooldown 请求级 429 的短冷却时长。
+	anthropicRequestLevel429ShortCooldown = 5 * time.Minute
+	// maxAggregated429Cooldown 汇总头(anthropic-ratelimit-unified-reset)兜底分支的冷却上限:
+	// 该头可能指向月度额度重置(几十天),照单全收会让号白躺;封顶后到期自动再探,上游还限就再冷却。
+	maxAggregated429Cooldown = 24 * time.Hour
+)
+
+// classifyAnthropicRequestLevel429 按 429 响应体文案识别请求级拒绝;不是则返回空串。
+func classifyAnthropicRequestLevel429(body []byte) string {
+	msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	if msg == "" {
+		msg = strings.ToLower(string(body))
+	}
+	switch {
+	case strings.Contains(msg, "usage credits are required"),
+		strings.Contains(msg, "long context request"):
+		return anthropicRequestLevel429LongContext
+	case strings.Contains(msg, "would exceed your account's rate limit"),
+		strings.Contains(msg, "would exceed your account’s rate limit"):
+		return anthropicRequestLevel429RequestTooLarge
+	}
+	return ""
+}
+
+// anthropicRateLimitHeadersAllowed 成功响应头是否表明账号当前未被限流:汇总状态 allowed,或
+// 5h 状态 allowed/allowed_warning 且 7d 状态不是 rejected。没有任何 unified 头时返回 false(不敢断言)。
+func anthropicRateLimitHeadersAllowed(h http.Header) bool {
+	if h == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(h.Get("anthropic-ratelimit-unified-status")), "allowed") {
+		return true
+	}
+	st5h := strings.ToLower(strings.TrimSpace(h.Get("anthropic-ratelimit-unified-5h-status")))
+	st7d := strings.ToLower(strings.TrimSpace(h.Get("anthropic-ratelimit-unified-7d-status")))
+	if st5h != "allowed" && st5h != "allowed_warning" {
+		return false
+	}
+	return st7d != "rejected"
 }
 
 // calculateAnthropic429ResetTime parses Anthropic's per-window rate-limit headers

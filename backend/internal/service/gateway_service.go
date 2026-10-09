@@ -5866,6 +5866,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
+		// 请求级 429(长上下文需付费额度):换哪个号都一样,不 failover、不冷却(handle429 内同样跳过),
+		// 标客户端侧后原样回给客户端。否则一条超大请求会把整个号池逐个冷却(2026-10-09 事故)。
+		if resp.StatusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic &&
+			classifyAnthropicRequestLevel429(respBody) == anthropicRequestLevel429LongContext {
+			if c != nil {
+				MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonUpstreamRequestRejected)
+			}
+			logger.LegacyPrintf("service.gateway", "[Forward] Upstream 429 is request-level (long context credits): Account=%d(%s) RequestID=%s, pass through without failover",
+				account.ID, account.Name, resp.Header.Get("x-request-id"))
+			return s.handleErrorResponse(ctx, resp, c, account, reqModel)
+		}
+
 		// 调试日志：打印上游错误响应
 		logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))

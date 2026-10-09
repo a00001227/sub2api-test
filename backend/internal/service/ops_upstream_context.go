@@ -61,6 +61,9 @@ const (
 	OpsClientBusinessLimitedReasonRequestTooLarge = "request_too_large"
 	// 客户端在上游响应前主动断开(ESC / 重发):上游 Post 报 context canceled,记 499,非中转故障。
 	OpsClientBusinessLimitedReasonClientCanceled = "client_canceled"
+	// 上游按「这一条请求」拒绝(如 Anthropic 429 "Usage credits are required for long context requests":
+	// 请求超 20 万上下文,Max 订阅不含,换哪个号都一样):原样回给客户端,不换号、不冷却账号,非中转故障。
+	OpsClientBusinessLimitedReasonUpstreamRequestRejected = "upstream_request_rejected"
 )
 
 // SanitizeUpstreamErrorMessage 是 sanitizeUpstreamErrorMessage 的导出包装,供 handler 层
