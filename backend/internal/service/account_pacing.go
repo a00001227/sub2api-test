@@ -188,9 +188,17 @@ const pacingUtilizationDormantThreshold5h = 0.85
 // 与 7d 硬封的安全边际。
 const pacingUtilizationDormantThreshold7d = 0.75
 
-// GetSessionWindowUtilization 返回上游 5h 窗口真实利用率 (0-1)；无数据返回 0。
+// GetSessionWindowUtilization 返回上游 5h 窗口真实利用率 (0-1)；无数据或窗口已过期返回 0。
+//
+// 窗口过期检查与 Get7dUtilization 对齐。以前没有:利用率只在下一次成功响应时才被刷新/清零,
+// 而达到休眠阈值的号不会被调度、永远等不到下一次响应 → 旧窗口的高利用率把号锁死
+// (2026-10-09 查到一个号窗口 9 月 30 日就过期,到 10 月 9 日还在"休眠·5h")。面板展示那条路
+// 早有过期归零,于是出现"5h 利用率 0% 却在休眠"。
 func (a *Account) GetSessionWindowUtilization() float64 {
 	if a.Extra == nil {
+		return 0
+	}
+	if a.SessionWindowEnd != nil && !time.Now().Before(*a.SessionWindowEnd) {
 		return 0
 	}
 	if v, ok := a.Extra["session_window_utilization"]; ok {
@@ -324,7 +332,7 @@ const (
 // cell 的同 ID 号错峰（salt=0 时等价旧行为）。
 func (a *Account) dailyRestStartMinute() int {
 	base := a.ID*pacingRestSpreadPrime + pacingCellPhaseSalt
-	return int((base%pacingDayMinutes+pacingDayMinutes) % pacingDayMinutes)
+	return int((base%pacingDayMinutes + pacingDayMinutes) % pacingDayMinutes)
 }
 
 // DailyRestWindowUTC 返回账号每日休息窗口 [startMin, endMin)（UTC 分钟）。
