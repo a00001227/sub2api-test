@@ -575,3 +575,97 @@ func TestStripClaudeCodeBanner(t *testing.T) {
 		})
 	}
 }
+
+// ── append 模式({client_system} 占位):客户 system 块原样留在 system 数组里,messages 不动 ──
+
+const appendModeBlocks = `{
+	"blocks": [
+		{"text": "{billing_header}"},
+		{"text": "{claude_code_system_prompt}"},
+		{"text": "{client_system}"}
+	]
+}`
+
+func TestRewriteSystemAppendMode_ClientBlocksStayInSystem(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"what is the mascot?"}]}`
+	system := []any{
+		map[string]any{"type": "text", "text": claudeCodeSystemPrompt},
+		map[string]any{"type": "text", "text": "Handbook: Our team mascot is a parrot named Pineapple.",
+			"cache_control": map[string]any{"type": "ephemeral", "ttl": "1h"}},
+		map[string]any{"type": "text", "text": "Always answer in one word."},
+	}
+
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks([]byte(body), system, "", appendModeBlocks)
+
+	sys := gjson.GetBytes(result, "system").Array()
+	require.Len(t, sys, 4, "billing + 身份句 + 客户两块(身份句块被剔除)")
+	require.Contains(t, sys[0].Get("text").String(), "x-anthropic-billing-header")
+	require.Equal(t, claudeCodeSystemPrompt, sys[1].Get("text").String())
+	require.Equal(t, "Handbook: Our team mascot is a parrot named Pineapple.", sys[2].Get("text").String())
+	require.Equal(t, "1h", sys[2].Get("cache_control.ttl").String(), "客户块自己的 cache_control 原样保留")
+	require.Equal(t, "Always answer in one word.", sys[3].Get("text").String())
+	// 我们前面的块必须跟随客户的 1h,否则上游 400 "1h after 5m"
+	for i := 0; i < 2; i++ {
+		if cc := sys[i].Get("cache_control"); cc.Exists() {
+			require.Equal(t, "1h", cc.Get("ttl").String())
+		}
+	}
+	// messages 不动:没有 [System Instructions] 注入
+	msgs := gjson.GetBytes(result, "messages").Array()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "what is the mascot?", msgs[0].Get("content").String())
+}
+
+func TestRewriteSystemAppendMode_BannerPrefixedBlockKeepsInstructions(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`
+	system := []any{
+		map[string]any{"type": "text", "text": claudeCodeSystemPrompt + "\n\nDo X exactly."},
+	}
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks([]byte(body), system, "", appendModeBlocks)
+	sys := gjson.GetBytes(result, "system").Array()
+	require.Len(t, sys, 3)
+	require.Equal(t, "Do X exactly.", sys[2].Get("text").String())
+	require.Len(t, gjson.GetBytes(result, "messages").Array(), 1)
+}
+
+func TestRewriteSystemAppendMode_StringSystem(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks([]byte(body), "You are a personal assistant.", "", appendModeBlocks)
+	sys := gjson.GetBytes(result, "system").Array()
+	require.Len(t, sys, 3)
+	require.Equal(t, "You are a personal assistant.", sys[2].Get("text").String())
+	require.Len(t, gjson.GetBytes(result, "messages").Array(), 1)
+}
+
+func TestRewriteSystemAppendMode_NoClientSystemSkipsPlaceholder(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`
+	for _, system := range []any{nil, "", claudeCodeSystemPrompt, []any{}} {
+		result := rewriteSystemForNonClaudeCodeWithPromptBlocks([]byte(body), system, "", appendModeBlocks)
+		sys := gjson.GetBytes(result, "system").Array()
+		require.Len(t, sys, 2, "占位无内容 → 只剩 billing + 身份句")
+		require.Len(t, gjson.GetBytes(result, "messages").Array(), 1)
+	}
+}
+
+// 默认配置(不含占位)→ 仍是 relocate:客户 system 挪进 messages(现网行为不变)。
+func TestRewriteSystemDefaultConfigStillRelocates(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks([]byte(body), "Be terse.", "", "")
+	require.Len(t, gjson.GetBytes(result, "system").Array(), 3)
+	msgs := gjson.GetBytes(result, "messages").Array()
+	require.Len(t, msgs, 3)
+	require.Contains(t, msgs[0].Get("content.0.text").String(), "[System Instructions]")
+}
+
+func TestValidateClaudeOAuthSystemPromptBlocksConfig_ClientSystemPlaceholder(t *testing.T) {
+	require.NoError(t, ValidateClaudeOAuthSystemPromptBlocksConfig(appendModeBlocks))
+	require.Error(t, ValidateClaudeOAuthSystemPromptBlocksConfig(`{"blocks":[{"text":"{client_system}"},{"text":"{client_system}"}]}`), "占位最多一次")
+	require.Error(t, ValidateClaudeOAuthSystemPromptBlocksConfig(`{"blocks":[{"text":"{client_system}","cache_control":{"type":"ephemeral"}}]}`), "占位块不能带 cache_control")
+}
+
+func TestDetectAnthropicThirdPartyAttribution(t *testing.T) {
+	// 只打日志不改行为:这里只验证不 panic、对 nil/其它平台安全
+	detectAnthropicThirdPartyAttribution(nil, 403, []byte("x"))
+	detectAnthropicThirdPartyAttribution(&Account{ID: 1, Platform: PlatformOpenAI}, 403, []byte("Third-party apps now draw from your extra usage"))
+	detectAnthropicThirdPartyAttribution(&Account{ID: 1, Platform: PlatformAnthropic}, 403, []byte(`{"error":{"message":"Third-party apps now draw from your extra usage, not your plan limits."}}`))
+}

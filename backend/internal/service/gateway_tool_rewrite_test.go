@@ -293,7 +293,7 @@ func TestInjectedSystemBlocks_FollowClientOneHourTTL(t *testing.T) {
 	out := injectClaudeCodePrompt(body, "You are helpful.")
 	require.Equal(t, "1h", gjson.GetBytes(out, "system.0.cache_control.ttl").String(), "伪装提示块跟随客户 1h")
 
-	blocks, err := buildClaudeOAuthSystemPromptBlocksJSON(body, "expansion text", "")
+	blocks, _, err := buildClaudeOAuthSystemPromptBlocksJSON(body, "expansion text", "", nil)
 	require.NoError(t, err)
 	for i, raw := range blocks {
 		if cc := gjson.GetBytes(raw, "cache_control"); cc.Exists() {

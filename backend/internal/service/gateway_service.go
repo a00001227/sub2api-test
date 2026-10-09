@@ -4804,16 +4804,93 @@ func defaultClaudeOAuthSystemPromptBlockConfig() []claudeOAuthSystemPromptBlockC
 	}
 }
 
-func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string) ([][]byte, error) {
+// detectAnthropicThirdPartyAttribution 识别上游"判为第三方应用"的信号并打日志,供灰度 append 模式时
+// 观察:文案 "Third-party apps now draw from your extra usage, not your plan limits" 表示该请求没按
+// Claude Code 计入套餐额度。只记日志不改行为。
+func detectAnthropicThirdPartyAttribution(account *Account, statusCode int, body []byte) {
+	if account == nil || account.Platform != PlatformAnthropic || len(body) == 0 {
+		return
+	}
+	lower := strings.ToLower(string(body))
+	if !strings.Contains(lower, "third-party apps now draw from your extra usage") &&
+		!strings.Contains(lower, "third-party app") {
+		return
+	}
+	slog.Warn("anthropic_third_party_attribution_detected",
+		"account_id", account.ID,
+		"account_name", account.Name,
+		"upstream_status", statusCode,
+		"message", truncateForLog(body, 300))
+}
+
+// claudeOAuthClientSystemPlaceholder 配置块里的占位:整块文本等于它时,在该位置原样展开客户自己的
+// system 块(append 模式)。配置里没有它 → 客户 system 挪进 messages(relocate,现网默认)。
+//
+// 背景:上游项目注释认为"CC 提示词后面接非 CC 内容过不了第三方检测",于是把客户 system 挪进第一条
+// user 消息,副作用是指令从 system 降级为用户消息、多两条消息、客户断点失效。但真实 Claude Code 的
+// --append-system-prompt 与 Agent SDK 自定义 agent 正是在 CC 自己的 system 块之后追加任意 system 块,
+// Anthropic 必然接受这种形态。append 模式按此形态拼:[billing, 身份句, 客户块...],messages 不动。
+// 默认配置不含占位,行为不变;灰度只改 claude_oauth_system_prompt_blocks 配置,热生效,回滚即改回。
+const claudeOAuthClientSystemPlaceholder = "{client_system}"
+
+// extractClientSystemBlocks 把客户的 system 原样拆成块(剔除 Claude Code 身份句,其余字段如
+// cache_control 一并保留);字符串 system 变成单个 text 块。无内容返回 nil。
+func extractClientSystemBlocks(system any) [][]byte {
+	system = normalizeSystemParam(system)
+	switch v := system.(type) {
+	case string:
+		stripped := stripClaudeCodeBanner(v)
+		if stripped == "" {
+			return nil
+		}
+		raw, err := marshalAnthropicSystemTextBlock(stripped, "")
+		if err != nil {
+			return nil
+		}
+		return [][]byte{raw}
+	case []any:
+		out := make([][]byte, 0, len(v))
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			text, _ := m["text"].(string)
+			stripped := stripClaudeCodeBanner(text)
+			if stripped == "" {
+				continue // 整块就是身份句 → 丢弃(我们自己会放一块)
+			}
+			if stripped != strings.TrimSpace(text) {
+				m["text"] = stripped // 身份句开头 + 指令 → 只剔身份句
+			}
+			raw, err := json.Marshal(m)
+			if err != nil {
+				continue
+			}
+			out = append(out, raw)
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	return nil
+}
+
+// buildClaudeOAuthSystemPromptBlocksJSON 按配置生成 system 块。clientBlocks 在遇到
+// claudeOAuthClientSystemPlaceholder 占位块时原样展开;返回 clientInlined 表示客户块已放进 system
+// (调用方据此不再把客户 system 挪进 messages)。占位块在没有客户块时直接跳过。
+func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string, clientBlocks [][]byte) ([][]byte, bool, error) {
 	blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(blocksConfig)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(blocks) == 0 {
 		blocks = defaultClaudeOAuthSystemPromptBlockConfig()
 	}
 
-	items := make([][]byte, 0, len(blocks))
+	items := make([][]byte, 0, len(blocks)+len(clientBlocks))
+	clientInlined := false
 	for i, block := range blocks {
 		if block.Enabled != nil && !*block.Enabled {
 			continue
@@ -4823,28 +4900,35 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 			blockType = "text"
 		}
 		if blockType != "text" {
-			return nil, fmt.Errorf("system block %d type %q is not supported", i, block.Type)
+			return nil, false, fmt.Errorf("system block %d type %q is not supported", i, block.Type)
+		}
+		if strings.TrimSpace(block.Text) == claudeOAuthClientSystemPlaceholder {
+			if len(clientBlocks) > 0 && !clientInlined {
+				items = append(items, clientBlocks...)
+				clientInlined = true
+			}
+			continue
 		}
 		text, err := expandClaudeOAuthSystemPromptTextTemplate(body, block.Text, expansionPrompt)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		cacheControl, err := decodeClaudeOAuthSystemPromptCacheControl(block.CacheControl)
 		if err != nil {
-			return nil, fmt.Errorf("system block %d cache_control: %w", i, err)
+			return nil, false, fmt.Errorf("system block %d cache_control: %w", i, err)
 		}
 		// 我们注入的 system 块排在客户 messages 之前:客户用 1h 时必须也用 1h,否则 400。
 		cacheControl = alignInjectedCacheControlTTL(cacheControl, injectedCacheTTL(body))
 		raw, err := marshalAnthropicSystemTextBlockWithCacheControl(text, cacheControl)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		items = append(items, raw)
 	}
-	return items, nil
+	return items, clientInlined, nil
 }
 
 func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
@@ -4855,6 +4939,7 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 	if err != nil {
 		return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "claude oauth system prompt blocks must be valid JSON")
 	}
+	placeholders := 0
 	for i, block := range blocks {
 		blockType := strings.TrimSpace(block.Type)
 		if blockType == "" {
@@ -4865,6 +4950,15 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 		}
 		if _, err := decodeClaudeOAuthSystemPromptCacheControl(block.CacheControl); err != nil {
 			return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", fmt.Sprintf("system block %d cache_control is invalid", i))
+		}
+		if strings.TrimSpace(block.Text) == claudeOAuthClientSystemPlaceholder {
+			placeholders++
+			if placeholders > 1 {
+				return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "{client_system} placeholder may appear at most once")
+			}
+			if len(block.CacheControl) > 0 {
+				return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "{client_system} placeholder must not carry cache_control (client blocks keep their own)")
+			}
 		}
 	}
 	return nil
@@ -4919,10 +5013,12 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
 	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
 	//    cch（见 buildBillingAttributionText）。
-	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig)
+	//    append 模式(配置含 {client_system} 占位):客户的 system 块原样展开在占位处,messages 不动。
+	clientBlocks := extractClientSystemBlocks(system)
+	systemBlocks, clientInlined, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig, clientBlocks)
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
-		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "")
+		systemBlocks, clientInlined, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "", clientBlocks)
 	}
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
@@ -4932,6 +5028,9 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	if !ok {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to set Claude Code system prompt")
 		return body
+	}
+	if clientInlined {
+		return out
 	}
 
 	// 3. 将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头
@@ -5866,6 +5965,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
+		detectAnthropicThirdPartyAttribution(account, resp.StatusCode, respBody)
 		// 请求级 429(长上下文需付费额度):换哪个号都一样,不 failover、不冷却(handle429 内同样跳过),
 		// 标客户端侧后原样回给客户端。否则一条超大请求会把整个号池逐个冷却(2026-10-09 事故)。
 		if resp.StatusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic &&
@@ -8305,6 +8405,7 @@ func (s *GatewayService) readUpstreamErrorBody(resp *http.Response) ([]byte, err
 
 func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, requestedModel ...string) (*ForwardResult, error) {
 	body, _ := s.readUpstreamErrorBody(resp)
+	detectAnthropicThirdPartyAttribution(account, resp.StatusCode, body)
 
 	// 调试日志：打印上游错误响应
 	logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (non-retryable): Account=%d(%s) Status=%d RequestID=%s Body=%s",
