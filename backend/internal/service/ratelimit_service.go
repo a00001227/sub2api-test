@@ -1572,10 +1572,59 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 }
 
 // UpdateSessionWindow 从成功响应更新5h窗口状态
+// storedUtilizationDormant 按 Extra 里存储的原始利用率(不看窗口是否过期)判断是否处于休眠阈值之上。
+func storedUtilizationDormant(account *Account) bool {
+	if account == nil || account.Extra == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return false
+	}
+	if parseExtraFloat64(account.Extra["session_window_utilization"]) >= pacingUtilizationDormantThreshold5h {
+		return true
+	}
+	return parseExtraFloat64(account.Extra["passive_usage_7d_utilization"]) >= pacingUtilizationDormantThreshold7d
+}
+
+// schedulerAccountChangeNotifier 账号仓储可选实现:给调度快照发账号变更事件(见 accountRepository.NotifySchedulerAccountChanged)。
+type schedulerAccountChangeNotifier interface {
+	NotifySchedulerAccountChanged(ctx context.Context, id int64) error
+}
+
+// notifySchedulerIfDormancyChanged 利用率更新前后休眠状态发生变化(进入或退出休眠)→ 通知调度快照。
+// 以前只能等 300s 全量重建,跨过阈值后的几分钟里网关仍按旧值派单(2026-10-09 实测过线后 4 分钟
+// 还在被选中);退出休眠同理会晚回池子。只在状态翻转时发,平时零开销。
+func (s *RateLimitService) notifySchedulerIfDormancyChanged(ctx context.Context, account *Account, wasDormant bool) {
+	if account == nil || account.GetPacingMode() == "" {
+		return
+	}
+	nowDormant := account.IsUtilizationDormant()
+	if nowDormant == wasDormant {
+		return
+	}
+	notifier, ok := s.accountRepo.(schedulerAccountChangeNotifier)
+	if !ok {
+		return
+	}
+	if err := notifier.NotifySchedulerAccountChanged(ctx, account.ID); err != nil {
+		slog.Warn("utilization_dormancy_notify_failed", "account_id", account.ID, "dormant", nowDormant, "error", err)
+		return
+	}
+	slog.Info("utilization_dormancy_changed",
+		"account_id", account.ID,
+		"dormant", nowDormant,
+		"util_5h", account.GetSessionWindowUtilization(),
+		"util_7d", account.Get7dUtilization())
+}
+
 func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Account, headers http.Header) {
 	status := headers.Get("anthropic-ratelimit-unified-5h-status")
 	if status == "" {
 		return
+	}
+	// 记下更新前的休眠状态;本函数内对 Extra/窗口的改动同步到内存对象,结尾比对后通知快照。
+	// 用"存储原值"而不是 IsUtilizationDormant():窗口刚过期时后者已返回 false,但调度快照可能
+	// 还是过期前算的"休眠",此时新窗口第一条响应必须把它叫回来。
+	wasDormant := account.GetPacingMode() != "" && storedUtilizationDormant(account)
+	if account.Extra == nil {
+		account.Extra = map[string]any{}
 	}
 
 	// 检查是否需要初始化时间窗口
@@ -1627,10 +1676,16 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 			"passive_usage_7d_reset":       nil,
 			"passive_usage_sampled_at":     nil,
 		})
+		for _, k := range []string{"session_window_utilization", "passive_usage_7d_utilization", "passive_usage_7d_reset", "passive_usage_sampled_at"} {
+			delete(account.Extra, k)
+		}
 	}
 
 	if err := s.accountRepo.UpdateSessionWindow(ctx, account.ID, windowStart, windowEnd, status); err != nil {
 		slog.Warn("session_window_update_failed", "account_id", account.ID, "error", err)
+	}
+	if windowEnd != nil {
+		account.SessionWindowStart, account.SessionWindowEnd = windowStart, windowEnd
 	}
 
 	// 被动采样：从响应头收集 5h + 7d utilization，合并为一次 DB 写入
@@ -1661,7 +1716,11 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		}
+		for k, v := range extraUpdates {
+			account.Extra[k] = v
+		}
 	}
+	s.notifySchedulerIfDormancyChanged(ctx, account, wasDormant)
 
 	// 如果状态为allowed且之前有限流，说明窗口已重置，清除限流状态
 	if status == "allowed" && account.IsRateLimited() {

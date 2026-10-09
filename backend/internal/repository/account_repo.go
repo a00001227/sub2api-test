@@ -828,6 +828,13 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 	return nil
 }
 
+// NotifySchedulerAccountChanged 只给调度快照发一条「账号变更」事件,不改任何列。
+// 用途:利用率跨过休眠阈值(进入/退出休眠)时让网关 1 秒内看到,而不是等 300 秒一次的全量重建
+// (UpdateExtra 本身不发事件,否则每次成功响应都会触发一次快照写入)。
+func (r *accountRepository) NotifySchedulerAccountChanged(ctx context.Context, id int64) error {
+	return enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+}
+
 func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg string) error {
 	_, err := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
