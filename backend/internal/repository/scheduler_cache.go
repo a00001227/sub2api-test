@@ -542,6 +542,12 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// Phase 21H quota-budget pacing：调度检查（预算刹车 / EffectiveBaseRPM）
 		// 读这些键；不进白名单则 snapshot 路径下 pacing 静默失效。
 		"pacing_mode",
+		// 利用率休眠 / 降权(IsUtilizationDormant、pacingUtilizationWeight)读这三个键;
+		// 以前不在白名单,snapshot 路径下网关永远看不到利用率 → 库里/Portal 显示"休眠"
+		// 的号照常被选中(2026-10-10 cell2 账号 6,7d 0.79 仍在派单)。
+		"session_window_utilization",
+		"passive_usage_7d_utilization",
+		"passive_usage_7d_reset",
 		"base_rpm",
 		"rpm_strategy",
 		"rpm_sticky_buffer",
