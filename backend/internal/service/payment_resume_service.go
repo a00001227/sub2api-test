@@ -245,6 +245,11 @@ func CanonicalizeReturnURL(raw string, srcHost string, srcURL string) (string, e
 		return "", infraerrors.BadRequest("INVALID_RETURN_URL", "return_url must use http or https")
 	}
 	parsed.Fragment = ""
+	// 用户带的 query 一律丢弃:return_url 会原样进入易支付下单签名串,攻击者可往里藏
+	// trade_status=TRADE_SUCCESS 之类的键复用下单签名伪造回调(Wei-Shaw/sub2api#7881)。
+	// 结果页需要的参数全部由 buildPaymentReturnURL 自己追加。
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	if parsed.Path == "" {
 		parsed.Path = "/"
 	}
@@ -288,7 +293,8 @@ func buildPaymentReturnURL(base string, orderID int64, outTradeNo string, resume
 	}
 	parsed.Fragment = ""
 
-	query := parsed.Query()
+	// 不继承 base 上的任何 query(见 CanonicalizeReturnURL),只放我们自己的键。
+	query := url.Values{}
 	if orderID > 0 {
 		query.Set("order_id", strconv.FormatInt(orderID, 10))
 	}

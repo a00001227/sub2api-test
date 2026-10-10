@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -304,6 +306,20 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 	if sign == "" {
 		return nil, fmt.Errorf("missing sign")
 	}
+	// 签名复用防护(2026-10 公开漏洞,Wei-Shaw/sub2api#7881):签名是 k=v&k=v 明文拼接不转义,
+	// popup 模式下单签名又暴露在付款页 URL 里。攻击者把 trade_status=TRADE_SUCCESS 藏进
+	// return_url 的 query,再把下单签名原样回放到回调,把藏的键"抬"成顶层参数就能对上签名串。
+	// 要对上就必须把 return_url / notify_url 这些只在下单请求里出现的键也带进回调 —— 真实回调
+	// 永远不含它们,出现即拒绝。
+	for _, k := range easyPayCallbackForbiddenKeys {
+		if _, present := params[k]; present {
+			slog.Warn("easypay_callback_rejected_request_only_param", "param", k, "out_trade_no", params["out_trade_no"])
+			return nil, fmt.Errorf("unexpected request-only parameter in callback: %s", k)
+		}
+	}
+	if strings.TrimSpace(params["out_trade_no"]) == "" {
+		return nil, fmt.Errorf("missing out_trade_no")
+	}
 	if !easyPayVerifySign(params, e.config["pkey"], sign) {
 		return nil, fmt.Errorf("invalid signature")
 	}
@@ -324,6 +340,45 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 		TradeNo: params["trade_no"], OrderID: params["out_trade_no"],
 		Amount: amount, Status: status, RawData: rawBody, Metadata: metadata,
 	}, nil
+}
+
+// easyPayCallbackForbiddenKeys 只会出现在下单请求、绝不会出现在支付结果回调里的参数名。
+var easyPayCallbackForbiddenKeys = []string{"return_url", "notify_url"}
+
+// easyPayConfirmAmountTolerance 查单金额与回调金额允许的误差。
+const easyPayConfirmAmountTolerance = 0.01
+
+// ConfirmNotification 回调验签通过后向面板 api.php?act=order 查单,确认订单确已支付且金额一致。
+// 这是签名复用伪造的最后一道闸:就算签名串被凑出来,面板那边没有真实付款记录就不入账。
+// 实例配置 skipQueryConfirm=true 可关闭(仅限面板不支持查单接口的情况,风险自担)。
+func (e *EasyPay) ConfirmNotification(ctx context.Context, n *payment.PaymentNotification) error {
+	if e == nil || n == nil || n.Status != payment.ProviderStatusSuccess {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(e.config["skipQueryConfirm"]), "true") {
+		return nil
+	}
+	outTradeNo := strings.TrimSpace(n.OrderID)
+	if outTradeNo == "" {
+		return fmt.Errorf("easypay confirm: missing out_trade_no")
+	}
+	resp, err := e.QueryOrder(ctx, outTradeNo)
+	if err != nil {
+		return fmt.Errorf("easypay confirm query failed: %w", err)
+	}
+	if resp == nil || resp.Status != payment.ProviderStatusPaid {
+		status := ""
+		if resp != nil {
+			status = resp.Status
+		}
+		slog.Warn("easypay_callback_not_confirmed_by_query", "out_trade_no", outTradeNo, "query_status", status, "callback_amount", n.Amount)
+		return fmt.Errorf("easypay confirm: upstream order %s not paid (status=%q)", outTradeNo, status)
+	}
+	if resp.Amount > 0 && math.Abs(resp.Amount-n.Amount) > easyPayConfirmAmountTolerance {
+		slog.Warn("easypay_callback_amount_mismatch_by_query", "out_trade_no", outTradeNo, "query_amount", resp.Amount, "callback_amount", n.Amount)
+		return fmt.Errorf("easypay confirm: amount mismatch upstream=%v callback=%v", resp.Amount, n.Amount)
+	}
+	return nil
 }
 
 func (e *EasyPay) Refund(ctx context.Context, req payment.RefundRequest) (*payment.RefundResponse, error) {

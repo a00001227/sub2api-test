@@ -69,8 +69,8 @@ func TestCanonicalizeReturnURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
 	}
-	if got != "https://example.com/payment/result?b=2" {
-		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://example.com/payment/result?b=2")
+	if got != "https://example.com/payment/result" {
+		t.Fatalf("CanonicalizeReturnURL = %q, want %q (user query must be dropped)", got, "https://example.com/payment/result")
 	}
 }
 
@@ -101,8 +101,8 @@ func TestCanonicalizeReturnURLAllowsConfiguredFrontendHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
 	}
-	if got != "https://app.example.com/payment/result?from=checkout" {
-		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://app.example.com/payment/result?from=checkout")
+	if got != "https://app.example.com/payment/result" {
+		t.Fatalf("CanonicalizeReturnURL = %q, want %q (user query must be dropped)", got, "https://app.example.com/payment/result")
 	}
 }
 
@@ -130,8 +130,8 @@ func TestBuildPaymentReturnURL(t *testing.T) {
 		t.Fatalf("buildPaymentReturnURL should strip fragments, got %q", parsed.Fragment)
 	}
 	query := parsed.Query()
-	if query.Get("from") != "checkout" {
-		t.Fatalf("expected original query to be preserved, got %q", query.Get("from"))
+	if query.Has("from") {
+		t.Fatalf("base query must not be inherited into return_url, got from=%q", query.Get("from"))
 	}
 	if query.Get("order_id") != strconv.FormatInt(42, 10) {
 		t.Fatalf("order_id = %q", query.Get("order_id"))

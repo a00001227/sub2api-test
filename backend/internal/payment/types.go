@@ -172,6 +172,13 @@ type QueryOrderResponse struct {
 	Metadata map[string]string
 }
 
+// NotificationConfirmer 可选能力:回调验签通过后,再向服务商服务端查单确认该订单确已支付。
+// 用于签名方案弱(明文拼接 MD5、下单签名暴露给付款人)的服务商,签名被复用/伪造时由查单兜底。
+// 返回 error 表示不能入账(查单未支付 / 金额不符 / 查单失败),调用方应回非成功响应让服务商重试。
+type NotificationConfirmer interface {
+	ConfirmNotification(ctx context.Context, n *PaymentNotification) error
+}
+
 // PaymentNotification is the parsed result of a webhook/notify callback.
 type PaymentNotification struct {
 	TradeNo  string
