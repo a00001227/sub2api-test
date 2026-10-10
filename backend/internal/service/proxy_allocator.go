@@ -25,7 +25,16 @@ var (
 	ErrRegionRequired = infraerrors.BadRequest("REGION_REQUIRED", "region is required")
 	// ErrRegionNoCapacity 该区域没有可分配的活跃代理。
 	ErrRegionNoCapacity = infraerrors.NotFound("REGION_NO_CAPACITY", "no active proxy available in region")
+	// ErrOwnedProxyNotSynced 自有代理地区(OWN-<id>)在本 cell 的代理表里找不到该代理。
+	// 自有代理必须精确命中,绝不能像普通地区那样在边缘 cell 降级为本机直连:本机是 AWS 出口,
+	// claude.ai 直接弹 Cloudflare 挑战页,即便侥幸成功账号也会被绑在错误的出口上
+	// (2026-10-10 cell6 导入 proxy_used=false → 403 "Just a moment")。
+	ErrOwnedProxyNotSynced = infraerrors.NotFound("OWNED_PROXY_NOT_FOUND",
+		"owned proxy for this region is not synced to this cell; refusing to import over the cell's own egress")
 )
+
+// ownedProxyRegionPrefix Portal 为自有代理合成的专属地区码前缀(见 ProviderAccountProxyService)。
+const ownedProxyRegionPrefix = "OWN-"
 
 // ProxyAllocationRepository 是分配器需要的最小仓储面。
 // SelectLeastLoadedActiveProxyForUpdate 必须在单事务内以
@@ -73,11 +82,11 @@ func capacityTierFromSlots(slots int) RegionCapacityTier {
 // 只含 region code / 展示名 / 容量档位；绝不含 proxy_id / IP / host / 供应商，
 // 也不含精确名额数字（只给 ample/limited/full 档位，防止容量底细外泄）。
 type AvailableRegion struct {
-	ID        string             `json:"id"`       // region code（IATA-style，如 lax/sgp/nrt 或存量 US）
-	Label     string             `json:"label"`    // 展示名（城市），未知 code 回退为 code 本身
-	LabelZh   string             `json:"label_zh"` // 中文展示名（来自 region 字典表），无则回退 code
-	Available bool               `json:"available"`// 是否还有名额（capacity != full）
-	Capacity  RegionCapacityTier `json:"capacity"` // 脱敏容量档位：ample / limited / full
+	ID        string             `json:"id"`        // region code（IATA-style，如 lax/sgp/nrt 或存量 US）
+	Label     string             `json:"label"`     // 展示名（城市），未知 code 回退为 code 本身
+	LabelZh   string             `json:"label_zh"`  // 中文展示名（来自 region 字典表），无则回退 code
+	Available bool               `json:"available"` // 是否还有名额（capacity != full）
+	Capacity  RegionCapacityTier `json:"capacity"`  // 脱敏容量档位：ample / limited / full
 	// AvailableSlots 是内部精确名额，仅供服务内/测试使用；json:"-" 确保它
 	// 绝不出网关（脱敏边界）。
 	AvailableSlots int `json:"-"`
@@ -256,6 +265,10 @@ func (a *ProxyAllocator) SelectProxy(ctx context.Context, region, platform strin
 		return nil, err
 	}
 	if proxy == nil {
+		// 自有代理地区:找不到就是同步问题,任何模式都不降级直连。
+		if strings.HasPrefix(region, ownedProxyRegionPrefix) {
+			return nil, ErrOwnedProxyNotSynced.WithMetadata(map[string]string{"region": region, "platform": platform})
+		}
 		// 边缘 cell:没配代理就直连(cell 本机出口即该地区出口);中央:铁律不降级。
 		if a.edgeMode {
 			return nil, nil

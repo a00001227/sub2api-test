@@ -46,7 +46,7 @@ func okInput() ImportCredentialInput {
 	return ImportCredentialInput{
 		ExternalProviderAccountID: "pa_abc123",
 		ProviderType:              "claude",
-		Credential:                "sk-ant-session-SECRET-VALUE",
+		Credential:                "sk-ant-sid01-session-SECRET-VALUE",
 		Region:                    "us",
 	}
 }
@@ -256,7 +256,7 @@ func TestImport_WebhookNoCredential(t *testing.T) {
 	svc := newImportSvc(accounts, alloc, cookie, wh)
 
 	in := okInput()
-	in.Credential = "sk-ant-session-DO-NOT-LEAK"
+	in.Credential = "sk-ant-sid01-session-DO-NOT-LEAK"
 	_, err := svc.ImportCredential(context.Background(), in)
 	require.NoError(t, err)
 	require.Len(t, wh.sent, 1)
