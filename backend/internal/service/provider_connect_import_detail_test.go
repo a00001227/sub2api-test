@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
@@ -126,4 +127,72 @@ func TestRedactImportDetail(t *testing.T) {
 	require.NotContains(t, got, "u:p@")
 	require.Contains(t, got, "sk-***")
 	require.Contains(t, got, "socks5://***@1.2.3.4:1080")
+}
+
+type fakeCodexProber struct {
+	err       error
+	calls     int
+	gotProxy  string
+	gotAcctID string
+}
+
+func (f *fakeCodexProber) ProbeCodexCredential(_ context.Context, _ string, acctID, proxyURL string) error {
+	f.calls++
+	f.gotAcctID = acctID
+	f.gotProxy = proxyURL
+	return f.err
+}
+
+// Codex 导入:建号前经分配代理探测;上游拒绝 → 不建号,原因原样透出。
+func TestImport_CodexProbe(t *testing.T) {
+	jwt := makeCodexJWT(t, map[string]any{"exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acc-9"}})
+
+	t.Run("probe rejects", func(t *testing.T) {
+		accounts := newFakeConnectAccountRepo()
+		alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive, Protocol: "socks5", Host: "10.0.0.1", Port: 1080}}, nil)
+		prober := &fakeCodexProber{err: errors.New(`upstream HTTP 401: API keys are not supported by this endpoint.`)}
+		svc := newImportSvc(accounts, alloc, &fakeCookieAuth{}, &fakeWebhookNotifier{})
+		svc.codexProbe = prober
+
+		in := okInput()
+		in.ProviderType = "codex"
+		in.Credential = jwt
+		_, err := svc.ImportCredential(context.Background(), in)
+		appErr := importAppErr(t, err)
+		require.Contains(t, appErr.Message, "API keys are not supported")
+		require.Equal(t, "probe", appErr.Metadata["stage"])
+		require.Equal(t, 1, prober.calls)
+		require.Equal(t, "acc-9", prober.gotAcctID)
+		require.Contains(t, prober.gotProxy, "socks5://10.0.0.1:1080", "探测必须走分配的代理")
+		require.Equal(t, 0, accounts.createN, "上游拒绝不建号")
+	})
+
+	t.Run("probe accepts", func(t *testing.T) {
+		accounts := newFakeConnectAccountRepo()
+		alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
+		prober := &fakeCodexProber{}
+		svc := newImportSvc(accounts, alloc, &fakeCookieAuth{}, &fakeWebhookNotifier{})
+		svc.codexProbe = prober
+
+		in := okInput()
+		in.ProviderType = "codex"
+		in.Credential = jwt
+		res, err := svc.ImportCredential(context.Background(), in)
+		require.NoError(t, err)
+		require.Equal(t, "active", res.Status)
+		require.Equal(t, 1, prober.calls)
+		require.Equal(t, 1, accounts.createN)
+	})
+}
+
+// sessionKey 导入只申请最小 scope("import"),不再要 Claude Code 的提升权限。
+func TestImport_ClaudeUsesMinimalScope(t *testing.T) {
+	accounts := newFakeConnectAccountRepo()
+	alloc := NewProxyAllocator(&fakeAllocationRepo{proxy: &Proxy{ID: 1, Status: StatusActive}}, nil)
+	cookie := &fakeCookieAuth{token: &TokenInfo{AccessToken: "at", RefreshToken: "rt", ExpiresAt: 1}}
+	svc := newImportSvc(accounts, alloc, cookie, &fakeWebhookNotifier{})
+
+	_, err := svc.ImportCredential(context.Background(), okInput())
+	require.NoError(t, err)
+	require.Equal(t, "import", cookie.gotScope)
 }

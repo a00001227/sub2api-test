@@ -29,6 +29,12 @@ const (
 	ScopeAPI = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 	// Scopes - Setup token (inference only)
 	ScopeInference = "user:inference"
+	// Scopes - sessionKey 导入/重授权(Provider Connect)用的最小 scope。
+	// ScopeAPI 里的 user:sessions:claude_code / user:mcp_servers / user:file_upload 是 Claude Code
+	// 客户端才用的"提升权限",Anthropic 要求会话是近期登录的,老 sessionKey 会被拒
+	// ("Session is not fresh enough to grant elevated access");中转跑量只需 inference + profile,
+	// 其他平台导入也只申请这两项,同一个 key 在那边能过、在我们这儿不能(2026-10-10 JNB 5 个号)。
+	ScopeSessionKeyImport = "user:profile user:inference"
 
 	// Session TTL
 	SessionTTL = 30 * time.Minute

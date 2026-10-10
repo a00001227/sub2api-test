@@ -164,7 +164,7 @@ func (s *ProviderConnectReauthService) ReauthWithSessionKey(
 	tokenInfo, err := s.cookie.CookieAuth(ctx, &CookieAuthInput{
 		SessionKey: strings.TrimSpace(sessionKey),
 		ProxyID:    acc.ProxyID,
-		Scope:      "full",
+		Scope:      "import",
 	})
 	if err != nil || tokenInfo == nil || strings.TrimSpace(tokenInfo.AccessToken) == "" {
 		return nil, ErrImportInvalidCredential

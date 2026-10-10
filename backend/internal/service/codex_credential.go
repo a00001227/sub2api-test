@@ -158,7 +158,13 @@ func enrichCodexCredFromJWT(out *CodexCredential, token string, validateExpiry b
 	claims, err := decodeCodexCredJWTClaims(token)
 	if err != nil {
 		if validateExpiry {
-			out.Warnings = append(out.Warnings, "accessToken 不是可解析 JWT,无法校验过期时间和账号身份")
+			// access_token 必须是 ChatGPT OAuth 签发的 JWT(eyJ… 三段)。以前非 JWT 只记警告照样建号,
+			// 结果 Claude 的 sessionKey(sk-ant-sid01-…)能"成功"导成 Codex 号,测试时才 401
+			// api_key_not_supported(2026-10-10)。这里直接拒,并把类型说清楚。
+			if strings.HasPrefix(token, "sk-") {
+				return errors.New("access_token looks like an API key (sk-…), not a ChatGPT OAuth access_token; Codex accounts need the OAuth JWT from the Codex CLI login (or the codex session JSON)")
+			}
+			return fmt.Errorf("access_token is not a decodable ChatGPT OAuth JWT (%v); expected the OAuth JWT from the Codex CLI login or the codex session JSON", err)
 		}
 		return nil
 	}

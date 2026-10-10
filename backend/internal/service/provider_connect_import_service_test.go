@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
@@ -20,6 +21,7 @@ type fakeCookieAuth struct {
 	err        error
 	gotSession string // 记录收到的 sessionKey（仅测试内断言，不外泄）
 	gotProxyID *int64
+	gotScope   string
 	callN      int
 }
 
@@ -27,6 +29,7 @@ func (f *fakeCookieAuth) CookieAuth(_ context.Context, in *CookieAuthInput) (*To
 	f.callN++
 	f.gotSession = in.SessionKey
 	f.gotProxyID = in.ProxyID
+	f.gotScope = in.Scope
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -220,7 +223,7 @@ func TestImport_CodexSuccess(t *testing.T) {
 
 	in := okInput()
 	in.ProviderType = "codex"
-	in.Credential = "codex-access-token-opaque" // 非 JWT:解析成 access_token,带警告但成功
+	in.Credential = makeCodexJWT(t, map[string]any{"exp": time.Now().Add(time.Hour).Unix(), "email": "codex@example.com", "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acc-1"}})
 
 	res, err := svc.ImportCredential(context.Background(), in)
 	require.NoError(t, err)

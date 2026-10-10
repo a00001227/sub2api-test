@@ -83,6 +83,8 @@ type ProviderConnectImportService struct {
 	allocator *ProxyAllocator
 	cookie    connectCookieAuthenticator
 	webhook   ProviderWebhookNotifier // 可为 nil（未配置时不通知）
+	// codexProbe 建号前经分配代理向 ChatGPT Codex 后端验一次 access_token;nil = 跳过(仅测试)。
+	codexProbe codexCredentialProber
 }
 
 // NewProviderConnectImportService creates the service.
@@ -93,10 +95,11 @@ func NewProviderConnectImportService(
 	webhook ProviderWebhookNotifier,
 ) *ProviderConnectImportService {
 	return &ProviderConnectImportService{
-		accounts:  accounts,
-		allocator: allocator,
-		cookie:    oauth,
-		webhook:   webhook,
+		accounts:   accounts,
+		allocator:  allocator,
+		cookie:     oauth,
+		webhook:    webhook,
+		codexProbe: liveCodexCredentialProber{},
 	}
 }
 
@@ -167,7 +170,7 @@ func (s *ProviderConnectImportService) ImportCredential(
 		tokenInfo, cerr := s.cookie.CookieAuth(ctx, &CookieAuthInput{
 			SessionKey: in.Credential,
 			ProxyID:    proxyID,
-			Scope:      "full",
+			Scope:      "import",
 		})
 		if cerr != nil || tokenInfo == nil || strings.TrimSpace(tokenInfo.AccessToken) == "" {
 			// The response stays a stable INVALID_CREDENTIAL (no leak). But the
@@ -201,6 +204,24 @@ func (s *ProviderConnectImportService) ImportCredential(
 				detail = "codex credential rejected: " + logredact.RedactText(perr.Error())
 			}
 			return nil, importInvalidCredential("parse", detail, map[string]string{"region": region})
+		}
+		// 和 Claude 对齐:建号前经"将来跑量的那个出口"向 ChatGPT Codex 后端打一次探测,
+		// 上游不认就不建号,不再出现"导入成功、上来就失效"的号。
+		if s.codexProbe != nil {
+			accessToken, _ := parsed.Credentials["access_token"].(string)
+			proxyURL := ""
+			if proxy != nil {
+				proxyURL = proxy.URL()
+			}
+			if perr := s.codexProbe.ProbeCodexCredential(ctx, accessToken, parsed.AccountID, proxyURL); perr != nil {
+				slog.WarnContext(ctx, "provider_connect.import.codex_probe_failed",
+					"external_ref", accountRef,
+					"region", region,
+					"proxy_used", proxyID != nil,
+					"reason", redactImportDetail(perr.Error()))
+				return nil, importInvalidCredential("probe", "ChatGPT Codex backend rejected the credential: "+perr.Error(),
+					map[string]string{"region": region, "proxy_used": strconv.FormatBool(proxyID != nil)})
+			}
 		}
 		credentials = parsed.Credentials
 		email = parsed.Email

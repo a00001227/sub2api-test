@@ -119,15 +119,15 @@ type ExchangeCodeInput struct {
 
 // TokenInfo represents the token information stored in credentials
 type TokenInfo struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int64  `json:"expires_in"`
-	ExpiresAt    int64  `json:"expires_at"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	Scope        string `json:"scope,omitempty"`
-	OrgUUID      string `json:"org_uuid,omitempty"`
-	AccountUUID  string `json:"account_uuid,omitempty"`
-	EmailAddress string `json:"email_address,omitempty"`
+	AccessToken   string `json:"access_token"`
+	TokenType     string `json:"token_type"`
+	ExpiresIn     int64  `json:"expires_in"`
+	ExpiresAt     int64  `json:"expires_at"`
+	RefreshToken  string `json:"refresh_token,omitempty"`
+	Scope         string `json:"scope,omitempty"`
+	OrgUUID       string `json:"org_uuid,omitempty"`
+	AccountUUID   string `json:"account_uuid,omitempty"`
+	EmailAddress  string `json:"email_address,omitempty"`
 	RateLimitTier string `json:"rate_limit_tier,omitempty"` // Anthropic 订阅等级，如 default_claude_max_20x
 }
 
@@ -167,7 +167,7 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 type CookieAuthInput struct {
 	SessionKey string
 	ProxyID    *int64
-	Scope      string // "full" or "inference"
+	Scope      string // "full"(ScopeAPI)、"inference"(setup token)或 "import"(ScopeSessionKeyImport,最小 scope)
 }
 
 // CookieAuth performs OAuth using sessionKey (cookie-based auto-auth)
@@ -185,9 +185,12 @@ func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (
 	// Internal API call uses ScopeAPI (org:create_api_key not supported)
 	scope := oauth.ScopeAPI
 	isSetupToken := false
-	if input.Scope == "inference" {
+	switch input.Scope {
+	case "inference":
 		scope = oauth.ScopeInference
 		isSetupToken = true
+	case "import":
+		scope = oauth.ScopeSessionKeyImport
 	}
 
 	// Step 1: Get organization info using sessionKey
