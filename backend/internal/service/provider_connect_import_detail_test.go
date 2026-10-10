@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -29,10 +30,20 @@ func TestImport_ClaudeSessionKeyPrefixRejected(t *testing.T) {
 	in.Credential = "sk-ant-api03-not-a-session-key"
 	_, err := svc.ImportCredential(context.Background(), in)
 	appErr := importAppErr(t, err)
-	require.Contains(t, appErr.Message, "sk-ant-sid01-")
+	require.Contains(t, appErr.Message, "sk-ant-sid")
 	require.Equal(t, "format", appErr.Metadata["stage"])
 	require.Equal(t, 0, cookie.callN, "格式错不应打上游")
 	require.Equal(t, 0, accounts.createN)
+
+	// sid01 / sid02 都是真实前缀,必须放行到上游
+	for i, prefix := range []string{"sk-ant-sid01-", "sk-ant-sid02-"} {
+		cookie.callN = 0
+		in.ExternalProviderAccountID = "pa_prefix_" + strconv.Itoa(i) // 避开幂等预查命中上一轮建的号
+		in.Credential = prefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		_, err = svc.ImportCredential(context.Background(), in)
+		require.NoError(t, err, prefix)
+		require.Equal(t, 1, cookie.callN, prefix)
+	}
 }
 
 // 上游原因要原样(脱敏后)透出:Cloudflare 挑战页 / 会话不够新 / 网络层失败,各自可区分。

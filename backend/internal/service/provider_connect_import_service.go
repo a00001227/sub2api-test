@@ -162,9 +162,9 @@ func (s *ProviderConnectImportService) ImportCredential(
 	var email, plan string
 	switch platform {
 	case PlatformAnthropic:
-		if !strings.HasPrefix(strings.TrimSpace(in.Credential), claudeSessionKeyPrefix) {
+		if !claudeSessionKeyRe.MatchString(strings.TrimSpace(in.Credential)) {
 			return nil, importInvalidCredential("format",
-				"claude sessionKey format invalid: expected a key starting with "+claudeSessionKeyPrefix+" (copied from claude.ai cookie sessionKey)",
+				"claude sessionKey format invalid: expected a key starting with sk-ant-sidNN- (e.g. sk-ant-sid01- / sk-ant-sid02-, copied from the claude.ai cookie sessionKey)",
 				map[string]string{"region": region, "proxy_used": strconv.FormatBool(proxyID != nil)})
 		}
 		tokenInfo, cerr := s.cookie.CookieAuth(ctx, &CookieAuthInput{
@@ -268,8 +268,9 @@ func (s *ProviderConnectImportService) ImportCredential(
 	return &ImportCredentialResult{Status: "active", Sub2apiAccountID: accountID}, nil
 }
 
-// claudeSessionKeyPrefix claude.ai 的 sessionKey cookie 固定前缀。
-const claudeSessionKeyPrefix = "sk-ant-sid01-"
+// claudeSessionKeyRe claude.ai 的 sessionKey cookie 前缀:sk-ant-sid<两位版本号>-,线上已见 sid01 和 sid02,
+// 版本号不写死(2026-10-10 写死 sid01 把 sid02 的真 key 拦了)。
+var claudeSessionKeyRe = regexp.MustCompile(`^sk-ant-sid\d{2}-`)
 
 // importInvalidCredential 构造带真实(已脱敏)原因的 INVALID_CREDENTIAL 错误。
 //
