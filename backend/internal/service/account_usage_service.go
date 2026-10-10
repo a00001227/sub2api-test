@@ -665,6 +665,8 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if err != nil {
 		return nil, err
 	}
+	// 探测 2xx 且头部说窗口没满 → 解除陈旧限流(渠道商重新授权/额度恢复后不用再等到旧到期时间)。
+	clearStaleOpenAIRateLimitOnSuccess(ctx, s.accountRepo, account, resp.StatusCode, ParseCodexRateLimitHeaders(resp.Header))
 	if len(updates) > 0 {
 		s.persistOpenAICodexProbeSnapshot(account.ID, updates)
 		return updates, nil

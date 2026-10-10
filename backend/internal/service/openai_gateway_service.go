@@ -3105,6 +3105,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if account.Type == AccountTypeOAuth {
 			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
+				clearStaleOpenAIRateLimitOnSuccess(ctx, s.accountRepo, account, resp.StatusCode, snapshot)
 			}
 		}
 
@@ -3340,6 +3341,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 	if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 		s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
+		clearStaleOpenAIRateLimitOnSuccess(ctx, s.accountRepo, account, resp.StatusCode, snapshot)
 	}
 
 	if usage == nil {
@@ -6480,6 +6482,64 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	}
 
 	return updates
+}
+
+// codexSnapshotShowsCapacity 上游 x-codex 头里 5h / 7d 用量都低于 100%(且至少有一个窗口给了数据)。
+func codexSnapshotShowsCapacity(snapshot *OpenAICodexUsageSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+	normalized := snapshot.Normalize()
+	if normalized == nil {
+		return false
+	}
+	hasData := false
+	if normalized.Used5hPercent != nil {
+		hasData = true
+		if *normalized.Used5hPercent >= 100 {
+			return false
+		}
+	}
+	if normalized.Used7dPercent != nil {
+		hasData = true
+		if *normalized.Used7dPercent >= 100 {
+			return false
+		}
+	}
+	return hasData
+}
+
+// openAIRateLimitClearer 清除账号限流的最小依赖(accountRepo 实现;仓储层会顺带发调度事件)。
+type openAIRateLimitClearer interface {
+	ClearRateLimit(ctx context.Context, id int64) error
+}
+
+// clearStaleOpenAIRateLimitOnSuccess Codex 号仍标记限流、但本次 2xx 响应的 x-codex 头说两个窗口都没满
+// → 清除限流(含调度事件),返回是否清了。
+//
+// 背景(2026-10-10 cell2 账号 2):定时测号 09:40~10:20 连续拿到上游 usage_limit_reached(周额度,
+// 冷却到 10/14),之后渠道商重新授权,12:00 探测已 200 且用量 0%,但没有任何路径会解除旧限流,
+// 号要一直挂到 10/14 才回池。Claude 号有 clearStaleRateLimitOnTestSuccess,Codex 补齐同样的语义:
+// 网关正常响应 / 用量探测 / 手动与定时测号三条路径都走这里。只认 2xx,429 自带的 <100% 头不算。
+func clearStaleOpenAIRateLimitOnSuccess(ctx context.Context, repo openAIRateLimitClearer, account *Account, statusCode int, snapshot *OpenAICodexUsageSnapshot) bool {
+	if repo == nil || account == nil || account.Platform != PlatformOpenAI || !account.IsRateLimited() {
+		return false
+	}
+	if statusCode < 200 || statusCode >= 300 || !codexSnapshotShowsCapacity(snapshot) {
+		return false
+	}
+	previousResetAt := account.RateLimitResetAt
+	if err := repo.ClearRateLimit(ctx, account.ID); err != nil {
+		slog.Warn("openai_clear_stale_rate_limit_failed", "account_id", account.ID, "error", err)
+		return false
+	}
+	account.RateLimitedAt = nil
+	account.RateLimitResetAt = nil
+	slog.Info("openai_cleared_stale_rate_limit",
+		"account_id", account.ID,
+		"previous_reset_at", previousResetAt,
+		"status_code", statusCode)
+	return true
 }
 
 // updateCodexUsageSnapshot saves the Codex usage snapshot to account's Extra field

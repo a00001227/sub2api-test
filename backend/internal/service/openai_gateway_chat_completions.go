@@ -329,6 +329,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if handleErr == nil && account.Type == AccountTypeOAuth {
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
+			clearStaleOpenAIRateLimitOnSuccess(ctx, s.accountRepo, account, resp.StatusCode, snapshot)
 		}
 	}
 

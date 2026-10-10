@@ -717,6 +717,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
 			mergeAccountExtra(account, updates)
 		}
+		clearStaleOpenAIRateLimitOnSuccess(ctx, s.accountRepo, account, resp.StatusCode, ParseCodexRateLimitHeaders(resp.Header))
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -780,6 +781,10 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) request failed: %s", err.Error()))
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if s.accountRepo != nil {
+		clearStaleOpenAIRateLimitOnSuccess(ctx, s.accountRepo, account, resp.StatusCode, ParseCodexRateLimitHeaders(resp.Header))
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -897,6 +902,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
+		clearStaleOpenAIRateLimitOnSuccess(ctx, s.accountRepo, account, resp.StatusCode, ParseCodexRateLimitHeaders(resp.Header))
 	}
 
 	if resp.StatusCode != http.StatusOK {
