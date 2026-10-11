@@ -1719,7 +1719,10 @@ func (h *OAuthHandler) CookieAuth(c *gin.Context) {
 	tokenInfo, err := h.oauthService.CookieAuth(c.Request.Context(), &service.CookieAuthInput{
 		SessionKey: req.SessionKey,
 		ProxyID:    req.ProxyID,
-		Scope:      "full",
+		// Session-key imports only need the inference/profile scopes. Requesting
+		// the full Claude Code scope makes older, otherwise valid sessions fail
+		// with "Session is not fresh enough to grant elevated access".
+		Scope: "import",
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
