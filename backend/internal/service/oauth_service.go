@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -172,6 +173,11 @@ type CookieAuthInput struct {
 
 // CookieAuth performs OAuth using sessionKey (cookie-based auto-auth)
 func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (*TokenInfo, error) {
+	// Session keys are often copied from Markdown/log output where underscores
+	// are escaped as "\\_". Claude receives this value as an exact cookie, so
+	// normalize that harmless presentation escape before making any request.
+	input.SessionKey = strings.ReplaceAll(strings.TrimSpace(input.SessionKey), `\_`, `_`)
+
 	// Get proxy URL if specified
 	var proxyURL string
 	if input.ProxyID != nil {
