@@ -104,17 +104,18 @@ func TestEasyPayConfirmNotification(t *testing.T) {
 		{"paid and amount matches", `{"code":1,"trade_status":"TRADE_SUCCESS","money":"650.00","trade_no":"T1"}`, 200, ""},
 		{"paid via status=1", `{"code":1,"status":1,"money":"650.00"}`, 200, ""},
 		{"not paid", `{"code":1,"trade_status":"TRADE_CLOSED","money":"650.00"}`, 200, "not paid"},
-		{"order missing", `{"code":-1,"msg":"订单不存在"}`, 200, "not paid"},
+		{"order missing", `{"code":-1,"msg":"订单不存在"}`, 200, "query failed"},
+		{"panel act rejection", `{"code":-5,"msg":"No Act!"}`, 200, "query failed"},
 		{"amount mismatch", `{"code":1,"trade_status":"TRADE_SUCCESS","money":"1.00"}`, 200, "amount mismatch"},
 		{"panel error", `oops`, 500, "query failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var gotOutTradeNo, gotAct string
+			var gotMethod, gotOutTradeNo, gotAct string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = r.ParseForm()
-				gotOutTradeNo = r.Form.Get("out_trade_no")
-				gotAct = r.Form.Get("act")
+				gotMethod = r.Method
+				gotOutTradeNo = r.URL.Query().Get("out_trade_no")
+				gotAct = r.URL.Query().Get("act")
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			}))
@@ -122,6 +123,8 @@ func TestEasyPayConfirmNotification(t *testing.T) {
 			e := newForgedTestEasyPay(t, srv.URL, nil)
 
 			err := e.ConfirmNotification(context.Background(), successNotification())
+			// 自建面板 api.php 只读 $_GET(POST 会回 No Act!),查单必须 GET。
+			require.Equal(t, http.MethodGet, gotMethod)
 			require.Equal(t, "order", gotAct)
 			require.Equal(t, "ORDER123", gotOutTradeNo)
 			if tc.wantErr == "" {

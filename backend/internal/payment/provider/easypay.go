@@ -225,31 +225,44 @@ func (e *EasyPay) resolveURLs(req payment.CreatePaymentRequest) (string, string)
 }
 
 func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.QueryOrderResponse, error) {
-	params := map[string]string{
-		"act": "order", "pid": e.config["pid"],
-		"key": e.config["pkey"], "out_trade_no": tradeNo,
-	}
-	body, err := e.post(ctx, e.apiBase()+"/api.php", params)
+	// 查单必须按易支付文档走 GET、参数全放 URL query:自建/彩虹系面板的 api.php 只从
+	// $_GET 读参数,act 放进 POST body 会被回 {"code":-5,"msg":"No Act!"}
+	// (对照:同文件 Refund 一直把 act 拼在 URL 上,所以退款从来是通的)。
+	q := url.Values{}
+	q.Set("act", "order")
+	q.Set("pid", e.config["pid"])
+	q.Set("key", e.config["pkey"])
+	q.Set("out_trade_no", tradeNo)
+	body, err := e.get(ctx, e.apiBase()+"/api.php?"+q.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("easypay query: %w", err)
 	}
 	type easyPayQueryData struct {
-		TradeStatus *string `json:"trade_status"`
-		Status      *int    `json:"status"`
-		Money       *string `json:"money"`
-		TradeNo     *string `json:"trade_no"`
+		TradeStatus *string            `json:"trade_status"`
+		Status      *easyPayFlexInt    `json:"status"`
+		Money       *easyPayFlexString `json:"money"`
+		TradeNo     *easyPayFlexString `json:"trade_no"`
 	}
 	var resp struct {
-		Code        int              `json:"code"`
-		Msg         string           `json:"msg"`
-		TradeStatus *string          `json:"trade_status"`
-		Status      *int             `json:"status"`
-		Money       *string          `json:"money"`
-		TradeNo     *string          `json:"trade_no"`
-		Data        easyPayQueryData `json:"data"`
+		Code        any                `json:"code"`
+		Msg         string             `json:"msg"`
+		TradeStatus *string            `json:"trade_status"`
+		Status      *easyPayFlexInt    `json:"status"`
+		Money       *easyPayFlexString `json:"money"`
+		TradeNo     *easyPayFlexString `json:"trade_no"`
+		Data        easyPayQueryData   `json:"data"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("easypay parse query: %w", err)
+		return nil, fmt.Errorf("easypay parse query (body: %s): %w", summarizeEasyPayResponse(body), err)
+	}
+	// code 不是成功码必须报错,不能静默当「未支付」:面板不支持查单/参数错误时所有业务
+	// 字段都是空,若落回 pending 会被 ConfirmNotification 误判成未付款,把真回调拒之门外。
+	if resp.Code != nil && !easyPayResponseCodeIsSuccess(resp.Code) {
+		msg := strings.TrimSpace(resp.Msg)
+		if msg == "" {
+			msg = summarizeEasyPayResponse(body)
+		}
+		return nil, fmt.Errorf("easypay query failed (code=%v): %s", resp.Code, msg)
 	}
 	status := payment.ProviderStatusPending
 	if resp.TradeStatus != nil {
@@ -261,26 +274,26 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 			status = payment.ProviderStatusPaid
 		}
 	} else if resp.Status != nil {
-		if *resp.Status == easypayStatusPaid {
+		if int(*resp.Status) == easypayStatusPaid {
 			status = payment.ProviderStatusPaid
 		}
-	} else if resp.Data.Status != nil && *resp.Data.Status == easypayStatusPaid {
+	} else if resp.Data.Status != nil && int(*resp.Data.Status) == easypayStatusPaid {
 		status = payment.ProviderStatusPaid
 	}
 
 	money := ""
 	if resp.Money != nil {
-		money = *resp.Money
+		money = string(*resp.Money)
 	} else if resp.Data.Money != nil {
-		money = *resp.Data.Money
+		money = string(*resp.Data.Money)
 	}
 	responseTradeNo := tradeNo
 	if resp.TradeNo != nil {
 		if *resp.TradeNo != "" {
-			responseTradeNo = *resp.TradeNo
+			responseTradeNo = string(*resp.TradeNo)
 		}
 	} else if resp.Data.TradeNo != nil && *resp.Data.TradeNo != "" {
-		responseTradeNo = *resp.Data.TradeNo
+		responseTradeNo = string(*resp.Data.TradeNo)
 	}
 
 	amount, _ := strconv.ParseFloat(money, 64)
@@ -290,6 +303,40 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 		Amount:   amount,
 		Metadata: e.MerchantIdentityMetadata(),
 	}, nil
+}
+
+// easyPayFlexInt 兼容把数字回成字符串的面板("status":"1" 与 "status":1 等价)。
+type easyPayFlexInt int
+
+func (f *easyPayFlexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return fmt.Errorf("easypay numeric field %q: %w", s, err)
+	}
+	*f = easyPayFlexInt(n)
+	return nil
+}
+
+// easyPayFlexString 兼容把字符串回成数字的面板("money":12.34 与 "money":"12.34" 等价)。
+type easyPayFlexString string
+
+func (f *easyPayFlexString) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*f = easyPayFlexString(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err == nil {
+		*f = easyPayFlexString(n.String())
+		return nil
+	}
+	return fmt.Errorf("easypay string field: unsupported value %s", summarizeEasyPayResponse(b))
 }
 
 func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[string]string) (*payment.PaymentNotification, error) {
@@ -546,6 +593,19 @@ func (e *EasyPay) postRaw(ctx context.Context, endpoint string, params map[strin
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return e.doRequest(req)
+}
+
+func (e *EasyPay) get(ctx context.Context, endpoint string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	body, _, err := e.doRequest(req)
+	return body, err
+}
+
+func (e *EasyPay) doRequest(req *http.Request) ([]byte, int, error) {
 	client := e.httpClient
 	if client == nil {
 		client = &http.Client{Timeout: easypayHTTPTimeout}
