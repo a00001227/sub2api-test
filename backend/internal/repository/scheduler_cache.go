@@ -548,6 +548,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"session_window_utilization",
 		"passive_usage_7d_utilization",
 		"passive_usage_7d_reset",
+		// 手动唤醒覆盖(Portal「唤醒」):IsUtilizationDormant 读它,不进白名单则 snapshot 路径下唤醒无效。
+		"utilization_dormancy_override_until",
 		"base_rpm",
 		"rpm_strategy",
 		"rpm_sticky_buffer",

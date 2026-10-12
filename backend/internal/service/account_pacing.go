@@ -249,14 +249,55 @@ func (a *Account) PacingSelectionWeight() float64 {
 		(u7 >= pacingDownweightThreshold && u7 < pacingUtilizationDormantThreshold7d) {
 		return pacingDownweightFactor
 	}
+	// 手动唤醒覆盖期内达休眠阈值的号没有被排除,但余量已经很少:仍按降权带对待,
+	// 让低利用率的号优先吃新流量,唤醒只是"能用"不是"优先用"。
+	if a.IsUtilizationDormancyOverridden() &&
+		(u5 >= pacingUtilizationDormantThreshold5h || u7 >= pacingUtilizationDormantThreshold7d) {
+		return pacingDownweightFactor
+	}
 	return 1.0
+}
+
+// ExtraKeyUtilizationDormancyOverrideUntil 手动唤醒覆盖键(unix 秒)。Portal 点「唤醒」后写入,
+// 到期前 IsUtilizationDormant 一律返回 false(降权仍按利用率算)。到期自动失效,回归正常休眠逻辑,
+// 不会永久关掉 7d 硬封保护。调度快照读它,必须在 scheduler_cache.filterSchedulerExtra 白名单里。
+const ExtraKeyUtilizationDormancyOverrideUntil = "utilization_dormancy_override_until"
+
+// UtilizationDormancyOverrideUntil 返回手动唤醒覆盖的到期时间;未设置、非法或已过期返回 (零值, false)。
+func (a *Account) UtilizationDormancyOverrideUntil() (time.Time, bool) {
+	if a.Extra == nil {
+		return time.Time{}, false
+	}
+	v, ok := a.Extra[ExtraKeyUtilizationDormancyOverrideUntil]
+	if !ok {
+		return time.Time{}, false
+	}
+	ts := parseExtraFloat64(v)
+	if ts <= 0 {
+		return time.Time{}, false
+	}
+	until := time.Unix(int64(ts), 0)
+	if !time.Now().Before(until) {
+		return time.Time{}, false
+	}
+	return until, true
+}
+
+// IsUtilizationDormancyOverridden 手动唤醒覆盖是否在生效期内。
+func (a *Account) IsUtilizationDormancyOverridden() bool {
+	_, ok := a.UtilizationDormancyOverrideUntil()
+	return ok
 }
 
 // IsUtilizationDormant 判断账号是否因上游真实利用率接近满而应主动休眠。
 // 5h 或 7d 任一窗口达到阈值即休眠。仅对 Anthropic OAuth/SetupToken 生效
 // （只有这类账号才有 unified-ratelimit 利用率响应头）。
+// 手动唤醒覆盖(ExtraKeyUtilizationDormancyOverrideUntil)在生效期内直接返回 false。
 func (a *Account) IsUtilizationDormant() bool {
 	if !a.IsAnthropicOAuthOrSetupToken() {
+		return false
+	}
+	if a.IsUtilizationDormancyOverridden() {
 		return false
 	}
 	if a.GetSessionWindowUtilization() >= pacingUtilizationDormantThreshold5h {

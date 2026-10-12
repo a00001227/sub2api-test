@@ -39,6 +39,9 @@ type PoolAccountSnapshot struct {
 	ProxyID      *int64 `json:"proxy_id,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
 
+	// DormancyOverrideUntil 手动唤醒覆盖到期时间(RFC3339);生效期内账号按利用率本应休眠但被放行。
+	DormancyOverrideUntil string `json:"dormancy_override_until,omitempty"`
+
 	Metrics *ProviderAccountMetrics `json:"metrics"`
 	Errors  *AccountErrorActivity   `json:"errors_1h,omitempty"`
 }
@@ -144,6 +147,9 @@ func (s *CellPoolSnapshotService) Build(ctx context.Context) (*CellPoolSnapshot,
 		if ea, ok := errMap[acc.ID]; ok {
 			e := ea
 			item.Errors = &e
+		}
+		if until, ok := acc.UtilizationDormancyOverrideUntil(); ok {
+			item.DormancyOverrideUntil = until.UTC().Format(time.RFC3339)
 		}
 		item.RunState = derivePoolRunState(acc, m, start)
 		out.Accounts = append(out.Accounts, item)

@@ -165,6 +165,8 @@ type PacingStatus struct {
 	SevenDayUtil float64 `json:"seven_day_util"`
 	// Dormant 是否因利用率接近满而主动休眠（新流量让路）。
 	Dormant bool `json:"dormant"`
+	// DormancyOverrideUntil 手动唤醒覆盖到期时间(RFC3339);有值表示本应休眠但被 Portal 放行。
+	DormancyOverrideUntil string `json:"dormancy_override_until,omitempty"`
 	// Humanized 该档位是否启用拟人化（活跃-冷却 + 每日休息）。
 	Humanized bool `json:"humanized"`
 	// Resting 当前是否处于拟人休息（每日休息窗口或冷却段）。
@@ -332,6 +334,9 @@ func (s *ProviderAccountMetricsService) MetricsForAccount(ctx context.Context, a
 			Dormant:      acc.IsUtilizationDormant(),
 			Humanized:    !pacingIsSpeedMode(mode),
 			Resting:      acc.IsHumanizedDormant(now),
+		}
+		if until, ok := acc.UtilizationDormancyOverrideUntil(); ok {
+			status.DormancyOverrideUntil = until.UTC().Format(time.RFC3339)
 		}
 		if p, ok := pacingProfileFor(mode); ok {
 			status.Concurrency = p.Concurrency

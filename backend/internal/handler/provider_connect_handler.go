@@ -23,19 +23,20 @@ import (
 // 侧 sub2api-client 的契约对齐。
 // Phase 21E-6E-4: 追加单条 credential 导入（import-credentials）。
 type ProviderConnectHandler struct {
-	connect     *service.ProviderConnectService
-	completion  *service.ProviderConnectCompletionService
-	importSvc   *service.ProviderConnectImportService
-	allocator   *service.ProxyAllocator
-	metrics     *service.ProviderAccountMetricsService
-	regions     *service.RegionService
-	deactivate  *service.ProviderAccountDeactivationService
-	reauth      *service.ProviderConnectReauthService
-	pacing      *service.ProviderAccountPacingService
-	scheduling  *service.ProviderAccountSchedulingService
-	test        *service.ProviderAccountTestService
-	config      *service.ProviderAccountConfigService
-	proxyBind   *service.ProviderAccountProxyService
+	connect       *service.ProviderConnectService
+	completion    *service.ProviderConnectCompletionService
+	importSvc     *service.ProviderConnectImportService
+	allocator     *service.ProxyAllocator
+	metrics       *service.ProviderAccountMetricsService
+	regions       *service.RegionService
+	deactivate    *service.ProviderAccountDeactivationService
+	reauth        *service.ProviderConnectReauthService
+	pacing        *service.ProviderAccountPacingService
+	scheduling    *service.ProviderAccountSchedulingService
+	dormancy      *service.ProviderAccountDormancyService
+	test          *service.ProviderAccountTestService
+	config        *service.ProviderAccountConfigService
+	proxyBind     *service.ProviderAccountProxyService
 	pricing       *service.PricingService
 	proxySync     *service.ProxySyncService
 	proxyProber   service.ProxyExitInfoProber
@@ -54,6 +55,7 @@ func NewProviderConnectHandler(
 	reauth *service.ProviderConnectReauthService,
 	pacing *service.ProviderAccountPacingService,
 	scheduling *service.ProviderAccountSchedulingService,
+	dormancy *service.ProviderAccountDormancyService,
 	test *service.ProviderAccountTestService,
 	config *service.ProviderAccountConfigService,
 	proxyBind *service.ProviderAccountProxyService,
@@ -62,7 +64,7 @@ func NewProviderConnectHandler(
 	proxyProber service.ProxyExitInfoProber,
 	proxyLiveness *service.ProxyLivenessService,
 ) *ProviderConnectHandler {
-	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, test: test, config: config, proxyBind: proxyBind, pricing: pricing, proxySync: proxySync, proxyProber: proxyProber, proxyLiveness: proxyLiveness}
+	return &ProviderConnectHandler{connect: connect, completion: completion, importSvc: importSvc, allocator: allocator, metrics: metrics, regions: regions, deactivate: deactivate, reauth: reauth, pacing: pacing, scheduling: scheduling, dormancy: dormancy, test: test, config: config, proxyBind: proxyBind, pricing: pricing, proxySync: proxySync, proxyProber: proxyProber, proxyLiveness: proxyLiveness}
 }
 
 // proxySyncRequest is the Portal→cell /internal/proxies/sync body: the desired
@@ -499,6 +501,36 @@ func (h *ProviderConnectHandler) SetPacingMode(c *gin.Context) {
 		return
 	}
 	result, err := h.pacing.SetPacingMode(c.Request.Context(), externalRef, req.Mode)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// dormancyRequest 手动唤醒/清除唤醒请求。
+type dormancyRequest struct {
+	Action    string `json:"action" binding:"required"` // wake | clear
+	UntilUnix int64  `json:"until_unix,omitempty"`      // wake 可选:显式截止(unix 秒,须在 7 天内);缺省取当前窗口重置时间
+}
+
+// SetUtilizationDormancy handles
+// POST /internal/provider-accounts/:external_ref/utilization-dormancy
+//
+// 手动唤醒因 5h/7d 利用率休眠的账号:写 extra["utilization_dormancy_override_until"],
+// 到期前不再按利用率休眠(到期自动回归)。action=clear 删除覆盖。幂等。
+func (h *ProviderConnectHandler) SetUtilizationDormancy(c *gin.Context) {
+	externalRef := strings.TrimSpace(c.Param("external_ref"))
+	if externalRef == "" || !strings.HasPrefix(externalRef, "pa_") {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_REQUEST", "invalid external_provider_account_id"))
+		return
+	}
+	var req dormancyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("CONNECT_INVALID_BODY", "invalid request body"))
+		return
+	}
+	result, err := h.dormancy.SetDormancyOverride(c.Request.Context(), externalRef, req.Action, req.UntilUnix)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

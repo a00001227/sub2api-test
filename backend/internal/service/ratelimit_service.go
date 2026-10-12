@@ -1577,6 +1577,11 @@ func storedUtilizationDormant(account *Account) bool {
 	if account == nil || account.Extra == nil || !account.IsAnthropicOAuthOrSetupToken() {
 		return false
 	}
+	// 手动唤醒覆盖期内一律视为非休眠,与 IsUtilizationDormant 口径一致,
+	// 否则每条响应都会算成"退出休眠"翻转而刷 outbox。
+	if account.IsUtilizationDormancyOverridden() {
+		return false
+	}
 	if parseExtraFloat64(account.Extra["session_window_utilization"]) >= pacingUtilizationDormantThreshold5h {
 		return true
 	}
