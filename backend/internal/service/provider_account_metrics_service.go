@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -132,6 +134,43 @@ func activeUnschedulableWindow(acc *Account, now time.Time) (until time.Time, so
 	return until, source, ok
 }
 
+// providerUnavailableReason 回流给 Portal 的「为什么不可用」文案:优先账号自身的 error_message;
+// 没有(临时不可调度时 status 仍是 active,error_message 为空)则退回 temp_unschedulable_reason——
+// 否则 Portal 只看到「熔断规则」却不知道是 OAuth 401 冷却、token 刷新失败还是哪条规则命中。
+// reason 若是 TempUnschedState JSON,拼成一句人话:"HTTP 401 · keyword · 上游消息"。
+func providerUnavailableReason(acc *Account, now time.Time) string {
+	if acc == nil {
+		return ""
+	}
+	if msg := strings.TrimSpace(acc.ErrorMessage); msg != "" {
+		return truncateProviderErrorMessage(msg)
+	}
+	if acc.TempUnschedulableUntil == nil || !now.Before(*acc.TempUnschedulableUntil) {
+		return ""
+	}
+	reason := strings.TrimSpace(acc.TempUnschedulableReason)
+	if reason == "" {
+		return ""
+	}
+	var st TempUnschedState
+	if strings.HasPrefix(reason, "{") && json.Unmarshal([]byte(reason), &st) == nil {
+		parts := make([]string, 0, 3)
+		if st.StatusCode > 0 {
+			parts = append(parts, fmt.Sprintf("HTTP %d", st.StatusCode))
+		}
+		if kw := strings.TrimSpace(st.MatchedKeyword); kw != "" {
+			parts = append(parts, kw)
+		}
+		if em := strings.TrimSpace(st.ErrorMessage); em != "" {
+			parts = append(parts, em)
+		}
+		if len(parts) > 0 {
+			return truncateProviderErrorMessage("temp_unschedulable: " + strings.Join(parts, " · "))
+		}
+	}
+	return truncateProviderErrorMessage("temp_unschedulable: " + reason)
+}
+
 // maxProviderErrorMessageLen 限制回流给 Portal 的错误详情长度,纯防御性——
 // 上游错误偶尔会带很长的响应体,面板只需一句原因。
 const maxProviderErrorMessageLen = 500
@@ -251,7 +290,7 @@ func (s *ProviderAccountMetricsService) MetricsForAccount(ctx context.Context, a
 
 	// #90 健康/错误详情:回流账号"为什么不可用"。error_message 与 sub2api 后台
 	// 展示同源(desensitized 上游状态串),截断后透出;限流按 reset_at 派生当前状态。
-	if msg := truncateProviderErrorMessage(acc.ErrorMessage); msg != "" {
+	if msg := providerUnavailableReason(acc, s.now()); msg != "" {
 		out.ErrorMessage = msg
 	}
 	if until, source, ok := activeUnschedulableWindow(acc, s.now()); ok {

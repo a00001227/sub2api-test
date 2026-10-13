@@ -141,7 +141,7 @@ func (s *CellPoolSnapshotService) Build(ctx context.Context) (*CellPoolSnapshot,
 			RejectReason: acc.SchedulableRejectReason(),
 			Priority:     acc.Priority,
 			ProxyID:      acc.ProxyID,
-			ErrorMessage: truncateProviderErrorMessage(acc.ErrorMessage),
+			ErrorMessage: providerUnavailableReason(acc, start),
 			Metrics:      m,
 		}
 		if ea, ok := errMap[acc.ID]; ok {
