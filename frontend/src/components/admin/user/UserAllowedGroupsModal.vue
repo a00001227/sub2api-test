@@ -215,7 +215,7 @@ interface GroupRateConfig {
 }
 
 // 工作道/号池选项(护号)。用户设了 lane 后,只列同 lane 的组。
-const LANE_VALUES = ['normal', 'batch', 'distillation'] as const
+const LANE_VALUES = ['normal', 'batch', 'distillation', 'bedrock'] as const
 
 const props = defineProps<{ show: boolean; user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])

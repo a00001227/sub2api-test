@@ -9,6 +9,9 @@ const (
 	GroupLaneNormal       = "normal"
 	GroupLaneBatch        = "batch"
 	GroupLaneDistillation = "distillation"
+	// GroupLaneBedrock:AWS Bedrock API Key 号池。渠道商提供的 Bedrock key 按 token 付 AWS,
+	// 不能混进订阅号池被调度器优先打满;单独一道,只发给指定消费者组。
+	GroupLaneBedrock = "bedrock"
 )
 
 // normalizeGroupLane 归一工作道;写入前的单一真源(handler 已用 oneof 兜住取值,这里
@@ -19,6 +22,8 @@ func NormalizeGroupLane(s string) string {
 		return GroupLaneBatch
 	case GroupLaneDistillation:
 		return GroupLaneDistillation
+	case GroupLaneBedrock:
+		return GroupLaneBedrock
 	default:
 		return GroupLaneNormal
 	}

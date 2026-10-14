@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/account"
@@ -120,10 +121,14 @@ func (r *providerConnectAccountRepository) CreateConnectedAccount(
 		}
 	}
 
+	accountType := strings.TrimSpace(in.Type)
+	if accountType == "" {
+		accountType = service.AccountTypeOAuth
+	}
 	builder := tx.Account.Create().
 		SetName(in.Name).
 		SetPlatform(in.Platform).
-		SetType(service.AccountTypeOAuth).
+		SetType(accountType).
 		SetCredentials(creds).
 		SetStatus(service.StatusActive).
 		SetExternalProviderAccountID(in.ExternalProviderAccountID).

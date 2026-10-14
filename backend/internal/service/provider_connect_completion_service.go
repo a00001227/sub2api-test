@@ -50,6 +50,9 @@ var providerTypeToPlatform = map[string]string{
 	"codex":  PlatformOpenAI,
 	"openai": PlatformOpenAI,
 	"gemini": PlatformGemini,
+	// bedrock:渠道商提供的 AWS Bedrock API Key,平台归 anthropic(模型/计价口径相同),
+	// 账号 type=bedrock(auth_mode=apikey),只走 import,不走 OAuth。
+	"bedrock": PlatformAnthropic,
 }
 
 // PlatformForProviderType 把 Portal 的 provider_type 解析为 Sub2API 账号平台
@@ -135,6 +138,9 @@ type CreateConnectedAccountInput struct {
 	// Region: egress region label snapshot for the proxy allocation record
 	// (Phase 21E-6E proxy-exclusive). Optional; nil when no proxy is bound.
 	Region *string
+	// Type: 账号类型;空 = oauth(OAuth / sessionKey / codex 导入都铸成 oauth 号)。
+	// bedrock 导入传 AccountTypeBedrock。
+	Type string
 }
 
 // CompleteAuthorizationInput 完成请求。
@@ -166,7 +172,7 @@ type ProviderConnectCompletionService struct {
 	// 更新既有账号凭证并恢复 active/schedulable，而非新建账号。
 	reauthAccounts connectReauthAccountUpdater
 	oauth          connectTokenExchanger
-	openaiOAuth    connectOpenAIExchanger // #95: openai 手动授权;可为 nil(未装配则 openai 走不通)
+	openaiOAuth    connectOpenAIExchanger  // #95: openai 手动授权;可为 nil(未装配则 openai 走不通)
 	webhook        ProviderWebhookNotifier // 可为 nil（未配置时不通知）
 	now            func() time.Time
 }

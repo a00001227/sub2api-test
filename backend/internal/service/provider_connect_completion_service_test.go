@@ -63,6 +63,7 @@ type fakeConnectAccountRepo struct {
 	createN      int
 	createErr    error
 	releasedRefs []string
+	lastCreate   *CreateConnectedAccountInput // 最近一次成功建号的入参(bedrock 用例断言 type/凭据/无代理)
 }
 
 func newFakeConnectAccountRepo() *fakeConnectAccountRepo {
@@ -78,6 +79,8 @@ func (f *fakeConnectAccountRepo) CreateConnectedAccount(_ context.Context, in Cr
 	f.seq++
 	f.byRef[in.ExternalProviderAccountID] = f.seq
 	f.createN++
+	cp := in
+	f.lastCreate = &cp
 	return f.seq, nil
 }
 func (f *fakeConnectAccountRepo) FindAccountIDByExternalRef(_ context.Context, ref string) (int64, bool, error) {

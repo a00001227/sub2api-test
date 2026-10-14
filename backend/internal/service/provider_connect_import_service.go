@@ -85,6 +85,8 @@ type ProviderConnectImportService struct {
 	webhook   ProviderWebhookNotifier // 可为 nil（未配置时不通知）
 	// codexProbe 建号前经分配代理向 ChatGPT Codex 后端验一次 access_token;nil = 跳过(仅测试)。
 	codexProbe codexCredentialProber
+	// bedrockProbe 建号前用 Bedrock API Key 直调一次 AWS(不走代理);nil = 跳过(仅测试)。
+	bedrockProbe bedrockCredentialProber
 }
 
 // NewProviderConnectImportService creates the service.
@@ -95,11 +97,12 @@ func NewProviderConnectImportService(
 	webhook ProviderWebhookNotifier,
 ) *ProviderConnectImportService {
 	return &ProviderConnectImportService{
-		accounts:   accounts,
-		allocator:  allocator,
-		cookie:     oauth,
-		webhook:    webhook,
-		codexProbe: liveCodexCredentialProber{},
+		accounts:     accounts,
+		allocator:    allocator,
+		cookie:       oauth,
+		webhook:      webhook,
+		codexProbe:   liveCodexCredentialProber{},
+		bedrockProbe: liveBedrockCredentialProber{},
 	}
 }
 
@@ -122,9 +125,10 @@ func (s *ProviderConnectImportService) ImportCredential(
 		return nil, ErrImportProviderTypeUnsupported
 	}
 	// 支持:claude(sessionKey → CookieAuth 网络交换)、codex/openai(access_token
-	// JWT / codex session JSON 纯解析,不走交换)。gemini 暂不支持导入。
+	// JWT / codex session JSON 纯解析,不走交换)、bedrock(AWS Bedrock API Key,直连
+	// AWS 探活,不分配代理)。gemini 暂不支持导入。
 	switch providerType {
-	case "claude", "codex", "openai":
+	case "claude", "codex", "openai", "bedrock":
 	default:
 		return nil, ErrImportProviderTypeUnsupported
 	}
@@ -141,6 +145,12 @@ func (s *ProviderConnectImportService) ImportCredential(
 		return nil, err
 	} else if found {
 		return &ImportCredentialResult{Status: "already_exists", Sub2apiAccountID: id}, nil
+	}
+
+	// bedrock:AWS 直连,不占代理槽(住宅代理对 AWS 无意义,还浪费 IP);key 有效性直接
+	// 向 Bedrock 探一次。账号 type=bedrock / auth_mode=apikey,网关按 forwardBedrock 转发。
+	if providerType == "bedrock" {
+		return s.importBedrock(ctx, accountRef, providerType, platform, region, in.Credential)
 	}
 
 	// Step 3: 按 region + platform 分配代理（无容量返回 REGION_NO_CAPACITY；不降级直连）。
@@ -265,6 +275,61 @@ func (s *ProviderConnectImportService) ImportCredential(
 		})
 	}
 
+	return &ImportCredentialResult{Status: "active", Sub2apiAccountID: accountID}, nil
+}
+
+// importBedrock 导入一把 AWS Bedrock API Key:解析 `<key>|<region>` → 直连 AWS 探活 →
+// 建 type=bedrock 账号(credentials: auth_mode=apikey / api_key / aws_region)→ activated webhook。
+// 不分配代理、不换 token;幂等与错误码口径同其他平台。
+func (s *ProviderConnectImportService) importBedrock(
+	ctx context.Context, accountRef, providerType, platform, region, rawCredential string,
+) (*ImportCredentialResult, error) {
+	apiKey, awsRegion, perr := parseBedrockImportCredential(rawCredential)
+	if perr != nil {
+		return nil, importInvalidCredential("format", "bedrock credential rejected: "+perr.Error(),
+			map[string]string{"region": region})
+	}
+	if s.bedrockProbe != nil {
+		if perr := s.bedrockProbe.ProbeBedrockCredential(ctx, apiKey, awsRegion); perr != nil {
+			slog.WarnContext(ctx, "provider_connect.import.bedrock_probe_failed",
+				"external_ref", accountRef,
+				"aws_region", awsRegion,
+				"reason", redactImportDetail(perr.Error()))
+			return nil, importInvalidCredential("probe", "AWS Bedrock rejected the key: "+perr.Error(),
+				map[string]string{"region": region, "aws_region": awsRegion})
+		}
+	}
+	credentials := map[string]any{
+		"auth_mode":  "apikey",
+		"api_key":    apiKey,
+		"aws_region": awsRegion,
+	}
+	accountID, err := s.accounts.CreateConnectedAccount(ctx, CreateConnectedAccountInput{
+		Name:                      accountRef,
+		Platform:                  platform,
+		Type:                      AccountTypeBedrock,
+		Credentials:               credentials,
+		ExternalProviderAccountID: accountRef,
+		Region:                    &region,
+	})
+	if err != nil {
+		if id, found, ferr := s.accounts.FindAccountIDByExternalRef(ctx, accountRef); ferr == nil && found {
+			return &ImportCredentialResult{Status: "already_exists", Sub2apiAccountID: id}, nil
+		}
+		return nil, ErrImportAccountCreateFailed
+	}
+	if s.webhook != nil && s.webhook.Enabled() {
+		s.webhook.SendActivatedAsync(ActivatedWebhookInput{
+			ExternalProviderAccountID: accountRef,
+			Sub2apiAccountID:          accountID,
+			ProviderType:              providerType,
+			Platform:                  platform,
+			Region:                    region,
+			EventID:                   providerwebhook.ImportActivatedEventID(accountRef),
+			// 没有邮箱;plan 用 AWS 区域标识,Portal 当订阅档位展示。
+			Plan: "aws_bedrock_" + awsRegion,
+		})
+	}
 	return &ImportCredentialResult{Status: "active", Sub2apiAccountID: accountID}, nil
 }
 
