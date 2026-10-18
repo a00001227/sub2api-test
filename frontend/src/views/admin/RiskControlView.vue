@@ -1167,6 +1167,44 @@
                 {{ t('admin.riskControl.allowedUsersHint') }}
               </p>
             </div>
+
+            <!-- 放行分组白名单:整组跳过内容审核 / 提示词审计 / 蒸馏检测 -->
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <label class="input-label mb-0">{{ t('admin.riskControl.allowedGroups') }}</label>
+                <span class="inline-flex rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300">
+                  {{ t('admin.riskControl.allowedGroupCount', { count: configForm.allowed_group_ids.length }) }}
+                </span>
+              </div>
+              <select class="input" :value="''" @change="onPickAllowedGroup">
+                <option value="">{{ t('admin.riskControl.allowedGroupsPlaceholder') }}</option>
+                <option v-for="g in allowedGroupOptions" :key="g.id" :value="g.id">{{ g.name }} · {{ g.platform }}</option>
+              </select>
+              <div v-if="configForm.allowed_group_ids.length > 0" class="mt-2 flex flex-wrap gap-2">
+                <span
+                  v-for="id in configForm.allowed_group_ids"
+                  :key="id"
+                  class="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                >
+                  <span class="font-mono">#{{ id }}</span>
+                  <span>{{ allowedGroupName(id) }}</span>
+                  <button
+                    type="button"
+                    class="ml-1 text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-200"
+                    :aria-label="t('common.delete')"
+                    @click="removeAllowedGroup(id)"
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.riskControl.allowedGroupsHint') }}
+              </p>
+              <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                {{ t('admin.riskControl.allowlistPurgeHint') }}
+              </p>
+            </div>
           </div>
 
           <div v-else class="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -1416,6 +1454,7 @@ const configForm = reactive({
   blocked_keywords_text: '',
   allowed_input_hashes_text: '',
   allowed_users: [] as AllowedUserChip[],
+  allowed_group_ids: [] as number[],
   keyword_blocking_mode: 'keyword_and_api' as KeywordBlockingMode,
   model_filter_type: 'all' as ContentModerationModelFilterType,
   model_filter_models: [] as string[],
@@ -1671,6 +1710,20 @@ const addAllowedUserByKeyword = async () => {
 
 const removeAllowedUser = (id: number) => {
   configForm.allowed_users = configForm.allowed_users.filter((u) => u.id !== id)
+}
+
+// ── 放行分组白名单(分组级,整组跳过三条线)────────────────────────────────
+const allowedGroupOptions = computed(() => groups.value.filter((g) => !configForm.allowed_group_ids.includes(g.id)))
+const allowedGroupName = (id: number) => groups.value.find((g) => g.id === id)?.name ?? t('admin.riskControl.allowedGroupUnknown')
+const onPickAllowedGroup = (e: Event) => {
+  const el = e.target as HTMLSelectElement
+  const id = Number(el.value)
+  el.value = ''
+  if (!id || configForm.allowed_group_ids.includes(id)) return
+  configForm.allowed_group_ids.push(id)
+}
+const removeAllowedGroup = (id: number) => {
+  configForm.allowed_group_ids = configForm.allowed_group_ids.filter((x) => x !== id)
 }
 
 const onAllowedUserClickOutside = (e: MouseEvent) => {
@@ -2005,6 +2058,7 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.blocked_keywords_text = Array.isArray(config.blocked_keywords) ? config.blocked_keywords.join('\n') : ''
   configForm.allowed_input_hashes_text = Array.isArray(config.allowed_input_hashes) ? config.allowed_input_hashes.join('\n') : ''
   void hydrateAllowedUsers(Array.isArray(config.allowed_user_ids) ? config.allowed_user_ids : [])
+  configForm.allowed_group_ids = Array.isArray(config.allowed_group_ids) ? [...config.allowed_group_ids] : []
   configForm.keyword_blocking_mode = normalizeKeywordBlockingMode(config.keyword_blocking_mode)
   const modelFilter = normalizeModelFilter(config.model_filter)
   configForm.model_filter_type = modelFilter.type
@@ -2126,6 +2180,7 @@ async function saveConfig() {
       blocked_keywords: blockedKeywordList.value,
       allowed_input_hashes: allowedHashList.value,
       allowed_user_ids: configForm.allowed_users.map((u) => u.id),
+      allowed_group_ids: [...configForm.allowed_group_ids],
       keyword_blocking_mode: configForm.keyword_blocking_mode,
       model_filter: modelFilterPayload,
     }

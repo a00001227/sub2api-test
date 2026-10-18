@@ -1684,3 +1684,14 @@ data: {"type":"response.failed","error":{"message":"This content was flagged"}}
 		require.False(t, openAIForwardErrorAlreadyCommunicated(c, c.Writer.Size(), errors.New("openai cyber_policy: blocked")))
 	})
 }
+
+// 风控白名单「加入即清理」桩(这些用例不涉及)。
+func (r *contentModerationHandlerTestRepo) DeleteLogsByUserIDs(ctx context.Context, userIDs []int64) (int64, error) {
+	return 0, nil
+}
+func (r *contentModerationHandlerTestRepo) DeleteLogsByGroupIDs(ctx context.Context, groupIDs []int64) (int64, error) {
+	return 0, nil
+}
+func (r *contentModerationHandlerTestRepo) ListUserIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error) {
+	return nil, nil
+}

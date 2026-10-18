@@ -66,6 +66,7 @@ type contentModerationConfigRequest struct {
 	BlockedKeywords                *[]string                             `json:"blocked_keywords"`
 	AllowedInputHashes             *[]string                             `json:"allowed_input_hashes"`
 	AllowedUserIDs                 *[]int64                              `json:"allowed_user_ids"`
+	AllowedGroupIDs                *[]int64                              `json:"allowed_group_ids"`
 	KeywordBlockingMode            *string                               `json:"keyword_blocking_mode"`
 	ModelFilter                    *service.ContentModerationModelFilter `json:"model_filter"`
 }
@@ -142,6 +143,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		BlockedKeywords:                req.BlockedKeywords,
 		AllowedInputHashes:             req.AllowedInputHashes,
 		AllowedUserIDs:                 req.AllowedUserIDs,
+		AllowedGroupIDs:                req.AllowedGroupIDs,
 		KeywordBlockingMode:            req.KeywordBlockingMode,
 		ModelFilter:                    req.ModelFilter,
 	})

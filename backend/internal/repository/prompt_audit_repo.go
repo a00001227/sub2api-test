@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type promptAuditRepository struct {
@@ -324,4 +325,29 @@ func buildPromptAuditEventWhere(filter service.PromptAuditEventFilter) ([]string
 		where = append(where, "("+pred+")")
 	}
 	return where, args
+}
+
+// 风控白名单「加入即清理」。
+func (r *promptAuditRepository) DeleteEventsByUserIDs(ctx context.Context, userIDs []int64) (int64, error) {
+	if r == nil || r.db == nil || len(userIDs) == 0 {
+		return 0, nil
+	}
+	res, err := r.db.ExecContext(ctx, `DELETE FROM prompt_audit_events WHERE user_id = ANY($1)`, pq.Array(userIDs))
+	if err != nil {
+		return 0, fmt.Errorf("delete prompt audit events by users: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+func (r *promptAuditRepository) DeleteEventsByGroupIDs(ctx context.Context, groupIDs []int64) (int64, error) {
+	if r == nil || r.db == nil || len(groupIDs) == 0 {
+		return 0, nil
+	}
+	res, err := r.db.ExecContext(ctx, `DELETE FROM prompt_audit_events WHERE group_id = ANY($1)`, pq.Array(groupIDs))
+	if err != nil {
+		return 0, fmt.Errorf("delete prompt audit events by groups: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

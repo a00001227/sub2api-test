@@ -55,6 +55,8 @@ export interface ContentModerationConfig {
   allowed_input_hashes: string[]
   /** 放行用户白名单(用户 ID):命中的用户完全跳过内容审计 */
   allowed_user_ids: number[]
+  /** 放行分组白名单(分组 ID):整组跳过内容审核 / 提示词审计 / 蒸馏检测 */
+  allowed_group_ids: number[]
   keyword_blocking_mode: KeywordBlockingMode
   model_filter: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count: boolean
@@ -148,6 +150,7 @@ export interface UpdateContentModerationConfig {
   blocked_keywords?: string[]
   allowed_input_hashes?: string[]
   allowed_user_ids?: number[]
+  allowed_group_ids?: number[]
   keyword_blocking_mode?: KeywordBlockingMode
   model_filter?: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count?: boolean

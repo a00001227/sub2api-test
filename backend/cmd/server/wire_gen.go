@@ -322,6 +322,11 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	contentModerationHandler := admin.NewContentModerationHandler(contentModerationService)
 	promptAuditRepository := repository.NewPromptAuditRepository(db)
 	promptAuditService := service.NewPromptAuditService(settingRepository, promptAuditRepository)
+	// 风控白名单(用户 + 分组)三条线共用:内容审核自身判定;提示词审计与 Risk V2 通过同一判定跳过;
+	// 加入即清理要删提示词留存与蒸馏评分。
+	contentModerationService.SetAllowlistCleanupDeps(promptAuditRepository, repository.NewUserRiskV2Repository(db))
+	promptAuditService.SetAllowlist(contentModerationService)
+	gatewayService.SetRiskAllowlist(contentModerationService)
 	promptAuditHandler := admin.NewPromptAuditHandler(promptAuditService)
 	paymentHandler := admin.NewPaymentHandler(paymentService, paymentConfigService)
 	affiliateHandler := admin.NewAffiliateHandler(affiliateService, adminService)

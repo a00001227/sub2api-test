@@ -97,7 +97,9 @@ const (
 	maxContentModerationBlockedKeywordRunes      = 200
 	maxContentModerationAllowedInputHashes       = 10000
 	// maxContentModerationAllowedUserIDs 放行用户白名单上限(用户级,完全跳过审计)。
-	maxContentModerationAllowedUserIDs    = 1000
+	maxContentModerationAllowedUserIDs = 1000
+	// maxContentModerationAllowedGroupIDs 放行分组白名单上限(分组级,整组跳过三条线)。
+	maxContentModerationAllowedGroupIDs   = 200
 	maxContentModerationModelFilterModels = 1000
 	maxContentModerationModelFilterRunes  = 200
 
@@ -222,7 +224,10 @@ type ContentModerationConfig struct {
 	// AllowedUserIDs 放行用户白名单(用户级):命中的用户在分组/模型范围判定之后、抽取文本之前
 	// 直接放行 —— 不解析请求体、不进关键词/预哈希/上游 API、不记录、不进封号计数。语义是
 	// 「信任该用户」,与哈希白名单同口径;仅中央生效(转发给 cell 的请求 cell 不再审)。
-	AllowedUserIDs      []int64                      `json:"allowed_user_ids"`
+	AllowedUserIDs []int64 `json:"allowed_user_ids"`
+	// AllowedGroupIDs 放行分组白名单(API 分组级):该分组 key 发出的请求同样完全跳过。与用户白名单
+	// 一起构成「风控白名单」,被提示词审计与蒸馏检测共用(见 risk_allowlist.go)。
+	AllowedGroupIDs     []int64                      `json:"allowed_group_ids"`
 	KeywordBlockingMode string                       `json:"keyword_blocking_mode"`
 	ModelFilter         ContentModerationModelFilter `json:"model_filter"`
 	// CyberPolicyExcludeFromBanCount 为 true 时，cyber_policy 命中不参与自动封号计数：
@@ -274,6 +279,7 @@ type ContentModerationConfigView struct {
 	BlockedKeywords                []string                        `json:"blocked_keywords"`
 	AllowedInputHashes             []string                        `json:"allowed_input_hashes"`
 	AllowedUserIDs                 []int64                         `json:"allowed_user_ids"`
+	AllowedGroupIDs                []int64                         `json:"allowed_group_ids"`
 	KeywordBlockingMode            string                          `json:"keyword_blocking_mode"`
 	ModelFilter                    ContentModerationModelFilter    `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount bool                            `json:"cyber_policy_exclude_from_ban_count"`
@@ -379,6 +385,7 @@ type UpdateContentModerationConfigInput struct {
 	BlockedKeywords                *[]string                     `json:"blocked_keywords"`
 	AllowedInputHashes             *[]string                     `json:"allowed_input_hashes"`
 	AllowedUserIDs                 *[]int64                      `json:"allowed_user_ids"`
+	AllowedGroupIDs                *[]int64                      `json:"allowed_group_ids"`
 	KeywordBlockingMode            *string                       `json:"keyword_blocking_mode"`
 	ModelFilter                    *ContentModerationModelFilter `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount *bool                         `json:"cyber_policy_exclude_from_ban_count"`
@@ -571,6 +578,10 @@ type ContentModerationRepository interface {
 	CleanupExpiredLogs(ctx context.Context, hitBefore time.Time, nonHitBefore time.Time) (*ContentModerationCleanupResult, error)
 	// UpdateLogEmailSent 回写邮件发送结果（F7：CreateLog 先行后补 EmailSent）。
 	UpdateLogEmailSent(ctx context.Context, id int64, sent bool) error
+	// 风控白名单「加入即清理」(risk_allowlist.go):按用户 / 分组删审核记录;分组展开成用户。
+	DeleteLogsByUserIDs(ctx context.Context, userIDs []int64) (int64, error)
+	DeleteLogsByGroupIDs(ctx context.Context, groupIDs []int64) (int64, error)
+	ListUserIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error)
 }
 
 type ContentModerationHashCache interface {
@@ -582,16 +593,20 @@ type ContentModerationHashCache interface {
 }
 
 type ContentModerationService struct {
-	settingRepo              SettingRepository
-	repo                     ContentModerationRepository
-	hashCache                ContentModerationHashCache
-	groupRepo                GroupRepository
-	userRepo                 UserRepository
-	proxyRepo                ProxyRepository
-	authCacheInvalidator     APIKeyAuthCacheInvalidator
-	emailService             *EmailService
-	httpClient               *http.Client
-	moderationProxyCache     atomic.Pointer[moderationProxyURLCacheEntry]
+	settingRepo          SettingRepository
+	repo                 ContentModerationRepository
+	hashCache            ContentModerationHashCache
+	groupRepo            GroupRepository
+	userRepo             UserRepository
+	proxyRepo            ProxyRepository
+	authCacheInvalidator APIKeyAuthCacheInvalidator
+	emailService         *EmailService
+	httpClient           *http.Client
+	moderationProxyCache atomic.Pointer[moderationProxyURLCacheEntry]
+	// 风控白名单(见 risk_allowlist.go):热路径快照缓存 + 加入即清理要动的另外两张表。
+	allowlistCache           allowlistCachePtr
+	promptAuditRepo          PromptAuditRepository
+	userRiskRepo             UserRiskV2Repository
 	asyncQueue               chan contentModerationTask
 	workerCount              int
 	apiKeyCursor             atomic.Uint64
@@ -688,6 +703,8 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if err != nil {
 		return nil, err
 	}
+	prevAllowedUsers := append([]int64(nil), cfg.AllowedUserIDs...)
+	prevAllowedGroups := append([]int64(nil), cfg.AllowedGroupIDs...)
 	if input.Enabled != nil {
 		cfg.Enabled = *input.Enabled
 	}
@@ -791,6 +808,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.AllowedUserIDs != nil {
 		cfg.AllowedUserIDs = normalizeAllowedUserIDs(*input.AllowedUserIDs)
 	}
+	if input.AllowedGroupIDs != nil {
+		cfg.AllowedGroupIDs = normalizeAllowedGroupIDs(*input.AllowedGroupIDs)
+	}
 	if input.KeywordBlockingMode != nil {
 		cfg.KeywordBlockingMode = strings.TrimSpace(*input.KeywordBlockingMode)
 	}
@@ -847,6 +867,12 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	// 代理选择可能已变化，丢弃已解析的代理 URL 缓存，下次调用即时生效。
 	s.moderationProxyCache.Store(nil)
+	// 风控白名单快照失效(提示词审计 / Risk V2 下一条请求即按新名单跳过)。
+	s.allowlistCache.Store(nil)
+	// 新加入白名单的用户 / 分组:把已存下的审核记录、提示词留存、蒸馏评分一并清掉。
+	if added, addedGroups := diffAddedInt64(prevAllowedUsers, cfg.AllowedUserIDs), diffAddedInt64(prevAllowedGroups, cfg.AllowedGroupIDs); len(added) > 0 || len(addedGroups) > 0 {
+		s.purgeAllowlisted(ctx, added, addedGroups)
+	}
 	return s.configView(cfg), nil
 }
 
@@ -1023,6 +1049,17 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
+			"endpoint", input.Endpoint,
+			"protocol", input.Protocol,
+			"model", input.Model)
+		return allow, nil
+	}
+	// 放行分组白名单:同用户白名单口径,整组跳过。
+	if input.GroupID != nil && *input.GroupID > 0 && containsInt64(cfg.AllowedGroupIDs, *input.GroupID) {
+		slog.Info("content_moderation.allow_group",
+			"user_id", input.UserID,
+			"api_key_id", input.APIKeyID,
+			"group_id", *input.GroupID,
 			"endpoint", input.Endpoint,
 			"protocol", input.Protocol,
 			"model", input.Model)
@@ -2116,6 +2153,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		BlockedKeywords:      []string{},
 		AllowedInputHashes:   []string{},
 		AllowedUserIDs:       []int64{},
+		AllowedGroupIDs:      []int64{},
 		KeywordBlockingMode:  ContentModerationKeywordModeKeywordAndAPI,
 		ModelFilter: ContentModerationModelFilter{
 			Type:   ContentModerationModelFilterAll,
@@ -2481,6 +2519,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		BlockedKeywords:                append([]string(nil), cfg.BlockedKeywords...),
 		AllowedInputHashes:             append([]string(nil), cfg.AllowedInputHashes...),
 		AllowedUserIDs:                 append([]int64(nil), cfg.AllowedUserIDs...),
+		AllowedGroupIDs:                append([]int64(nil), cfg.AllowedGroupIDs...),
 		KeywordBlockingMode:            cfg.KeywordBlockingMode,
 		ModelFilter:                    cloneContentModerationModelFilter(cfg.ModelFilter),
 		CyberPolicyExcludeFromBanCount: cfg.CyberPolicyExcludeFromBanCount,
@@ -2839,6 +2878,26 @@ func normalizeInputHashes(in []string) []string {
 }
 
 // containsInputHash 判断哈希是否在放行集内(调用方保证 set 已 normalize 为小写)。
+// normalizeAllowedGroupIDs 同 normalizeAllowedUserIDs,封顶 maxContentModerationAllowedGroupIDs。
+func normalizeAllowedGroupIDs(ids []int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if len(out) >= maxContentModerationAllowedGroupIDs {
+			break
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
 // normalizeAllowedUserIDs 去掉非正数、去重、保序,封顶 maxContentModerationAllowedUserIDs。
 func normalizeAllowedUserIDs(ids []int64) []int64 {
 	out := make([]int64, 0, len(ids))

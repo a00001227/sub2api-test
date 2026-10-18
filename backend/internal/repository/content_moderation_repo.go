@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type contentModerationRepository struct {
@@ -283,4 +284,50 @@ func buildContentModerationLogWhere(filter service.ContentModerationLogFilter) (
 		add("l.created_at <= $%d", *filter.To)
 	}
 	return where, args
+}
+
+// 风控白名单「加入即清理」。
+func (r *contentModerationRepository) DeleteLogsByUserIDs(ctx context.Context, userIDs []int64) (int64, error) {
+	if r == nil || r.db == nil || len(userIDs) == 0 {
+		return 0, nil
+	}
+	res, err := r.db.ExecContext(ctx, `DELETE FROM content_moderation_logs WHERE user_id = ANY($1)`, pq.Array(userIDs))
+	if err != nil {
+		return 0, fmt.Errorf("delete content moderation logs by users: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+func (r *contentModerationRepository) DeleteLogsByGroupIDs(ctx context.Context, groupIDs []int64) (int64, error) {
+	if r == nil || r.db == nil || len(groupIDs) == 0 {
+		return 0, nil
+	}
+	res, err := r.db.ExecContext(ctx, `DELETE FROM content_moderation_logs WHERE group_id = ANY($1)`, pq.Array(groupIDs))
+	if err != nil {
+		return 0, fmt.Errorf("delete content moderation logs by groups: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// ListUserIDsByGroupIDs 这些分组下所有 API key 的归属用户(去重)。
+func (r *contentModerationRepository) ListUserIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error) {
+	if r == nil || r.db == nil || len(groupIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT user_id FROM api_keys WHERE group_id = ANY($1) AND user_id IS NOT NULL`, pq.Array(groupIDs))
+	if err != nil {
+		return nil, fmt.Errorf("list user ids by groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }

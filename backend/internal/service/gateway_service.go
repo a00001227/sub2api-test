@@ -660,6 +660,8 @@ type GatewayService struct {
 	// dispatcher 为 nil 或 cfg.Enabled=false 时，V2 采集完全不发生（legacy 行为逐字节不变）。
 	riskV2Cfg        config.RiskV2Config
 	riskV2Dispatcher *RiskV2Dispatcher
+	// riskAllowlist 风控白名单(用户 / 分组):命中不进 Risk V2 评分队列。nil = 不过滤。
+	riskAllowlist RiskAllowlistChecker
 
 	// #86b 中央「执行→转发」消费者计费:占位 account(懒建 + 缓存)。转发请求在中央
 	// 没有本地 account,用它满足 usage_log 的 account FK;它 external ref 为空 → provider
@@ -751,6 +753,14 @@ func NewGatewayService(
 
 // SetRiskV2 注入 Model Extraction Risk V2 Shadow（P1A）的配置与有界采集器。
 // 仅在 risk.v2.enabled 时由装配处调用；未注入时 V2 采集完全不发生。
+// SetRiskAllowlist 注入风控白名单判定(由内容审核服务实现);命中的用户 / 分组不进 Risk V2。
+func (s *GatewayService) SetRiskAllowlist(checker RiskAllowlistChecker) {
+	if s == nil {
+		return
+	}
+	s.riskAllowlist = checker
+}
+
 func (s *GatewayService) SetRiskV2(cfg config.RiskV2Config, dispatcher *RiskV2Dispatcher) {
 	if s != nil {
 		s.riskV2Cfg = cfg
@@ -776,6 +786,10 @@ func riskV2CacheApplicable(platform string) bool {
 // cache：仅 Applicable 的 provider 才置 Available 与真实 presence（0/value）；否则指针保持 nil。
 func (s *GatewayService) enqueueRiskV2(usageLog *UsageLog, feat RiskUsageFeatures, platform string) {
 	if s == nil || s.riskV2Dispatcher == nil || !s.riskV2Cfg.EffectiveEnabled() || usageLog == nil || feat.V2Request == nil {
+		return
+	}
+	// 风控白名单:用户或其分组命中 → 不采集、不评分(白名单 = 彻底不留)。
+	if s.riskAllowlist != nil && s.riskAllowlist.IsAllowlisted(context.Background(), usageLog.UserID, usageLog.GroupID) {
 		return
 	}
 	v2 := feat.V2Request

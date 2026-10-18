@@ -1952,3 +1952,14 @@ func TestContentModerationUpdateConfig_AllowedUserIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, view.AllowedUserIDs)
 }
+
+// 风控白名单「加入即清理」桩(这些用例不涉及)。
+func (r *contentModerationTestRepo) DeleteLogsByUserIDs(ctx context.Context, userIDs []int64) (int64, error) {
+	return 0, nil
+}
+func (r *contentModerationTestRepo) DeleteLogsByGroupIDs(ctx context.Context, groupIDs []int64) (int64, error) {
+	return 0, nil
+}
+func (r *contentModerationTestRepo) ListUserIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error) {
+	return nil, nil
+}

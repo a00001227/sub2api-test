@@ -23,7 +23,7 @@ const (
 	defaultPromptAuditRetentionDays = 30
 	maxPromptAuditRetentionDays     = 3650
 
-	promptAuditConfigCacheTTL = 10 * time.Second
+	promptAuditConfigCacheTTL  = 10 * time.Second
 	promptAuditCleanupInterval = 24 * time.Hour
 	promptAuditCleanupTimeout  = 30 * time.Minute
 	promptAuditPersistTimeout  = 10 * time.Second
@@ -138,6 +138,9 @@ type PromptAuditRepository interface {
 	DeleteEvent(ctx context.Context, id int64) error
 	DeleteAll(ctx context.Context) (int64, error)
 	CleanupExpired(ctx context.Context, before time.Time) (int64, error)
+	// 风控白名单「加入即清理」:按用户 / 分组删已留存的提示词。
+	DeleteEventsByUserIDs(ctx context.Context, userIDs []int64) (int64, error)
+	DeleteEventsByGroupIDs(ctx context.Context, groupIDs []int64) (int64, error)
 }
 
 // promptAuditTask 异步落库任务（只带原始 body + 元数据，解析在 worker 里做，避免占用请求热路径）。
@@ -170,8 +173,20 @@ type PromptAuditService struct {
 
 	cfgCache atomic.Pointer[promptAuditCachedConfig]
 
-	stored  atomic.Int64
-	dropped atomic.Int64
+	// allowlist 风控白名单(与内容审核共用一份):命中的用户 / 分组不留存原文。nil = 不过滤。
+	allowlist RiskAllowlistChecker
+
+	stored             atomic.Int64
+	dropped            atomic.Int64
+	skippedAllowlisted atomic.Int64
+}
+
+// SetAllowlist 注入风控白名单判定(由内容审核服务实现)。
+func (s *PromptAuditService) SetAllowlist(checker RiskAllowlistChecker) {
+	if s == nil {
+		return
+	}
+	s.allowlist = checker
 }
 
 // NewPromptAuditService 构造并在后台拉起 worker 与清理循环（与内容审核同构）。
@@ -228,6 +243,17 @@ func (s *PromptAuditService) Capture(ctx context.Context, task promptAuditTask) 
 	}
 	if !s.Active(ctx) {
 		return
+	}
+	// 白名单用户 / 分组:彻底不留存(不是存了再隐藏)。
+	if s.allowlist != nil {
+		var uid int64
+		if task.userID != nil {
+			uid = *task.userID
+		}
+		if s.allowlist.IsAllowlisted(ctx, uid, task.groupID) {
+			s.skippedAllowlisted.Add(1)
+			return
+		}
 	}
 	select {
 	case s.queue <- task:

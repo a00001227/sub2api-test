@@ -20,6 +20,7 @@ func (s *GatewayService) EnqueueForwardedRiskV2(apiKey *APIKey, env EdgeUsageEnv
 	usageLog := &UsageLog{
 		UserID:              apiKey.UserID,
 		APIKeyID:            apiKey.ID,
+		GroupID:             apiKey.GroupID, // 风控白名单按分组跳过要用
 		Model:               env.Model,
 		Stream:              env.Stream,
 		InputTokens:         env.Usage.InputTokens,

@@ -35,6 +35,11 @@
         </span>
       </div>
 
+      <!-- 风控白名单(与审计风控中心共用一份):命中的用户 / 分组不评分、不留原文、不审核 -->
+      <div class="mb-6">
+        <RiskAllowlistPanel />
+      </div>
+
       <!-- Runtime Status -->
       <div class="mb-6">
         <div v-if="statusLoading && !status" data-test="status-loading" role="status" aria-live="polite" class="flex items-center justify-center py-8">
@@ -486,6 +491,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import EvidenceCapturePanel from '@/components/admin/EvidenceCapturePanel.vue'
 import EnforcementPanel from '@/components/admin/EnforcementPanel.vue'
+import RiskAllowlistPanel from '@/components/admin/RiskAllowlistPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
   riskV2API,

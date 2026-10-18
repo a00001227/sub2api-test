@@ -303,3 +303,14 @@ func TestRecordCyberPolicyEvent_DefaultCountsTowardBan(t *testing.T) {
 	require.Len(t, logs, 1)
 	require.GreaterOrEqual(t, logs[0].ViolationCount, 1, "默认路径行为不变（现状回归）")
 }
+
+// 风控白名单「加入即清理」桩(这些用例不涉及)。
+func (r *cyberOrderingTestRepo) DeleteLogsByUserIDs(ctx context.Context, userIDs []int64) (int64, error) {
+	return 0, nil
+}
+func (r *cyberOrderingTestRepo) DeleteLogsByGroupIDs(ctx context.Context, groupIDs []int64) (int64, error) {
+	return 0, nil
+}
+func (r *cyberOrderingTestRepo) ListUserIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error) {
+	return nil, nil
+}
