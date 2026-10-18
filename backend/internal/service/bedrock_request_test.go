@@ -524,7 +524,7 @@ func TestResolveBedrockModelID(t *testing.T) {
 
 		modelID, ok := ResolveBedrockModelID(account, "claude-opus-4-8")
 		require.True(t, ok)
-		assert.Equal(t, "eu.anthropic.claude-opus-4-8-v1", modelID)
+		assert.Equal(t, "eu.anthropic.claude-opus-4-8", modelID)
 	})
 
 	t.Run("默认 Fable 5 映射使用官方 Bedrock 模型 ID", func(t *testing.T) {
