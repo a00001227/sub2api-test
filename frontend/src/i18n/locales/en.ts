@@ -2252,6 +2252,7 @@ export default {
         batch: 'Batch pool',
         distillation: 'Distillation pool',
         bedrock: 'Bedrock pool (provider AWS keys, pay-per-token)',
+        azure: 'Azure pool (provider Azure OpenAI keys, pay-per-token)',
       },
       subscription: {
         title: 'Subscription Settings',

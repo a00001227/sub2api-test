@@ -53,6 +53,8 @@ var providerTypeToPlatform = map[string]string{
 	// bedrock:渠道商提供的 AWS Bedrock API Key,平台归 anthropic(模型/计价口径相同),
 	// 账号 type=bedrock(auth_mode=apikey),只走 import,不走 OAuth。
 	"bedrock": PlatformAnthropic,
+	// azure:渠道商提供的 Azure OpenAI key,平台归 openai,账号 type=apikey + base_url(…/openai/v1),只走 import。
+	"azure": PlatformOpenAI,
 }
 
 // PlatformForProviderType 把 Portal 的 provider_type 解析为 Sub2API 账号平台

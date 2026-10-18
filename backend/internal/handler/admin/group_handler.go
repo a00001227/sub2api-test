@@ -88,7 +88,7 @@ type CreateGroupRequest struct {
 	Platform         string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity"`
 	RateMultiplier   float64            `json:"rate_multiplier"`
 	IsExclusive      bool               `json:"is_exclusive"`
-	Lane             string             `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock"`
+	Lane             string             `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock azure"`
 	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
 	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
 	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
@@ -130,7 +130,7 @@ type UpdateGroupRequest struct {
 	Platform         string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity"`
 	RateMultiplier   *float64           `json:"rate_multiplier"`
 	IsExclusive      *bool              `json:"is_exclusive"`
-	Lane             *string            `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock"`
+	Lane             *string            `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock azure"`
 	Status           string             `json:"status" binding:"omitempty,oneof=active inactive"`
 	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
 	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`

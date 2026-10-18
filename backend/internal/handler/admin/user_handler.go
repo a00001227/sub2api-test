@@ -58,7 +58,7 @@ type CreateUserRequest struct {
 	Balance       *float64 `json:"balance"`
 	Concurrency   int      `json:"concurrency"`
 	RPMLimit      int      `json:"rpm_limit"`
-	Lane          string   `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock"`
+	Lane          string   `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock azure"`
 	AllowedGroups []int64  `json:"allowed_groups"`
 }
 
@@ -72,7 +72,7 @@ type UpdateUserRequest struct {
 	Balance       *float64 `json:"balance"`
 	Concurrency   *int     `json:"concurrency"`
 	RPMLimit      *int     `json:"rpm_limit"`
-	Lane          *string  `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock"`
+	Lane          *string  `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock azure"`
 	Status        string   `json:"status" binding:"omitempty,oneof=active disabled"`
 	AllowedGroups *[]int64 `json:"allowed_groups"`
 	// GroupRates 用户专属分组倍率配置

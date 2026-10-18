@@ -18,6 +18,7 @@ const (
 	laneBatch        = "batch"
 	laneDistillation = "distillation"
 	laneBedrock      = "bedrock" // AWS Bedrock API Key 号池(渠道商按 token 付费,单独一道)
+	laneAzure        = "azure"   // Azure OpenAI API Key 号池(同上)
 )
 
 // normalizeLane 归一工作道;是全链路的单一真源(config 只做浅解析,规范化都走这里)。
@@ -29,6 +30,8 @@ func normalizeLane(s string) string {
 		return laneDistillation
 	case laneBedrock:
 		return laneBedrock
+	case laneAzure:
+		return laneAzure
 	default:
 		return laneNormal
 	}

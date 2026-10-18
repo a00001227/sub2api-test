@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -87,6 +88,8 @@ type ProviderConnectImportService struct {
 	codexProbe codexCredentialProber
 	// bedrockProbe 建号前用 Bedrock API Key 直调一次 AWS(不走代理);nil = 跳过(仅测试)。
 	bedrockProbe bedrockCredentialProber
+	// azureProbe 建号前用 Azure key 直调一次 Azure(不走代理);nil = 跳过(仅测试)。
+	azureProbe azureCredentialProber
 }
 
 // NewProviderConnectImportService creates the service.
@@ -103,6 +106,7 @@ func NewProviderConnectImportService(
 		webhook:      webhook,
 		codexProbe:   liveCodexCredentialProber{},
 		bedrockProbe: liveBedrockCredentialProber{},
+		azureProbe:   liveAzureCredentialProber{},
 	}
 }
 
@@ -128,7 +132,7 @@ func (s *ProviderConnectImportService) ImportCredential(
 	// JWT / codex session JSON 纯解析,不走交换)、bedrock(AWS Bedrock API Key,直连
 	// AWS 探活,不分配代理)。gemini 暂不支持导入。
 	switch providerType {
-	case "claude", "codex", "openai", "bedrock":
+	case "claude", "codex", "openai", "bedrock", "azure":
 	default:
 		return nil, ErrImportProviderTypeUnsupported
 	}
@@ -151,6 +155,10 @@ func (s *ProviderConnectImportService) ImportCredential(
 	// 向 Bedrock 探一次。账号 type=bedrock / auth_mode=apikey,网关按 forwardBedrock 转发。
 	if providerType == "bedrock" {
 		return s.importBedrock(ctx, accountRef, providerType, platform, region, in.Credential)
+	}
+	// azure:同 bedrock,直连微软,不占代理;建 OpenAI 平台 type=apikey + base_url 号。
+	if providerType == "azure" {
+		return s.importAzure(ctx, accountRef, providerType, platform, region, in.Credential)
 	}
 
 	// Step 3: 按 region + platform 分配代理（无容量返回 REGION_NO_CAPACITY；不降级直连）。
@@ -328,6 +336,63 @@ func (s *ProviderConnectImportService) importBedrock(
 			EventID:                   providerwebhook.ImportActivatedEventID(accountRef),
 			// 没有邮箱;plan 用 AWS 区域标识,Portal 当订阅档位展示。
 			Plan: "aws_bedrock_" + awsRegion,
+		})
+	}
+	return &ImportCredentialResult{Status: "active", Sub2apiAccountID: accountID}, nil
+}
+
+// importAzure 导入一把 Azure OpenAI key:解析 `<endpoint>|<key>` → 直连 Azure 探活 →
+// 建 type=apikey 账号(credentials: api_key / base_url=…/openai/v1)→ activated webhook。
+func (s *ProviderConnectImportService) importAzure(
+	ctx context.Context, accountRef, providerType, platform, region, rawCredential string,
+) (*ImportCredentialResult, error) {
+	baseURL, apiKey, perr := parseAzureImportCredential(rawCredential)
+	if perr != nil {
+		return nil, importInvalidCredential("format", "azure credential rejected: "+perr.Error(),
+			map[string]string{"region": region})
+	}
+	if s.azureProbe != nil {
+		if perr := s.azureProbe.ProbeAzureCredential(ctx, baseURL, apiKey); perr != nil {
+			slog.WarnContext(ctx, "provider_connect.import.azure_probe_failed",
+				"external_ref", accountRef,
+				"endpoint", baseURL,
+				"reason", redactImportDetail(perr.Error()))
+			return nil, importInvalidCredential("probe", "Azure OpenAI rejected the key: "+perr.Error(),
+				map[string]string{"region": region, "endpoint": baseURL})
+		}
+	}
+	credentials := map[string]any{
+		"api_key":  apiKey,
+		"base_url": baseURL,
+	}
+	accountID, err := s.accounts.CreateConnectedAccount(ctx, CreateConnectedAccountInput{
+		Name:                      accountRef,
+		Platform:                  platform,
+		Type:                      AccountTypeAPIKey,
+		Credentials:               credentials,
+		ExternalProviderAccountID: accountRef,
+		Region:                    &region,
+	})
+	if err != nil {
+		if id, found, ferr := s.accounts.FindAccountIDByExternalRef(ctx, accountRef); ferr == nil && found {
+			return &ImportCredentialResult{Status: "already_exists", Sub2apiAccountID: id}, nil
+		}
+		return nil, ErrImportAccountCreateFailed
+	}
+	if s.webhook != nil && s.webhook.Enabled() {
+		host := baseURL
+		if u, uerr := url.Parse(baseURL); uerr == nil {
+			host = u.Hostname()
+		}
+		s.webhook.SendActivatedAsync(ActivatedWebhookInput{
+			ExternalProviderAccountID: accountRef,
+			Sub2apiAccountID:          accountID,
+			ProviderType:              providerType,
+			Platform:                  platform,
+			Region:                    region,
+			EventID:                   providerwebhook.ImportActivatedEventID(accountRef),
+			// 没有邮箱;plan 记资源主机名,Portal 当订阅档位展示。
+			Plan: "azure_openai_" + host,
 		})
 	}
 	return &ImportCredentialResult{Status: "active", Sub2apiAccountID: accountID}, nil

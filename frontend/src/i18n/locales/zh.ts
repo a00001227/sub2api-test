@@ -2336,6 +2336,7 @@ export default {
         batch: '批量池',
         distillation: '蒸馏池',
         bedrock: 'Bedrock 池(渠道商 AWS key,按量付费)',
+        azure: 'Azure 池(渠道商 Azure OpenAI key,按量付费)',
       },
       subscription: {
         title: '订阅设置',

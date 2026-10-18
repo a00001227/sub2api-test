@@ -3196,6 +3196,7 @@ const laneOptions = computed(() => [
   { value: "batch", label: t("admin.groups.lane.batch") },
   { value: "distillation", label: t("admin.groups.lane.distillation") },
   { value: "bedrock", label: t("admin.groups.lane.bedrock") },
+  { value: "azure", label: t("admin.groups.lane.azure") },
 ]);
 
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
