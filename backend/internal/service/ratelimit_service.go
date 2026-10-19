@@ -790,6 +790,15 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformOpenAI {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
+	// Bedrock:403 大多是「这把 key 没有某个模型的使用权」(受限模型要找 AWS 销售开通),
+	// 不是凭据失效,绝不能因此停整个号(2026-10-19 一条 fable-5-1 的 403 把号停了,后续
+	// 全部 503)。只有 AWS 明确说 key/凭据本身无效时才停号;其余 403 原样回给客户端。
+	if account.IsBedrock() && !isBedrockCredentialRejected(upstreamMsg, responseBody) {
+		slog.Warn("bedrock_403_model_access_denied_not_disabling",
+			"account_id", account.ID,
+			"message", truncateTempUnschedMessage(responseBody, 300))
+		return false
+	}
 	// 非 Antigravity 平台：保持原有行为
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
@@ -2350,4 +2359,26 @@ func (s *RateLimitService) triggerStreamTimeoutError(ctx context.Context, accoun
 
 	slog.Warn("stream_timeout_account_error", "account_id", account.ID, "model", model)
 	return true
+}
+
+// isBedrockCredentialRejected 判断 Bedrock 403 是不是凭据本身被拒(停号),而非单个模型无权限。
+// AWS 的措辞:key 无效 → "Authentication failed: Please make sure your API Key is valid";
+// SigV4 → "The security token included in the request is invalid" / "UnrecognizedClientException" /
+// "InvalidSignatureException";模型无权限 → "<model> is not available for this account"。
+func isBedrockCredentialRejected(upstreamMsg string, responseBody []byte) bool {
+	text := strings.ToLower(upstreamMsg + " " + string(responseBody))
+	for _, needle := range []string{
+		"authentication failed",
+		"api key is valid",
+		"security token included in the request is invalid",
+		"unrecognizedclientexception",
+		"invalidsignatureexception",
+		"expiredtokenexception",
+		"the api key provided is invalid",
+	} {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
 }
