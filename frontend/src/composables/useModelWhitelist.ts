@@ -7,6 +7,8 @@ const openaiModels = [
   // GPT-5.2 系列
   'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest',
   'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11',
+  // GPT-5.6 系列(terra / sol / luna 为 Codex 代号,生产白名单已启用)
+  'gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna',
   // GPT-5.5 系列
   'gpt-5.5',
   // GPT-5.4 系列
