@@ -552,6 +552,9 @@ export interface Group {
 export interface AdminGroup extends Group {
   // 工作道 / 号池(护号):normal|batch|distillation。中央按此路由该组流量到对应池的 cell。
   lane?: string
+  // 本地渠道策略:inherit|cell_only|local_only|cell_first|local_first|balanced;local_weight = balanced 本地占比(0-100)
+  local_policy?: GroupLocalPolicy
+  local_weight?: number
 
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
@@ -640,6 +643,8 @@ export interface UpdateApiKeyRequest {
   reset_rate_limit_usage?: boolean
 }
 
+export type GroupLocalPolicy = 'inherit' | 'cell_only' | 'local_only' | 'cell_first' | 'local_first' | 'balanced'
+
 export interface CreateGroupRequest {
   name: string
   slug?: string
@@ -648,6 +653,8 @@ export interface CreateGroupRequest {
   rate_multiplier?: number
   is_exclusive?: boolean
   lane?: string
+  local_policy?: GroupLocalPolicy
+  local_weight?: number
   subscription_type?: SubscriptionType
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
@@ -684,6 +691,8 @@ export interface UpdateGroupRequest {
   rate_multiplier?: number
   is_exclusive?: boolean
   lane?: string
+  local_policy?: GroupLocalPolicy
+  local_weight?: number
   status?: 'active' | 'inactive'
   subscription_type?: SubscriptionType
   daily_limit_usd?: number | null

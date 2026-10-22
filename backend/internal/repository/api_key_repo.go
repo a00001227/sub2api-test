@@ -908,6 +908,8 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		RateMultiplier:                  g.RateMultiplier,
 		IsExclusive:                     g.IsExclusive,
 		Lane:                            g.Lane,
+		LocalPolicy:                     g.LocalPolicy,
+		LocalWeight:                     g.LocalWeight,
 		Status:                          g.Status,
 		Hydrated:                        true,
 		SubscriptionType:                g.SubscriptionType,

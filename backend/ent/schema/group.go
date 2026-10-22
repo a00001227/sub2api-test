@@ -57,6 +57,15 @@ func (Group) Fields() []ent.Field {
 		field.String("lane").
 			MaxLen(20).
 			Default("normal"),
+		// 本地渠道策略(中央):该组请求在「转发 cell」与「中央本地绑定账号(如第三方中转)」之间怎么分。
+		// inherit(默认,按 EDGE_FORWARD_GROUPS 决定:在名单=只转 cell,不在=只走本地)|cell_only|local_only|
+		// cell_first(cell 没号兜底本地)|local_first(本地没号再转 cell)|balanced(按 local_weight 随机先后)。
+		field.String("local_policy").
+			MaxLen(20).
+			Default("inherit"),
+		// balanced 时先走本地的概率(0-100)。
+		field.Int("local_weight").
+			Default(50),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),

@@ -1625,6 +1625,17 @@ func (h *GatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream bool) (
 	return wrapReleaseOnDone(c.Request.Context(), releaseFunc), true
 }
 
+// HasLocalCandidate 本地渠道策略的干跑探测:该组在中央本地绑定的账号里此刻有没有能接 model 的号。
+// 只做选号判定(不占并发槽、不绑粘性会话)。选号失败一律 false(含无绑定账号)。
+func (h *GatewayHandler) HasLocalCandidate(c *gin.Context, model string) bool {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || h.gatewayService == nil {
+		return false
+	}
+	_, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, "", model, nil)
+	return err == nil
+}
+
 // CheckForwardEligibility 在中央 edge 转发路径上执行与本地 handler 完全相同的计费资格检查:
 // 余额 / 订阅 / 用户平台配额 / key 自身限额 / RPM(级联)。
 //

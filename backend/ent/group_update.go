@@ -165,6 +165,41 @@ func (_u *GroupUpdate) SetNillableLane(v *string) *GroupUpdate {
 	return _u
 }
 
+// SetLocalPolicy sets the "local_policy" field.
+func (_u *GroupUpdate) SetLocalPolicy(v string) *GroupUpdate {
+	_u.mutation.SetLocalPolicy(v)
+	return _u
+}
+
+// SetNillableLocalPolicy sets the "local_policy" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableLocalPolicy(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetLocalPolicy(*v)
+	}
+	return _u
+}
+
+// SetLocalWeight sets the "local_weight" field.
+func (_u *GroupUpdate) SetLocalWeight(v int) *GroupUpdate {
+	_u.mutation.ResetLocalWeight()
+	_u.mutation.SetLocalWeight(v)
+	return _u
+}
+
+// SetNillableLocalWeight sets the "local_weight" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableLocalWeight(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetLocalWeight(*v)
+	}
+	return _u
+}
+
+// AddLocalWeight adds value to the "local_weight" field.
+func (_u *GroupUpdate) AddLocalWeight(v int) *GroupUpdate {
+	_u.mutation.AddLocalWeight(v)
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *GroupUpdate) SetStatus(v string) *GroupUpdate {
 	_u.mutation.SetStatus(v)
@@ -965,6 +1000,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "lane", err: fmt.Errorf(`ent: validator failed for field "Group.lane": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.LocalPolicy(); ok {
+		if err := group.LocalPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "local_policy", err: fmt.Errorf(`ent: validator failed for field "Group.local_policy": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := group.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Group.status": %w`, err)}
@@ -1035,6 +1075,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Lane(); ok {
 		_spec.SetField(group.FieldLane, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.LocalPolicy(); ok {
+		_spec.SetField(group.FieldLocalPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.LocalWeight(); ok {
+		_spec.SetField(group.FieldLocalWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedLocalWeight(); ok {
+		_spec.AddField(group.FieldLocalWeight, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
@@ -1628,6 +1677,41 @@ func (_u *GroupUpdateOne) SetNillableLane(v *string) *GroupUpdateOne {
 	if v != nil {
 		_u.SetLane(*v)
 	}
+	return _u
+}
+
+// SetLocalPolicy sets the "local_policy" field.
+func (_u *GroupUpdateOne) SetLocalPolicy(v string) *GroupUpdateOne {
+	_u.mutation.SetLocalPolicy(v)
+	return _u
+}
+
+// SetNillableLocalPolicy sets the "local_policy" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableLocalPolicy(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetLocalPolicy(*v)
+	}
+	return _u
+}
+
+// SetLocalWeight sets the "local_weight" field.
+func (_u *GroupUpdateOne) SetLocalWeight(v int) *GroupUpdateOne {
+	_u.mutation.ResetLocalWeight()
+	_u.mutation.SetLocalWeight(v)
+	return _u
+}
+
+// SetNillableLocalWeight sets the "local_weight" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableLocalWeight(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetLocalWeight(*v)
+	}
+	return _u
+}
+
+// AddLocalWeight adds value to the "local_weight" field.
+func (_u *GroupUpdateOne) AddLocalWeight(v int) *GroupUpdateOne {
+	_u.mutation.AddLocalWeight(v)
 	return _u
 }
 
@@ -2444,6 +2528,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "lane", err: fmt.Errorf(`ent: validator failed for field "Group.lane": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.LocalPolicy(); ok {
+		if err := group.LocalPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "local_policy", err: fmt.Errorf(`ent: validator failed for field "Group.local_policy": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := group.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Group.status": %w`, err)}
@@ -2531,6 +2620,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.Lane(); ok {
 		_spec.SetField(group.FieldLane, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.LocalPolicy(); ok {
+		_spec.SetField(group.FieldLocalPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.LocalWeight(); ok {
+		_spec.SetField(group.FieldLocalWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedLocalWeight(); ok {
+		_spec.AddField(group.FieldLocalWeight, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)

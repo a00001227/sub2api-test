@@ -147,6 +147,34 @@ func (_c *GroupCreate) SetNillableLane(v *string) *GroupCreate {
 	return _c
 }
 
+// SetLocalPolicy sets the "local_policy" field.
+func (_c *GroupCreate) SetLocalPolicy(v string) *GroupCreate {
+	_c.mutation.SetLocalPolicy(v)
+	return _c
+}
+
+// SetNillableLocalPolicy sets the "local_policy" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableLocalPolicy(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetLocalPolicy(*v)
+	}
+	return _c
+}
+
+// SetLocalWeight sets the "local_weight" field.
+func (_c *GroupCreate) SetLocalWeight(v int) *GroupCreate {
+	_c.mutation.SetLocalWeight(v)
+	return _c
+}
+
+// SetNillableLocalWeight sets the "local_weight" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableLocalWeight(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetLocalWeight(*v)
+	}
+	return _c
+}
+
 // SetStatus sets the "status" field.
 func (_c *GroupCreate) SetStatus(v string) *GroupCreate {
 	_c.mutation.SetStatus(v)
@@ -676,6 +704,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultLane
 		_c.mutation.SetLane(v)
 	}
+	if _, ok := _c.mutation.LocalPolicy(); !ok {
+		v := group.DefaultLocalPolicy
+		_c.mutation.SetLocalPolicy(v)
+	}
+	if _, ok := _c.mutation.LocalWeight(); !ok {
+		v := group.DefaultLocalWeight
+		_c.mutation.SetLocalWeight(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := group.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -789,6 +825,17 @@ func (_c *GroupCreate) check() error {
 		if err := group.LaneValidator(v); err != nil {
 			return &ValidationError{Name: "lane", err: fmt.Errorf(`ent: validator failed for field "Group.lane": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.LocalPolicy(); !ok {
+		return &ValidationError{Name: "local_policy", err: errors.New(`ent: missing required field "Group.local_policy"`)}
+	}
+	if v, ok := _c.mutation.LocalPolicy(); ok {
+		if err := group.LocalPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "local_policy", err: fmt.Errorf(`ent: validator failed for field "Group.local_policy": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.LocalWeight(); !ok {
+		return &ValidationError{Name: "local_weight", err: errors.New(`ent: missing required field "Group.local_weight"`)}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "Group.status"`)}
@@ -929,6 +976,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Lane(); ok {
 		_spec.SetField(group.FieldLane, field.TypeString, value)
 		_node.Lane = value
+	}
+	if value, ok := _c.mutation.LocalPolicy(); ok {
+		_spec.SetField(group.FieldLocalPolicy, field.TypeString, value)
+		_node.LocalPolicy = value
+	}
+	if value, ok := _c.mutation.LocalWeight(); ok {
+		_spec.SetField(group.FieldLocalWeight, field.TypeInt, value)
+		_node.LocalWeight = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
@@ -1315,6 +1370,36 @@ func (u *GroupUpsert) SetLane(v string) *GroupUpsert {
 // UpdateLane sets the "lane" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateLane() *GroupUpsert {
 	u.SetExcluded(group.FieldLane)
+	return u
+}
+
+// SetLocalPolicy sets the "local_policy" field.
+func (u *GroupUpsert) SetLocalPolicy(v string) *GroupUpsert {
+	u.Set(group.FieldLocalPolicy, v)
+	return u
+}
+
+// UpdateLocalPolicy sets the "local_policy" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateLocalPolicy() *GroupUpsert {
+	u.SetExcluded(group.FieldLocalPolicy)
+	return u
+}
+
+// SetLocalWeight sets the "local_weight" field.
+func (u *GroupUpsert) SetLocalWeight(v int) *GroupUpsert {
+	u.Set(group.FieldLocalWeight, v)
+	return u
+}
+
+// UpdateLocalWeight sets the "local_weight" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateLocalWeight() *GroupUpsert {
+	u.SetExcluded(group.FieldLocalWeight)
+	return u
+}
+
+// AddLocalWeight adds v to the "local_weight" field.
+func (u *GroupUpsert) AddLocalWeight(v int) *GroupUpsert {
+	u.Add(group.FieldLocalWeight, v)
 	return u
 }
 
@@ -1962,6 +2047,41 @@ func (u *GroupUpsertOne) SetLane(v string) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateLane() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateLane()
+	})
+}
+
+// SetLocalPolicy sets the "local_policy" field.
+func (u *GroupUpsertOne) SetLocalPolicy(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLocalPolicy(v)
+	})
+}
+
+// UpdateLocalPolicy sets the "local_policy" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateLocalPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLocalPolicy()
+	})
+}
+
+// SetLocalWeight sets the "local_weight" field.
+func (u *GroupUpsertOne) SetLocalWeight(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLocalWeight(v)
+	})
+}
+
+// AddLocalWeight adds v to the "local_weight" field.
+func (u *GroupUpsertOne) AddLocalWeight(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddLocalWeight(v)
+	})
+}
+
+// UpdateLocalWeight sets the "local_weight" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateLocalWeight() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLocalWeight()
 	})
 }
 
@@ -2852,6 +2972,41 @@ func (u *GroupUpsertBulk) SetLane(v string) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateLane() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateLane()
+	})
+}
+
+// SetLocalPolicy sets the "local_policy" field.
+func (u *GroupUpsertBulk) SetLocalPolicy(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLocalPolicy(v)
+	})
+}
+
+// UpdateLocalPolicy sets the "local_policy" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateLocalPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLocalPolicy()
+	})
+}
+
+// SetLocalWeight sets the "local_weight" field.
+func (u *GroupUpsertBulk) SetLocalWeight(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLocalWeight(v)
+	})
+}
+
+// AddLocalWeight adds v to the "local_weight" field.
+func (u *GroupUpsertBulk) AddLocalWeight(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddLocalWeight(v)
+	})
+}
+
+// UpdateLocalWeight sets the "local_weight" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateLocalWeight() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLocalWeight()
 	})
 }
 

@@ -1110,6 +1110,16 @@ func (h *OpenAIGatewayHandler) AcquireForwardUserSlot(c *gin.Context, isStream b
 	return h.acquireResponsesUserSlot(c, slotUserID, slotPlatform, slotMax, isStream, &streamStarted, logger.L())
 }
 
+// HasLocalCandidate 本地渠道策略的干跑探测(OpenAI 侧),语义同 GatewayHandler.HasLocalCandidate。
+func (h *OpenAIGatewayHandler) HasLocalCandidate(c *gin.Context, model string) bool {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || h.gatewayService == nil {
+		return false
+	}
+	_, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, "", model, nil)
+	return err == nil
+}
+
 // CheckForwardEligibility 中央 edge 转发路径的完整计费资格检查(OpenAI 协议错误写法),
 // 语义同 GatewayHandler.CheckForwardEligibility:余额 / 订阅 / 平台配额 / key 限额 / RPM。
 func (h *OpenAIGatewayHandler) CheckForwardEligibility(c *gin.Context) bool {

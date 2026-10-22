@@ -39,6 +39,44 @@ type EvidenceCaptureFunc func(c *gin.Context, userID, apiKeyID int64, reqBody []
 // 由 pricing_models 的"启用模型"集合驱动。nil = 不校验(白名单关)。
 type ModelAllowFunc func(ctx context.Context, model string) bool
 
+// EdgeLocalProbeFunc 本地渠道策略的干跑探测:该组在中央本地绑定的账号里,此刻有没有能接
+// 这个模型的号(不占槽、不绑会话)。返回 true → 可以把请求交给本地处理器。
+type EdgeLocalProbeFunc func(c *gin.Context, model string) bool
+
+// edgeLocalProbe 由 EdgeForward 注入(进程内只有一份转发中间件);nil = 本地探测不可用,
+// local_first / balanced 退化为 cell_first(只兜底,不前置)。
+var edgeLocalProbe EdgeLocalProbeFunc
+
+// SetEdgeLocalProbe 注入本地探测(routes 装配时调用)。
+func SetEdgeLocalProbe(fn EdgeLocalProbeFunc) { edgeLocalProbe = fn }
+
+// localFallbackToHandler 把请求交还给中央本地处理器(本地渠道策略):还原已缓冲的请求体、
+// 释放转发阶段持有的消费者槽位、标阶段,然后 c.Next()。调用方必须保证尚未写任何响应字节。
+func localFallbackToHandler(c *gin.Context, body []byte, releaseSlot func(), reason string) {
+	if releaseSlot != nil {
+		releaseSlot()
+	}
+	if body != nil {
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		c.Request.ContentLength = int64(len(body))
+	}
+	slog.Info("edge_forward: 交给本地渠道", "path", c.Request.URL.Path, "reason", reason)
+	SetRequestPhase(c, "local_handler")
+	c.Next()
+}
+
+// effectiveLocalPolicy 把组策略归一并解开 inherit:在转发名单里 = cell_only,否则 local_only。
+func effectiveLocalPolicy(group *service.Group, inForwardSet bool) string {
+	pol := service.NormalizeGroupLocalPolicy(group.LocalPolicy)
+	if pol != service.GroupLocalPolicyInherit {
+		return pol
+	}
+	if inForwardSet {
+		return service.GroupLocalPolicyCellOnly
+	}
+	return service.GroupLocalPolicyLocalOnly
+}
+
 // EdgeUserSlotFunc 在转发到 cell 之前获取「消费者用户级并发槽位」。
 //
 // 为什么必须在中央这层限:转发到 cell 的流量在 cell 侧走的是无限并发的可信占位身份
@@ -206,19 +244,20 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			c.Next()
 			return
 		}
-		if _, hit := groupSet[apiKey.Group.Slug]; !hit {
-			slog.Debug("edge_forward: 跳过(组 slug 未命中转发列表)", "path", c.Request.URL.Path,
-				"key_group_slug", apiKey.Group.Slug, "forward_groups", func() []string {
-					gs := make([]string, 0, len(groupSet))
-					for g := range groupSet {
-						gs = append(gs, g)
-					}
-					return gs
-				}())
+		_, inForwardSet := groupSet[apiKey.Group.Slug]
+		// 本地渠道策略(组级,存库即时生效):inherit 沿用 EDGE_FORWARD_GROUPS;其它值覆盖名单。
+		localPolicy := effectiveLocalPolicy(apiKey.Group, inForwardSet)
+		if localPolicy == service.GroupLocalPolicyLocalOnly {
+			slog.Debug("edge_forward: 跳过(组走本地)", "path", c.Request.URL.Path,
+				"key_group_slug", apiKey.Group.Slug, "local_policy", apiKey.Group.LocalPolicy, "in_forward_set", inForwardSet)
 			SetRequestPhase(c, "local_handler")
 			c.Next()
 			return
 		}
+		// 允许回落本地的策略:cell 没号 / 无可路由时不再 502,交给本地处理器。
+		localFallbackAllowed := localPolicy == service.GroupLocalPolicyCellFirst ||
+			localPolicy == service.GroupLocalPolicyLocalFirst ||
+			localPolicy == service.GroupLocalPolicyBalanced
 		// 只读元数据端点(列模型 /v1/models、查用量 /v1/usage)由中央直接服务,不转发到 cell:
 		// 这类请求不调用模型、请求体无 model,若走转发+模型白名单会被误判 403 model not allowed。
 		// 列模型菜单归中央(受分组「自定义 /v1/models 列表」等展示配置控制),与调用/调度无关。
@@ -264,7 +303,11 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			}
 		}
 		if len(order) == 0 {
-			// 对应工作道无可用 cell → 502,绝不跨道、绝不本地执行(fail-closed 护号)。
+			// 对应工作道无可用 cell:组允许本地兜底就交给本地处理器,否则 502(绝不跨道,护号)。
+			if localFallbackAllowed {
+				localFallbackToHandler(c, nil, nil, "no_routable_cell")
+				return
+			}
 			slog.Error("edge_forward: 无可路由 cell", "path", c.Request.URL.Path, "lane", consumerLane)
 			writeEdgeError(c)
 			return
@@ -336,6 +379,18 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 			}
 		}
 
+		// 本地优先 / 平权:转发前先问本地有没有能接的号(干跑,不占槽)。有就直接本地跑;
+		// 没有再转 cell(cell 也没号时仍可按 localFallbackAllowed 兜底回来)。
+		if edgeLocalProbe != nil && (localPolicy == service.GroupLocalPolicyLocalFirst ||
+			(localPolicy == service.GroupLocalPolicyBalanced && rng()*100 < float64(service.NormalizeGroupLocalWeight(apiKey.Group.LocalWeight)))) {
+			reqModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+			if edgeLocalProbe(c, reqModel) {
+				localFallbackToHandler(c, body, nil, "policy_"+localPolicy)
+				return
+			}
+			slog.Debug("edge_forward: 本地无可用账号,转 cell", "path", c.Request.URL.Path, "local_policy", localPolicy, "model", reqModel)
+		}
+
 		// 消费者用户级并发限制(中央职责):转发前获取消费者的用户并发槽位。cell 侧对
 		// 转发流量不限并发,不在这里限,edge 模式下用户并发上限就完全失效。槽位持有到本次
 		// 转发结束(defer 释放),客户端断开由 wrapReleaseOnDone 兜底。放在白名单校验之后、
@@ -343,6 +398,7 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 		// 时回调已按客户端协议写好错误响应,这里直接收尾。
 		isStream := gjson.GetBytes(body, "stream").Bool()
 		SetRequestPhase(c, "edge_forward.user_slot")
+		var releaseUserSlot func()
 		if acquireUserSlot != nil {
 			release, ok := acquireUserSlot(c, isStream)
 			if !ok {
@@ -350,7 +406,14 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				return
 			}
 			if release != nil {
-				defer release()
+				released := false
+				releaseUserSlot = func() {
+					if !released {
+						released = true
+						release()
+					}
+				}
+				defer releaseUserSlot()
 			}
 		}
 
@@ -498,6 +561,11 @@ func newEdgeForwardHandler(resolver cellResolver, groupSet map[string]struct{}, 
 				biller(c, *env, body, reqStart)
 			}
 			c.Abort()
+			return
+		}
+		if localFallbackAllowed && !earlyStarted && !c.Writer.Written() {
+			slog.Warn("edge_forward: 所有候选 cell 均不可达,交给本地渠道", "candidates", len(order), "outcomes", outcomes, "err", lastErr)
+			localFallbackToHandler(c, body, releaseUserSlot, "cells_exhausted")
 			return
 		}
 		slog.Error("edge_forward: 所有候选 cell 均不可达", "candidates", len(order), "outcomes", outcomes, "err", lastErr)

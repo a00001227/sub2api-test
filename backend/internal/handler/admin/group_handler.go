@@ -89,6 +89,8 @@ type CreateGroupRequest struct {
 	RateMultiplier   float64            `json:"rate_multiplier"`
 	IsExclusive      bool               `json:"is_exclusive"`
 	Lane             string             `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock azure"`
+	LocalPolicy      string             `json:"local_policy" binding:"omitempty,oneof=inherit cell_only local_only cell_first local_first balanced"`
+	LocalWeight      *int               `json:"local_weight" binding:"omitempty,min=0,max=100"`
 	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
 	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
 	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
@@ -131,6 +133,8 @@ type UpdateGroupRequest struct {
 	RateMultiplier   *float64           `json:"rate_multiplier"`
 	IsExclusive      *bool              `json:"is_exclusive"`
 	Lane             *string            `json:"lane" binding:"omitempty,oneof=normal batch distillation bedrock azure"`
+	LocalPolicy      *string            `json:"local_policy" binding:"omitempty,oneof=inherit cell_only local_only cell_first local_first balanced"`
+	LocalWeight      *int               `json:"local_weight" binding:"omitempty,min=0,max=100"`
 	Status           string             `json:"status" binding:"omitempty,oneof=active inactive"`
 	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
 	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
@@ -289,6 +293,8 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		RateMultiplier:                  req.RateMultiplier,
 		IsExclusive:                     req.IsExclusive,
 		Lane:                            req.Lane,
+		LocalPolicy:                     req.LocalPolicy,
+		LocalWeight:                     req.LocalWeight,
 		SubscriptionType:                req.SubscriptionType,
 		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
 		WeeklyLimitUSD:                  req.WeeklyLimitUSD.ToServiceInput(),
@@ -346,6 +352,8 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		RateMultiplier:                  req.RateMultiplier,
 		IsExclusive:                     req.IsExclusive,
 		Lane:                            req.Lane,
+		LocalPolicy:                     req.LocalPolicy,
+		LocalWeight:                     req.LocalWeight,
 		Status:                          req.Status,
 		SubscriptionType:                req.SubscriptionType,
 		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),

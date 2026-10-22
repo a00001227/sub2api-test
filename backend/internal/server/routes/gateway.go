@@ -64,6 +64,13 @@ func RegisterGatewayRoutes(
 		}
 		return h.Gateway.CheckForwardEligibility(c)
 	}
+	// 本地渠道策略(组级 local_first / balanced):转发前干跑探测中央本地有没有能接的号。
+	middleware.SetEdgeLocalProbe(func(c *gin.Context, model string) bool {
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			return h.OpenAIGateway.HasLocalCandidate(c, model)
+		}
+		return h.Gateway.HasLocalCandidate(c, model)
+	})
 	edgeForward := middleware.Phase("edge_forward", middleware.EdgeForward(cfg.EdgeForward, func(c *gin.Context, env service.EdgeUsageEnvelope, reqBody []byte, startedAt time.Time) {
 		if env.IsOpenAI() {
 			h.OpenAIGateway.RecordForwardedConsumerUsage(c, env)

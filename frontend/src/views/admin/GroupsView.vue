@@ -603,6 +603,17 @@
           </div>
 
           <div class="mt-4">
+            <label class="input-label">{{ t("admin.groups.localPolicy.label") }}</label>
+            <Select v-model="createForm.local_policy" :options="localPolicyOptions" />
+            <p class="input-hint">{{ t("admin.groups.localPolicy.hint") }}</p>
+          </div>
+          <div v-if="createForm.local_policy === 'balanced'" class="mt-4">
+            <label class="input-label">{{ t("admin.groups.localPolicy.weight") }}</label>
+            <input v-model.number="createForm.local_weight" type="number" min="0" max="100" class="input" />
+            <p class="input-hint">{{ t("admin.groups.localPolicy.weightHint") }}</p>
+          </div>
+
+          <div class="mt-4">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -1906,6 +1917,17 @@
           </div>
 
           <div class="mt-4">
+            <label class="input-label">{{ t("admin.groups.localPolicy.label") }}</label>
+            <Select v-model="editForm.local_policy" :options="localPolicyOptions" />
+            <p class="input-hint">{{ t("admin.groups.localPolicy.hint") }}</p>
+          </div>
+          <div v-if="editForm.local_policy === 'balanced'" class="mt-4">
+            <label class="input-label">{{ t("admin.groups.localPolicy.weight") }}</label>
+            <input v-model.number="editForm.local_weight" type="number" min="0" max="100" class="input" />
+            <p class="input-hint">{{ t("admin.groups.localPolicy.weightHint") }}</p>
+          </div>
+
+          <div class="mt-4">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -3074,7 +3096,7 @@ import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
 import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
-import type { AdminGroup, GroupPlatform, SubscriptionType } from "@/types";
+import type { AdminGroup, GroupPlatform, SubscriptionType, GroupLocalPolicy } from "@/types";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
@@ -3198,6 +3220,14 @@ const laneOptions = computed(() => [
   { value: "bedrock", label: t("admin.groups.lane.bedrock") },
   { value: "azure", label: t("admin.groups.lane.azure") },
 ]);
+
+// 本地渠道策略:该组请求在「转发 cell」与「中央本地绑定账号(如第三方中转)」之间怎么分。
+const localPolicyOptions = computed(() =>
+  (["inherit", "cell_only", "local_only", "cell_first", "local_first", "balanced"] as GroupLocalPolicy[]).map((v) => ({
+    value: v,
+    label: t(`admin.groups.localPolicy.${v}`),
+  })),
+);
 
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
 const fallbackGroupOptions = computed(() => {
@@ -3372,6 +3402,8 @@ const createForm = reactive({
   rate_multiplier: 1.0,
   is_exclusive: false,
   lane: "normal",
+  local_policy: "inherit" as GroupLocalPolicy,
+  local_weight: 50,
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
@@ -3705,6 +3737,8 @@ const editForm = reactive({
   is_exclusive: false,
   status: "active" as "active" | "inactive",
   lane: "normal",
+  local_policy: "inherit" as GroupLocalPolicy,
+  local_weight: 50,
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
@@ -3959,6 +3993,8 @@ const closeCreateModal = () => {
   createForm.rate_multiplier = 1.0;
   createForm.is_exclusive = false;
   createForm.lane = "normal";
+  createForm.local_policy = "inherit";
+  createForm.local_weight = 50;
   createForm.subscription_type = "standard";
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
@@ -4087,6 +4123,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.is_exclusive = group.is_exclusive;
   editForm.status = group.status;
   editForm.lane = group.lane || "normal";
+  editForm.local_policy = (group.local_policy as GroupLocalPolicy) || "inherit";
+  editForm.local_weight = group.local_weight ?? 50;
   editForm.subscription_type = group.subscription_type || "standard";
   editForm.daily_limit_usd = group.daily_limit_usd;
   editForm.weekly_limit_usd = group.weekly_limit_usd;

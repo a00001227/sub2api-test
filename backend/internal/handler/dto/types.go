@@ -134,6 +134,9 @@ type AdminGroup struct {
 
 	// 工作道 / 号池(护号):normal|batch|distillation。中央按此路由该组流量到对应池的 cell。
 	Lane string `json:"lane"`
+	// 本地渠道策略:inherit|cell_only|local_only|cell_first|local_first|balanced;LocalWeight = balanced 本地占比。
+	LocalPolicy string `json:"local_policy"`
+	LocalWeight int    `json:"local_weight"`
 
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`

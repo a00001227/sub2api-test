@@ -2329,6 +2329,18 @@ export default {
       unsavedChanges: '有未保存的修改',
       revertChanges: '撤销修改',
       userInfo: '用户信息',
+      localPolicy: {
+        label: '本地渠道策略',
+        hint: '该组请求在「转发 cell」与「本组在中央绑定的账号(如第三方中转站)」之间怎么分。「沿用环境配置」= 按 EDGE_FORWARD_GROUPS:在名单只转 cell,不在只走本地。改动即时生效,无需重启。',
+        weight: '本地占比(%)',
+        weightHint: '平权模式下每条请求先走本地的概率;走不通自动换另一边。',
+        inherit: '沿用环境配置(默认)',
+        cell_only: '只转 cell',
+        local_only: '只走本地',
+        cell_first: 'cell 优先,本地兜底',
+        local_first: '本地优先,cell 兜底',
+        balanced: '本地平权(按占比随机)',
+      },
       lane: {
         label: '号池（工作道）',
         hint: '该分组的流量只路由到对应号池的 cell。非「常规」为内部护号池，请勿分配给终端客户分组。',

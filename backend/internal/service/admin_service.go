@@ -206,6 +206,8 @@ type CreateGroupInput struct {
 	RateMultiplier   float64
 	IsExclusive      bool
 	Lane             string   // 工作道/号池:normal|batch|distillation
+	LocalPolicy      string   // 本地渠道策略(见 group_local_policy.go);空 = inherit
+	LocalWeight      *int     // balanced 本地占比 0-100;nil = 50
 	SubscriptionType string   // standard/subscription
 	DailyLimitUSD    *float64 // 日限额 (USD)
 	WeeklyLimitUSD   *float64 // 周限额 (USD)
@@ -248,6 +250,8 @@ type UpdateGroupInput struct {
 	RateMultiplier   *float64 // 使用指针以支持设置为0
 	IsExclusive      *bool
 	Lane             *string // 工作道/号池:normal|batch|distillation
+	LocalPolicy      *string // 本地渠道策略;nil = 不变
+	LocalWeight      *int    // balanced 本地占比;nil = 不变
 	Status           string
 	SubscriptionType string   // standard/subscription
 	DailyLimitUSD    *float64 // 日限额 (USD)
@@ -1941,6 +1945,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RateMultiplier:                  input.RateMultiplier,
 		IsExclusive:                     input.IsExclusive,
 		Lane:                            NormalizeGroupLane(input.Lane),
+		LocalPolicy:                     NormalizeGroupLocalPolicy(input.LocalPolicy),
+		LocalWeight:                     NormalizeGroupLocalWeight(derefIntDefault(input.LocalWeight, 50)),
 		Status:                          StatusActive,
 		SubscriptionType:                subscriptionType,
 		DailyLimitUSD:                   dailyLimit,
@@ -2144,6 +2150,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive
+	}
+	if input.LocalPolicy != nil {
+		group.LocalPolicy = NormalizeGroupLocalPolicy(*input.LocalPolicy)
+	}
+	if input.LocalWeight != nil {
+		group.LocalWeight = NormalizeGroupLocalWeight(*input.LocalWeight)
 	}
 	if input.Lane != nil {
 		group.Lane = NormalizeGroupLane(*input.Lane)
@@ -4132,4 +4144,11 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 	}
 	applyAntigravityPrivacyMode(account, mode)
 	return mode
+}
+
+func derefIntDefault(p *int, def int) int {
+	if p == nil {
+		return def
+	}
+	return *p
 }

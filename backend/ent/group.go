@@ -37,6 +37,10 @@ type Group struct {
 	IsExclusive bool `json:"is_exclusive,omitempty"`
 	// Lane holds the value of the "lane" field.
 	Lane string `json:"lane,omitempty"`
+	// LocalPolicy holds the value of the "local_policy" field.
+	LocalPolicy string `json:"local_policy,omitempty"`
+	// LocalWeight holds the value of the "local_weight" field.
+	LocalWeight int `json:"local_weight,omitempty"`
 	// Status holds the value of the "status" field.
 	Status string `json:"status,omitempty"`
 	// Platform holds the value of the "platform" field.
@@ -205,9 +209,9 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImageRateMultiplier, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k:
 			values[i] = new(sql.NullFloat64)
-		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit:
+		case group.FieldID, group.FieldLocalWeight, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldSlug, group.FieldDescription, group.FieldLane, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel:
+		case group.FieldName, group.FieldSlug, group.FieldDescription, group.FieldLane, group.FieldLocalPolicy, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -287,6 +291,18 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field lane", values[i])
 			} else if value.Valid {
 				_m.Lane = value.String
+			}
+		case group.FieldLocalPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field local_policy", values[i])
+			} else if value.Valid {
+				_m.LocalPolicy = value.String
+			}
+		case group.FieldLocalWeight:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field local_weight", values[i])
+			} else if value.Valid {
+				_m.LocalWeight = int(value.Int64)
 			}
 		case group.FieldStatus:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -578,6 +594,12 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("lane=")
 	builder.WriteString(_m.Lane)
+	builder.WriteString(", ")
+	builder.WriteString("local_policy=")
+	builder.WriteString(_m.LocalPolicy)
+	builder.WriteString(", ")
+	builder.WriteString("local_weight=")
+	builder.WriteString(fmt.Sprintf("%v", _m.LocalWeight))
 	builder.WriteString(", ")
 	builder.WriteString("status=")
 	builder.WriteString(_m.Status)

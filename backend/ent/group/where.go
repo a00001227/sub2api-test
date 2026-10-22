@@ -100,6 +100,16 @@ func Lane(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldLane, v))
 }
 
+// LocalPolicy applies equality check predicate on the "local_policy" field. It's identical to LocalPolicyEQ.
+func LocalPolicy(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLocalPolicy, v))
+}
+
+// LocalWeight applies equality check predicate on the "local_weight" field. It's identical to LocalWeightEQ.
+func LocalWeight(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLocalWeight, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldStatus, v))
@@ -678,6 +688,111 @@ func LaneEqualFold(v string) predicate.Group {
 // LaneContainsFold applies the ContainsFold predicate on the "lane" field.
 func LaneContainsFold(v string) predicate.Group {
 	return predicate.Group(sql.FieldContainsFold(FieldLane, v))
+}
+
+// LocalPolicyEQ applies the EQ predicate on the "local_policy" field.
+func LocalPolicyEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLocalPolicy, v))
+}
+
+// LocalPolicyNEQ applies the NEQ predicate on the "local_policy" field.
+func LocalPolicyNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldLocalPolicy, v))
+}
+
+// LocalPolicyIn applies the In predicate on the "local_policy" field.
+func LocalPolicyIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldLocalPolicy, vs...))
+}
+
+// LocalPolicyNotIn applies the NotIn predicate on the "local_policy" field.
+func LocalPolicyNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldLocalPolicy, vs...))
+}
+
+// LocalPolicyGT applies the GT predicate on the "local_policy" field.
+func LocalPolicyGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldLocalPolicy, v))
+}
+
+// LocalPolicyGTE applies the GTE predicate on the "local_policy" field.
+func LocalPolicyGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldLocalPolicy, v))
+}
+
+// LocalPolicyLT applies the LT predicate on the "local_policy" field.
+func LocalPolicyLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldLocalPolicy, v))
+}
+
+// LocalPolicyLTE applies the LTE predicate on the "local_policy" field.
+func LocalPolicyLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldLocalPolicy, v))
+}
+
+// LocalPolicyContains applies the Contains predicate on the "local_policy" field.
+func LocalPolicyContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldLocalPolicy, v))
+}
+
+// LocalPolicyHasPrefix applies the HasPrefix predicate on the "local_policy" field.
+func LocalPolicyHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldLocalPolicy, v))
+}
+
+// LocalPolicyHasSuffix applies the HasSuffix predicate on the "local_policy" field.
+func LocalPolicyHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldLocalPolicy, v))
+}
+
+// LocalPolicyEqualFold applies the EqualFold predicate on the "local_policy" field.
+func LocalPolicyEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldLocalPolicy, v))
+}
+
+// LocalPolicyContainsFold applies the ContainsFold predicate on the "local_policy" field.
+func LocalPolicyContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldLocalPolicy, v))
+}
+
+// LocalWeightEQ applies the EQ predicate on the "local_weight" field.
+func LocalWeightEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLocalWeight, v))
+}
+
+// LocalWeightNEQ applies the NEQ predicate on the "local_weight" field.
+func LocalWeightNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldLocalWeight, v))
+}
+
+// LocalWeightIn applies the In predicate on the "local_weight" field.
+func LocalWeightIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldLocalWeight, vs...))
+}
+
+// LocalWeightNotIn applies the NotIn predicate on the "local_weight" field.
+func LocalWeightNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldLocalWeight, vs...))
+}
+
+// LocalWeightGT applies the GT predicate on the "local_weight" field.
+func LocalWeightGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldLocalWeight, v))
+}
+
+// LocalWeightGTE applies the GTE predicate on the "local_weight" field.
+func LocalWeightGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldLocalWeight, v))
+}
+
+// LocalWeightLT applies the LT predicate on the "local_weight" field.
+func LocalWeightLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldLocalWeight, v))
+}
+
+// LocalWeightLTE applies the LTE predicate on the "local_weight" field.
+func LocalWeightLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldLocalWeight, v))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

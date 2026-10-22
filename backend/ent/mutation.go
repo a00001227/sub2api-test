@@ -16351,6 +16351,9 @@ type GroupMutation struct {
 	addrate_multiplier                      *float64
 	is_exclusive                            *bool
 	lane                                    *string
+	local_policy                            *string
+	local_weight                            *int
+	addlocal_weight                         *int
 	status                                  *string
 	platform                                *string
 	subscription_type                       *string
@@ -16895,6 +16898,98 @@ func (m *GroupMutation) OldLane(ctx context.Context) (v string, err error) {
 // ResetLane resets all changes to the "lane" field.
 func (m *GroupMutation) ResetLane() {
 	m.lane = nil
+}
+
+// SetLocalPolicy sets the "local_policy" field.
+func (m *GroupMutation) SetLocalPolicy(s string) {
+	m.local_policy = &s
+}
+
+// LocalPolicy returns the value of the "local_policy" field in the mutation.
+func (m *GroupMutation) LocalPolicy() (r string, exists bool) {
+	v := m.local_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLocalPolicy returns the old "local_policy" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldLocalPolicy(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLocalPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLocalPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLocalPolicy: %w", err)
+	}
+	return oldValue.LocalPolicy, nil
+}
+
+// ResetLocalPolicy resets all changes to the "local_policy" field.
+func (m *GroupMutation) ResetLocalPolicy() {
+	m.local_policy = nil
+}
+
+// SetLocalWeight sets the "local_weight" field.
+func (m *GroupMutation) SetLocalWeight(i int) {
+	m.local_weight = &i
+	m.addlocal_weight = nil
+}
+
+// LocalWeight returns the value of the "local_weight" field in the mutation.
+func (m *GroupMutation) LocalWeight() (r int, exists bool) {
+	v := m.local_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLocalWeight returns the old "local_weight" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldLocalWeight(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLocalWeight is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLocalWeight requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLocalWeight: %w", err)
+	}
+	return oldValue.LocalWeight, nil
+}
+
+// AddLocalWeight adds i to the "local_weight" field.
+func (m *GroupMutation) AddLocalWeight(i int) {
+	if m.addlocal_weight != nil {
+		*m.addlocal_weight += i
+	} else {
+		m.addlocal_weight = &i
+	}
+}
+
+// AddedLocalWeight returns the value that was added to the "local_weight" field in this mutation.
+func (m *GroupMutation) AddedLocalWeight() (r int, exists bool) {
+	v := m.addlocal_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetLocalWeight resets all changes to the "local_weight" field.
+func (m *GroupMutation) ResetLocalWeight() {
+	m.local_weight = nil
+	m.addlocal_weight = nil
 }
 
 // SetStatus sets the "status" field.
@@ -18643,7 +18738,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 37)
+	fields := make([]string, 0, 39)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -18670,6 +18765,12 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.lane != nil {
 		fields = append(fields, group.FieldLane)
+	}
+	if m.local_policy != nil {
+		fields = append(fields, group.FieldLocalPolicy)
+	}
+	if m.local_weight != nil {
+		fields = append(fields, group.FieldLocalWeight)
 	}
 	if m.status != nil {
 		fields = append(fields, group.FieldStatus)
@@ -18781,6 +18882,10 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.IsExclusive()
 	case group.FieldLane:
 		return m.Lane()
+	case group.FieldLocalPolicy:
+		return m.LocalPolicy()
+	case group.FieldLocalWeight:
+		return m.LocalWeight()
 	case group.FieldStatus:
 		return m.Status()
 	case group.FieldPlatform:
@@ -18864,6 +18969,10 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldIsExclusive(ctx)
 	case group.FieldLane:
 		return m.OldLane(ctx)
+	case group.FieldLocalPolicy:
+		return m.OldLocalPolicy(ctx)
+	case group.FieldLocalWeight:
+		return m.OldLocalWeight(ctx)
 	case group.FieldStatus:
 		return m.OldStatus(ctx)
 	case group.FieldPlatform:
@@ -18991,6 +19100,20 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetLane(v)
+		return nil
+	case group.FieldLocalPolicy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLocalPolicy(v)
+		return nil
+	case group.FieldLocalWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLocalWeight(v)
 		return nil
 	case group.FieldStatus:
 		v, ok := value.(string)
@@ -19199,6 +19322,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, group.FieldRateMultiplier)
 	}
+	if m.addlocal_weight != nil {
+		fields = append(fields, group.FieldLocalWeight)
+	}
 	if m.adddaily_limit_usd != nil {
 		fields = append(fields, group.FieldDailyLimitUsd)
 	}
@@ -19245,6 +19371,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case group.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
+	case group.FieldLocalWeight:
+		return m.AddedLocalWeight()
 	case group.FieldDailyLimitUsd:
 		return m.AddedDailyLimitUsd()
 	case group.FieldWeeklyLimitUsd:
@@ -19284,6 +19412,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRateMultiplier(v)
+		return nil
+	case group.FieldLocalWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddLocalWeight(v)
 		return nil
 	case group.FieldDailyLimitUsd:
 		v, ok := value.(float64)
@@ -19497,6 +19632,12 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldLane:
 		m.ResetLane()
+		return nil
+	case group.FieldLocalPolicy:
+		m.ResetLocalPolicy()
+		return nil
+	case group.FieldLocalWeight:
+		m.ResetLocalWeight()
 		return nil
 	case group.FieldStatus:
 		m.ResetStatus()

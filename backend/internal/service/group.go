@@ -19,8 +19,11 @@ type Group struct {
 	RateMultiplier float64
 	IsExclusive    bool
 	Lane           string // 工作道/号池:normal|batch|distillation(护号路由)
-	Status         string
-	Hydrated       bool // indicates the group was loaded from a trusted repository source
+	// LocalPolicy / LocalWeight 本地渠道策略(见 group_local_policy.go):转发 cell 与中央本地绑定账号的分流。
+	LocalPolicy string
+	LocalWeight int
+	Status      string
+	Hydrated    bool // indicates the group was loaded from a trusted repository source
 
 	SubscriptionType    string
 	DailyLimitUSD       *float64

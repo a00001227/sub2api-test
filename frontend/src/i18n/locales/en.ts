@@ -2245,6 +2245,18 @@ export default {
         "Are you sure you want to delete '{name}'? All associated API keys will no longer belong to any group.",
       deleteConfirmSubscription:
         "Are you sure you want to delete subscription group '{name}'? This will invalidate all API keys bound to this subscription and delete all related subscription records. This action cannot be undone.",
+      localPolicy: {
+        label: 'Local channel policy',
+        hint: "How this group's requests split between edge cells and the accounts bound to this group on central (e.g. third-party relays). 'Inherit' follows EDGE_FORWARD_GROUPS: listed = cells only, unlisted = local only. Takes effect immediately.",
+        weight: 'Local share (%)',
+        weightHint: 'In balanced mode, the chance a request tries local first; falls through to the other side if unavailable.',
+        inherit: 'Inherit env config (default)',
+        cell_only: 'Cells only',
+        local_only: 'Local only',
+        cell_first: 'Cells first, local fallback',
+        local_first: 'Local first, cells fallback',
+        balanced: 'Balanced (random by share)',
+      },
       lane: {
         label: 'Pool (workload lane)',
         hint: "This group's traffic routes only to cells of the matching pool. Non-normal pools are internal account-protection pools — do not assign them to end-customer groups.",

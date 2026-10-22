@@ -145,6 +145,8 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 	out := &AdminGroup{
 		Group:                       groupFromServiceBase(g),
 		Lane:                        g.Lane,
+		LocalPolicy:                 g.LocalPolicy,
+		LocalWeight:                 g.LocalWeight,
 		ModelRouting:                g.ModelRouting,
 		ModelRoutingEnabled:         g.ModelRoutingEnabled,
 		MCPXMLInject:                g.MCPXMLInject,

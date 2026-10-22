@@ -34,6 +34,10 @@ const (
 	FieldIsExclusive = "is_exclusive"
 	// FieldLane holds the string denoting the lane field in the database.
 	FieldLane = "lane"
+	// FieldLocalPolicy holds the string denoting the local_policy field in the database.
+	FieldLocalPolicy = "local_policy"
+	// FieldLocalWeight holds the string denoting the local_weight field in the database.
+	FieldLocalWeight = "local_weight"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldPlatform holds the string denoting the platform field in the database.
@@ -174,6 +178,8 @@ var Columns = []string{
 	FieldRateMultiplier,
 	FieldIsExclusive,
 	FieldLane,
+	FieldLocalPolicy,
+	FieldLocalWeight,
 	FieldStatus,
 	FieldPlatform,
 	FieldSubscriptionType,
@@ -249,6 +255,12 @@ var (
 	DefaultLane string
 	// LaneValidator is a validator for the "lane" field. It is called by the builders before save.
 	LaneValidator func(string) error
+	// DefaultLocalPolicy holds the default value on creation for the "local_policy" field.
+	DefaultLocalPolicy string
+	// LocalPolicyValidator is a validator for the "local_policy" field. It is called by the builders before save.
+	LocalPolicyValidator func(string) error
+	// DefaultLocalWeight holds the default value on creation for the "local_weight" field.
+	DefaultLocalWeight int
 	// DefaultStatus holds the default value on creation for the "status" field.
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
@@ -348,6 +360,16 @@ func ByIsExclusive(opts ...sql.OrderTermOption) OrderOption {
 // ByLane orders the results by the lane field.
 func ByLane(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLane, opts...).ToFunc()
+}
+
+// ByLocalPolicy orders the results by the local_policy field.
+func ByLocalPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLocalPolicy, opts...).ToFunc()
+}
+
+// ByLocalWeight orders the results by the local_weight field.
+func ByLocalWeight(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLocalWeight, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.
